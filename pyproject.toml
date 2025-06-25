@@ -1,0 +1,32 @@
+[project]
+name = "nerd"
+version = "0.1.0"
+description = "Analysis tools for RNA energetics and dynamics"
+authors = [
+    { name = "Edric Choi", email = "edr.choi@gmail.com" }
+]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+
+dependencies = [
+    "typer[all] >=0.7",         # CLI tool
+    "rich",                     # Logging, CLI formatting
+    "pandas",                   # Data handling
+    "numpy",                    # Math operations
+    "matplotlib",               # Plotting
+    "lmfit",                    # Fitting models
+    "sqlalchemy",              # Optional: for more robust db handling
+    # Add more as needed
+]
+
+[project.scripts]
+nerd = "nerd.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nerd*"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

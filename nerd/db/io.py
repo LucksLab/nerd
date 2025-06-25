@@ -1,0 +1,274 @@
+# nerd/db/io.py
+
+import sqlite3
+from pathlib import Path
+from nerd.db.schema import ALL_TABLES
+from rich.console import Console
+console = Console()
+DEFAULT_DB_PATH = Path("nerd.sqlite3")  # fallback if not specified
+
+# ==== Connection + Database Initialization ===================================
+
+def connect_db(db_path: str = None) -> sqlite3.Connection:
+    """Connect to the SQLite3 database."""
+    db_file = Path(db_path) if db_path else DEFAULT_DB_PATH
+    return sqlite3.connect(db_file)
+
+
+def init_db(conn: sqlite3.Connection):
+    """Create tables defined in schema.py if they don't exist."""
+    cursor = conn.cursor()
+    for stmt in ALL_TABLES:
+        cursor.execute(stmt)
+    conn.commit()
+
+def check_db(conn: sqlite3.Connection, TABLE: str, REQUIRED_COLUMNS: list):
+    """Check if a table exists and has the required columns."""
+    cursor = conn.cursor()
+
+    # Check if the table exists
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (TABLE,))
+    if not cursor.fetchone():
+        console.print(f"[red]Error:[/red] Table '{TABLE}' does not exist.")
+        return False
+
+    # Check for required columns
+    cursor.execute(f"PRAGMA table_info({TABLE})")
+    columns = [row[1] for row in cursor.fetchall()]
+    missing = [col for col in REQUIRED_COLUMNS if col not in columns]
+    if missing:
+        console.print(f"[red]Error:[/red] Missing columns in {TABLE}: {missing}")
+        return False
+    return True
+
+
+# === Insert Functions ===
+
+def insert_nmr_reaction(conn, reaction_metadata: dict):
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO nmr_reactions (
+            reaction_type, substrate, substrate_conc,
+            temperature, replicate,
+            probe, probe_conc, buffer, probe_solvent,
+            num_scans, time_per_read, total_kinetic_reads, total_kinetic_time,
+            nmr_machine, kinetic_data_dir, mnova_analysis_dir, raw_fid_dir
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        reaction_metadata.get("reaction_type"),
+        reaction_metadata.get("substrate"),
+        reaction_metadata.get("substrate_conc"),
+        reaction_metadata.get("temperature"),
+        reaction_metadata.get("replicate"),
+        reaction_metadata.get("probe"),
+        reaction_metadata.get("probe_conc"),
+        reaction_metadata.get("buffer"),
+        reaction_metadata.get("probe_solvent"),
+        reaction_metadata.get("num_scans"),
+        reaction_metadata.get("time_per_read"),
+        reaction_metadata.get("total_kinetic_reads"),
+        reaction_metadata.get("total_kinetic_time"),
+        reaction_metadata.get("nmr_machine"),
+        reaction_metadata.get("kinetic_data_dir"),
+        reaction_metadata.get("mnova_analysis_dir"),
+        reaction_metadata.get("raw_fid_dir"),
+    ))
+    conn.commit()
+    return cursor.rowcount > 0
+
+# nmr
+def insert_fitted_kinetic_rate(conn, fit_result: dict):
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO nmr_kinetic_rates (
+            nmr_reaction_id, model, k_value, k_error, r2, chisq, species
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (fit_result.get("nmr_reaction_id"),
+            fit_result.get("model"),
+            fit_result.get("k_value"),
+            fit_result.get("k_error"),
+            fit_result.get("r2"),
+            fit_result.get("chisq"),
+            fit_result.get("species")))
+    conn.commit()
+    return cursor.rowcount > 0
+
+def insert_arrhenius_fit(conn, fit_result: dict):
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO arrhenius_fits (
+            reaction_type, data_source, substrate,
+            slope, slope_err,
+            intercept, intercept_err,
+            r2, model_file
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (fit_result.get("reaction_type"),
+        fit_result.get("data_source"),
+        fit_result.get("substrate"),
+        fit_result.get("slope"),
+        fit_result.get("slope_err"),
+        fit_result.get("intercept"),
+        fit_result.get("intercept_err"),
+        fit_result.get("r2"),
+        fit_result.get("model_file"),
+    ))
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def insert_buffer(conn, buffer_data: dict):
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO buffers (
+            name, pH, composition, disp_name
+        ) VALUES (?, ?, ?, ?)
+    """, (
+        buffer_data.get("name"),
+        buffer_data.get("pH"),
+        buffer_data.get("composition"),
+        buffer_data.get("disp_name")
+    ))
+    conn.commit()
+    return cursor.rowcount > 0
+
+def insert_construct(conn, construct_data: dict):
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO constructs (
+            family, name, version, sequence, disp_name
+        ) VALUES (?, ?, ?, ?, ?)
+    """, (
+        construct_data.get("family"),
+        construct_data.get("name"),
+        construct_data.get("version"),
+        construct_data.get("sequence"),
+        construct_data.get("disp_name")
+    ))
+
+    conn.commit()
+    construct_id = cursor.lastrowid
+    return cursor.rowcount > 0, construct_id
+
+def insert_nt_info(conn, nt_info_data: dict):
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO nucleotides (
+            construct_id, site, base, base_region, construct_id
+        ) VALUES (?, ?, ?, ?, ?)
+    """, (
+        nt_info_data.get("construct_id"),
+        nt_info_data.get("site"),
+        nt_info_data.get("base"),
+        nt_info_data.get("base_region"),
+        nt_info_data.get("construct_id")
+    ))
+    conn.commit()
+    return cursor.rowcount > 0
+
+def insert_seq_run(conn, run_data: dict):
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO sequencing_runs (
+            run_name, date, sequencer, run_manager
+        ) VALUES (?, ?, ?, ?)
+    """, (
+        run_data.get("run_name"),
+        run_data.get("date"),
+        run_data.get("sequencer"),
+        run_data.get("run_manager")
+    ))
+    conn.commit()
+    return cursor.rowcount > 0
+
+def insert_seq_sample(conn, sample_data: dict):
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO sequencing_samples (
+            seqrun_id, sample_name, fq_dir
+        ) VALUES (?, ?, ?, ?, ?)
+    """, (
+        sample_data.get("seqrun_id"),
+        sample_data.get("sample_name"),
+        sample_data.get("fq_dir")
+    ))
+    conn.commit()
+    return cursor.rowcount > 0
+
+# === Query Functions ===
+
+def fetch_all_nmr_samples(conn, reaction_type='deg'):
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, temperature, replicate,
+            probe, probe_conc, buffer, probe_solvent, substrate, substrate_conc,
+            nmr_machine, kinetic_data_dir
+        FROM nmr_reactions
+        WHERE reaction_type = ?
+    """, (reaction_type,))
+    return cursor.fetchall(), cursor.description
+
+def fetch_kinetic_rates_for_reactions(conn, reaction_ids):
+    """
+    Fetches kinetic rates for a list of NMR reaction IDs.
+
+    Parameters:
+    - conn: SQLite connection object
+    - reaction_ids: List of NMR reaction IDs to fetch rates for
+
+    Returns:
+    - List of tuples containing k_value, k_error, species, nmr_reaction_id
+    - Cursor description
+    """
+    if not reaction_ids:
+        return [], None
+    cursor = conn.cursor()
+    placeholders = ','.join('?' for _ in reaction_ids)
+    query = f"""
+        SELECT nmr_reaction_id, species, nr.temperature, k_value, k_error
+        FROM nmr_kinetic_rates
+        JOIN nmr_reactions nr ON nmr_kinetic_rates.nmr_reaction_id = nr.id
+        WHERE nr.id IN ({placeholders})
+    """
+    cursor.execute(query, reaction_ids)
+    return cursor.fetchall(), cursor.description
+
+# === Display table ===
+
+from rich.table import Table
+from rich.console import Console
+
+def display_table(results, column_descriptions, title="Query Results"):
+    """
+    Prints a formatted Rich table from a SQLite query result.
+    
+    Parameters:
+    - results: list of tuples from cursor.fetchall()
+    - column_descriptions: cursor.description (list of column metadata)
+    - title: optional table title
+    """
+    console = Console()
+    table = Table(title=title)
+
+    # Extract column names
+    column_names = [desc[0] for desc in column_descriptions]
+
+    # Add columns
+    for col in column_names:
+        table.add_column(col, style="cyan", no_wrap=True)
+
+    # Add rows
+    for row in results:
+        table.add_row(*[str(cell) if cell is not None else "" for cell in row])
+
+    console.print(table)
+
+# === Example Query Function ===
+
+def fetch_probe_rates_for_reaction(conn, reaction_id):
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT k_value, k_error, species
+        FROM probe_kinetic_rates
+        WHERE nmr_reaction_id = ?
+    """, (reaction_id,))
+    return cursor.fetchall()

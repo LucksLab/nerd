@@ -1,0 +1,33 @@
+nerd/                            # Your main Python package
+├── __init__.py
+├── cli.py                       # CLI entrypoint (called by `nerd` command)
+├── main.py                      # Dispatch logic for CLI subcommands
+├── db/
+│   ├── __init__.py
+│   ├── schema.py                # Schema definitions
+│   └── io.py                    # SQLite I/O helpers
+├── importers/
+│   ├── __init__.py
+│   ├── sample.py                # Sample sheet import
+│   ├── shapemapper.py           # SHAPEMapper folder import
+│   └── nmr.py                   # NMR sample import
+├── kinetics/
+│   ├── __init__.py
+│   ├── degradation.py
+│   ├── adduction.py
+│   ├── timecourse.py
+│   └── arrhenius.py
+├── energy/
+│   ├── __init__.py
+│   ├── meltfit.py
+│   └── calc_K.py
+├── utils/
+│   ├── __init__.py
+│   ├── fit_wrappers.py          # lmfit models
+│   ├── plotting.py              # matplotlib or Rich visualization
+│   └── logging.py               # optional: centralized Rich logging
+├── config/
+│   └── defaults.toml            # optional: default settings
+tests/                           # Optional: unit tests
+pyproject.toml                   # Build system + metadata
+README.md                        # Project description
