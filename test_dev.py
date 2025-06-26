@@ -1,4 +1,4 @@
-from nerd.importers import probing_sample, shapemapper, nmr
+from nerd.importers import fmod_calc, probing_sample, nmr
 from nerd.kinetics import degradation, adduction, arrhenius
 #from nerd.energy import meltfit, calc_K
 from nerd.db import io
@@ -18,36 +18,7 @@ DB_PATH = "nerd_dev.sqlite3"
 
 
 def test_all():
-    print("\n[IMPORT]")
-    probing_sample.run(SAMPLE_SHEET, db_path=DB_PATH)
-    shapemapper.run(SHAPEMAPPER_DIR, db_path=DB_PATH)
-    nmr.run(NMR_SHEET, db_path=DB_PATH)
-
-    print("\n[DEGRADATION]")
-    degradation.run(csv_path=DEGRADATION_CSV, reaction_id="rxn_deg_test", db_path=DB_PATH)
-
-    print("\n[ADDUCTION]")
-    adduction.run(csv_path=ADDUCTION_CSV, reaction_id="rxn_add_test", db_path=DB_PATH)
-
-    print("\n[ARRHENIUS]")
-    arrhenius.run(csv_path=ARRHENIUS_CSV,
-                  reaction_type="degradation",
-                  data_source="nmr",
-                  db_path=DB_PATH)
-
-    print("\n[TIMECOURSE]")
-    timecourse.run(reaction_group_id="rg_test", db_path=DB_PATH)
-
-    print("\n[CALC ENERGY: Two-State]")
-    meltfit.run(MELT_CURVE_CSV)
-
-    print("\n[CALC ENERGY: Single K]")
-    calc_K.run(["0.015", "0.005", "0.002"])
-
-
-
-if __name__ == "__main__":
-    #test_all()
+    print("\n[IMPORT NMR DEGRADATION SAMPLES]")
     # Initialize the database
     conn = io.connect_db('test_output/nerd_dev.sqlite3')
     io.init_db(conn)
@@ -65,7 +36,7 @@ if __name__ == "__main__":
 
     # TODO display 10, then click for next page
 
-    # Run degradation fit
+    print("\n[DEGRADATION NMR]")
     user_input = 'all'
     #user_input = '1, 2, 3'
     #user_input = '1'
@@ -75,9 +46,12 @@ if __name__ == "__main__":
     arrhenius.run(reaction_type="deg", data_source="nmr", species="none",
                   buffer="schwalbe_buffer", db_path='test_output/nerd_dev.sqlite3')
     
+    print("\n[IMPORT NMR ADDUCTION SAMPLES]")
 
     # Run the NMR importer with a sample CSV file
     nmr.run('test_data/nmr_adduction_samples.csv', db_path='test_output/nerd_dev.sqlite3')
+
+    print("\n[ADDUCTION NMR]")
 
     # Display samples to analyze
     conn = io.connect_db('test_output/nerd_dev.sqlite3')
@@ -96,6 +70,9 @@ if __name__ == "__main__":
 
     arrhenius.run(reaction_type="add", data_source="nmr", species="GTP",
                   buffer="schwalbe_buffer", db_path='test_output/nerd_dev.sqlite3')
+
+
+    print("\n[IMPORT PROBING SAMPLES]")
 
     probing_sample.import_buffer(
         csv_path="test_data/probing_data/buffers.csv",
@@ -116,3 +93,17 @@ if __name__ == "__main__":
         csv_path="test_data/probing_data/probing_samples.csv",
         db_path='test_output/nerd_dev.sqlite3'
     )
+
+    # fmod_calc.import_shapemapper() # imports to fmod_calc_run and fmod_vals tables in db
+    # fmod_calc.run()
+
+    # timecourse.run() # free fits writes to free_fits table in db
+    # timecourse.run() # global deg fit to get k_deg
+    # timecourse.run() # refit constrained to global k_deg
+
+    # adduction from melted (fourU, HIV)
+    # adduction from single (P4P6)
+    
+
+if __name__ == "__main__":
+    #test_all()

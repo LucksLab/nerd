@@ -1,6 +1,6 @@
 # nerd/main.py
 
-from nerd.importers import probing_sample, shapemapper, nmr
+from nerd.importers import fmod_calc, probing_sample, nmr
 from nerd.kinetics import degradation, adduction, arrhenius, timecourse
 from nerd.energy import meltfit, calc_K
 from rich.console import Console
@@ -16,7 +16,7 @@ def run_command(args):
         if args.source == "csv":
             probing_sample.run(args.input, db_path=None)
         elif args.source == "shapemapper":
-            shapemapper.run(args.input, db_path=None)
+            fmod_calc.run(args.input, db_path=None)
         elif args.source == "nmr":
             nmr.run(args.input, db_path=None)
 
