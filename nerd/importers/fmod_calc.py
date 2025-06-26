@@ -6,8 +6,8 @@ import glob
 import sqlite3
 import pandas as pd
 from nerd.db.io import connect_db, init_db  # You’ll define insert function later
-from nerd.db.io import fetch_run_name
-
+from nerd.db.fetch import fetch_run_name
+from rich.progress import Progress
 
 console = Console()
 
@@ -43,7 +43,7 @@ def extract_info_from_log(log_file, sample_name, run0420 = None):
     # check shapemapper success
     run_completed = [i for i, line in enumerate(lines) if ('ShapeMapper run completed' in line) or ('ShapeMapper run successfully completed' in line)]
     if len(run_completed) == 0:
-        print(f'ShapeMapper run not completed successfully in log file: {log_file}')
+        console.print(f'ShapeMapper run not completed successfully in log file: {log_file}')
         return None
 
     #print(log_file)
@@ -119,7 +119,7 @@ def extract_info_from_log(log_file, sample_name, run0420 = None):
         sample_name_check = sample_name_check.replace('_', '')
         sample_check = (sample_name_check == r1_file_check)
         if sample_check == False:
-            print('upper', r1_file_check, sample_name_check)
+            console.print('upper', r1_file_check, sample_name_check)
 
     if run0420:
         name_index = run_args.split(' --')[1]
@@ -127,25 +127,25 @@ def extract_info_from_log(log_file, sample_name, run0420 = None):
         name_check = name_index.split(' ')[-1]
         sample_check = (name_check in sample_name) or (r1_file_check == sample_name_check)
         if sample_check:
-            print('Rechecking on name successful')
+            console.print('Rechecking on name successful')
         else:
-            print('lower', r1_file_check, sample_name_check)
+            console.print('lower', r1_file_check, sample_name_check)
 
     return run_datetime, run_args, version, r1_file, untreated, denatured, sample_check
 
-def fetch_s_id(db_file, sample_name):
+def fetch_s_id(db_path, sample_name):
     """
     Fetches the ID of a sample from the sequencing_samples table.
 
     Parameters:
-        db_file (str): Path to the database file.
+        db_path (str): Path to the database file.
         sample_name (str): Name of the sample to fetch the ID for.
 
     Returns:
         int: The ID of the sample.
     """
     
-    conn = sqlite3.connect(db_file)
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute('SELECT id FROM sequencing_samples WHERE sample_name = ?', (sample_name,))
     result = c.fetchall()  # Fetch only one row
@@ -156,40 +156,39 @@ def fetch_s_id(db_file, sample_name):
     elif len(result) > 1:
         raise ValueError(f"Multiple samples found with name: {sample_name}")
     else:
-        print(result)
         return result[0][0]  # Extract ID from tuple
 
-def get_max_id(db_file, table, id_col):
+def get_max_id(db_path, table, id_col):
     """
         Fetches the maximum ID from a specified table and column.
 
         Parameters:
-            db_file (str): Path to the database file.
+            db_path (str): Path to the database file.
             table (str): Name of the table to query.
             id_col (str): Name of the ID column to find the maximum value.
 
         Returns:
             int: The maximum ID value plus one, or 1 if the table is empty.
         """
-    conn = sqlite3.connect(db_file)
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute(f"SELECT MAX({id_col}) FROM {table}")
     max_id = c.fetchone()[0]
     return max_id + 1 if max_id else 1
 
-def fetch_construct_seq(db_file, s_id):
+def fetch_construct_seq(db_path, s_id):
     """
     Fetches the construct sequence for a given sample ID.
 
     Parameters:
-        db_file (str): Path to the database file.
+        db_path (str): Path to the database file.
         s_id (int): Sample ID to fetch the construct sequence for.
 
     Returns:
         str: The construct sequence with T's converted to U's.
     """
 
-    conn = sqlite3.connect(db_file)
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute('SELECT construct_id FROM probing_reactions WHERE s_id = ?', (s_id,))
     construct_id = c.fetchone()[0]
@@ -200,19 +199,19 @@ def fetch_construct_seq(db_file, s_id):
     conn.close()
     return construct_seq
 
-def fetch_rxn_id(db_file, s_id):
+def fetch_rxn_id(db_path, s_id):
     """
     Fetches the reaction ID for a given sample ID.
 
     Parameters:
-        db_file (str): Path to the database file.
+        db_path (str): Path to the database file.
         s_id (int): Sample ID to fetch the reaction ID for.
 
     Returns:
         int: The reaction ID.
     """
 
-    conn = sqlite3.connect(db_file)
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute('SELECT id, treated FROM probing_reactions WHERE s_id = ?', (s_id,))
     result = c.fetchone()
@@ -222,19 +221,19 @@ def fetch_rxn_id(db_file, s_id):
     treated = result[1]
     return rxn_id, treated
 
-def fetch_nt_ids(db_file, s_id):
+def fetch_nt_ids(db_path, s_id):
     """
     Fetches the nucleotide IDs and sequence for a given sample ID.
 
     Parameters:
-        db_file (str): Path to the database file.
+        db_path (str): Path to the database file.
         s_id (int): Sample ID to fetch the nucleotide IDs and sequence for.
 
     Returns:
         tuple: A tuple containing a list of nucleotide IDs and the nucleotide sequence with T's converted to U's.
     """
     
-    conn = sqlite3.connect(db_file)
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
     c.execute('SELECT construct_id FROM probing_reactions WHERE s_id = ?', (s_id,))
     construct_id = c.fetchone()[0]
@@ -249,20 +248,21 @@ def fetch_nt_ids(db_file, s_id):
     return nt_ids, nt_seq
 
 
-def construct_fmod_calc_run(sample_name, fmod_dir, db_file, run0420 = None):
+def construct_fmod_calc_run(sample_name, fmod_dir, db_path, run0420 = None):
 
-    run = glob.glob(f'/projects/b1044/Computational_Output/EKC/{fmod_dir}/*shapemapper_log*')[0]
+    run = glob.glob(f'{fmod_dir}/*shapemapper_log*')[0]
     run_datetime, run_args, version, r1_file, untreated, denatured, sample_check = extract_info_from_log(run, sample_name, run0420)
-    s_id = fetch_s_id(db_file, sample_name)
+    s_id = fetch_s_id(db_path, sample_name)
 
     # get potential fmod_calc id but do not add until fmod vals are good
 
     # Tentative fmod_calc id (pending fmod_vals check)
-    fmod_calc_id = get_max_id(db_file, 'fmod_calc_runs', 'id')
+    fmod_calc_id = get_max_id(db_path, 'fmod_calc_runs', 'id')
 
-    profile_txt = glob.glob(f'/projects/b1044/Computational_Output/EKC/{fmod_dir}/**/*_profile.txt', recursive=True)
+    profile_txt = glob.glob(f'{fmod_dir}/**/*_profile.txt', recursive=True)
     # exclude shapemapper_temp
     profile_txt = [x for x in profile_txt if 'shapemapper_temp' not in x]
+
     # choose profile with "reanalyzed"
     if len(profile_txt) > 1:
         profile_txt = [x for x in profile_txt if 'reanalyzed' in x]
@@ -272,7 +272,7 @@ def construct_fmod_calc_run(sample_name, fmod_dir, db_file, run0420 = None):
     
     
     # process GAmodrate
-    profile_txtga = glob.glob(f'/projects/b1044/Computational_Output/EKC/{fmod_dir}/**/*_profile.txtga', recursive=True)
+    profile_txtga = glob.glob(f'{fmod_dir}/**/*_profile.txtga', recursive=True)
 
     # exclude shapemapper_temp
     profile_txtga = [x for x in profile_txtga if 'shapemapper_temp' not in x]
@@ -286,7 +286,7 @@ def construct_fmod_calc_run(sample_name, fmod_dir, db_file, run0420 = None):
         profile_txtga = profile_txtga[0]
 
     # handle untreated or denatured
-    rxn_id, rxn_treated = fetch_rxn_id(db_file, s_id)
+    rxn_id, rxn_treated = fetch_rxn_id(db_path, s_id)
 
     use_untreated_calc = False
 
@@ -298,19 +298,19 @@ def construct_fmod_calc_run(sample_name, fmod_dir, db_file, run0420 = None):
 
     return run_datetime, run_args, version, use_untreated_calc, r1_file, sample_check, s_id, fmod_calc_id, profile_txt, profile_txtga
 
-def construct_fmod_vals(profile_txt, db_file, s_id, fmod_calc_id, use_untreated_calc):
+def construct_fmod_vals(profile_txt, db_path, s_id, fmod_calc_id, use_untreated_calc):
     # read the csv file
     df = pd.read_csv(profile_txt, sep='\t')
     seq_from_profile = ''.join(df['Sequence'].values)
 
-    construct_seq = fetch_construct_seq(db_file, s_id)
+    construct_seq = fetch_construct_seq(db_path, s_id)
     assert construct_seq.upper() == seq_from_profile.upper(), 'Construct sequence does not match profile.txt sequence'
 
-    nt_ids, nt_seq = fetch_nt_ids(db_file, s_id)
+    nt_ids, nt_seq = fetch_nt_ids(db_path, s_id)
 
     assert nt_seq.upper() == seq_from_profile.upper(), 'Nt sequence does not match profile.txt sequence'
 
-    rxn_id, rxn_treated = fetch_rxn_id(db_file, s_id)
+    rxn_id, rxn_treated = fetch_rxn_id(db_path, s_id)
 
     if use_untreated_calc:
         #print('using untreated')
@@ -324,10 +324,13 @@ def construct_fmod_vals(profile_txt, db_file, s_id, fmod_calc_id, use_untreated_
     return fmod_vals_df
 
 
-def run(sample_name: str, fmod_dir: str, db_path: str = None):
+def import_single_fmod_calc(sample_name: str, fmod_dir: str, db_path: str = None, console = None):
     """
     Import metadata from a shapemapper output directory.
     """
+    if 'stop' in sample_name:
+        console.print(f"[red]Error:[/red] Sample name '{sample_name}' contains 'stop'. Skipping import.")
+        return
 
     # get text inside single quote '
     if "'" in fmod_dir:
@@ -348,23 +351,45 @@ def run(sample_name: str, fmod_dir: str, db_path: str = None):
 
     run_datetime, run_args, version, use_untreated_calc, r1_file, sample_check, s_id, fmod_calc_id, profile_txt, profile_txtga = construct_fmod_calc_run(sample_name, fmod_dir, db_path, run0420)
 
+    if sample_check:
+        fmod_vals_df = construct_fmod_vals(profile_txt, db_path, s_id, fmod_calc_id, use_untreated_calc)
+
+        if profile_txtga is not None:
+            fmod_vals_df_ga = construct_fmod_vals(profile_txtga, db_path, s_id, fmod_calc_id, use_untreated_calc)
+            fmod_vals_df_ga['valtype'] = 'GAmodrate'
+            fmod_vals_df = pd.concat([fmod_vals_df, fmod_vals_df_ga])
+        
+        # Append fmod_calc_run fmod_vals to db
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        c.execute('INSERT OR IGNORE INTO fmod_calc_runs (id, s_id, software_name, software_version, run_args, run_datetime, output_dir) VALUES (?, ?, ?, ?, ?, ?, ?)', (fmod_calc_id, s_id, 'shapemapper', version, run_args, run_datetime, r1_file))
+        fmod_vals_df.to_sql('fmod_vals', conn, if_exists='append', index=False)
+        conn.commit()
+        conn.close()
+
+    else:
+        console.print(f"[red]Error:[/red] Sample name '{sample_name}' does not match R1 file '{r1_file}' in SHAPEMapper run.")
+        return        
+
+    console.print(f"[green]✓ Successfully imported sample output for '{sample_name}'[/green]")
 
 
-    conn = connect_db(db_path)
-    # checkdb
+def run(fmod_calc_csv: str = None, db_path: str = None):
+    """
+    Run the fmod_calc importer for runs specified in a CSV file
+    """
 
+    base_path = Path(fmod_calc_csv).resolve()
+    if not base_path.exists():
+        console.print(f"[red]Error:[/red] fmod_calc_runs CSV file not found: {base_path}")
+        return
 
-    # You can collect metadata here for later insertion
-    fmod_calc_run_log = {
-        "sample_name": sample_name,
-        "profile_path": str(profile_file.resolve()),
-        "mutation_path": str(mut_file.resolve()) if mut_file.exists() else None,
-        "shapemapper_dir": str(base_path.resolve())
-        # Add more metadata fields here as needed
-    }
+    df = pd.read_csv(fmod_calc_csv)
 
-    # Placeholder: insert into db (implement this function)
-    # insert_shapemapper_run(conn, record)
-    console.print(f"[green]✓ Found SHAPEMapper output for sample:[/green] {sample_name}")
-
-    console.print(f"[green]✓ Imported {count} SHAPEMapper sample outputs[/green]")
+    with Progress() as progress:
+        task = progress.add_task("[cyan]Importing fmod_calc runs...", total=len(df))
+        for index, row in df.iterrows():
+            sample_name = row['sample_name']
+            fmod_dir = row['fmod_runs']
+            import_single_fmod_calc(sample_name, fmod_dir, db_path, progress.console)
+            progress.advance(task)

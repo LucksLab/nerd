@@ -107,3 +107,11 @@ def test_all():
 
 if __name__ == "__main__":
     #test_all()
+    # def run(sample_name: str, fmod_dir: str, db_path: str = None):
+
+
+    fmod_calc.run(
+        sample_name="031-EKC-WT-30c-b-6-m_S31_L001_R1_001.fastq.gz",
+        fmod_dir="/projects/b1044/Computational_Output/EKC/fmod_calc_runs_2/000000000378",
+        db_path='test_output/nerd_dev.sqlite3'
+    )

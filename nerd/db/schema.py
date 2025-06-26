@@ -114,11 +114,12 @@ CREATE TABLE IF NOT EXISTS fmod_calc_runs (
     software_name TEXT NOT NULL,                     -- Name of the software used for calculation
     software_version INTEGER NOT NULL,               -- Version of the software
     run_args INTEGER NOT NULL,                       -- Arguments used for the run (should likely be TEXT)
-    output_dir TEXT NOT NULL,                        -- Directory where output files are stored
+    run_datetime TEXT NOT NULL,                      -- Date and time of the run
+    output_dir TEXT NOT NULL UNIQUE,                 -- Directory where output files are stored
     s_id INTEGER NOT NULL,                           -- Foreign key to sequencing_samples table
     PRIMARY KEY(id AUTOINCREMENT),
     FOREIGN KEY(s_id) REFERENCES sequencing_samples(id),
-    UNIQUE(software_name, software_version, run_args, output_dir, s_id)  -- Ensure unique calculation runs
+    UNIQUE(software_name, software_version, run_args, run_datetime, output_dir, s_id)  -- Ensure unique calculation runs
 );
 """
 
