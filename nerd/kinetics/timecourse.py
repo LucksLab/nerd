@@ -7,6 +7,7 @@ from lmfit.models import ExponentialModel, ConstantModel
 from nerd.db.io import connect_db, init_db, check_db, insert_tc_fit
 from nerd.utils.fit_models import fit_timecourse 
 from nerd.db.fetch import fetch_all_nt, fetch_timecourse_data, fetch_reaction_temp, fetch_reaction_pH
+from nerd.kinetics.degradation import calc_kdeg
 
 console = Console()
 
@@ -41,75 +42,55 @@ def free_fit(rg_id, db_path):
 
     count = 0
     for nt_id in nt_ids:
-
-        time_data, fmod_data = fetch_timecourse_data(db_path, nt_id, rg_id)
-
-        # Actual
-        result, outlier = fit_timecourse(time_data, fmod_data, kdeg0)
-
-        # Construct fit_result dict for insertion
-        fit_result = {
-            "rg_id": rg_id,
-            "nt_id": nt_id,
-            "kobs_val": result.params["log_kappa"].value,
-            "kobs_err": result.params["log_kappa"].stderr,
-            "kdeg_val": result.params["log_kdeg"].value,
-            "kdeg_err": result.params["log_kdeg"].stderr,
-            "fmod0": result.params["log_fmod_0"].value,
-            "fmod0_err": result.params["log_fmod_0"].stderr,
-            "r2": result.rsquared,
-            "chisq": result.chisqr,
-            "time_min": min(time_data),
-            "time_max": max(time_data)
-        }
-
-        console.print(f"[green]✓ Free timecourse fit complete[/green]: slope = {slope:.4f} ± {slope_err:.4f}, intercept = {intercept:.4f} ± {intercept_err:.4f}, r² = {r2:.4f}")
-
-        conn = connect_db(db_path)
-
-        # Check if the database is initialized and has the required columns
-        if not check_db(conn, "free_tc_fits", REQUIRED_COLUMNS):
-            console.print(f"[red]Error:[/red] Database initialization failed or missing required columns.")
-            conn.close()
-            return
-        else:
-            console.print(f"[green]✓ Database check passed and ready for Arrhenius fit import[/green]")
-
-        insert_success = insert_tc_fit(conn, fit_result)
-        count += insert_success
-        conn.close()
-    
-    console.print(f"[green]✓ Free timecourse fits imported successfully[/green]: {count} fits inserted into the database.")
-
-
-def run(reaction_group_id: str, db_path: str = None):
-    """
-    Fit independent time-courses for each site in a reaction group.
-    """
-    conn = connect_db(db_path)
-    init_db(conn)
-
-    # === Placeholder: load time-course data ===
-    # Replace this with actual query logic:
-    # Example data structure:
-    # {
-    #   10: {"times": [0, 1, 2], "signals": [0.1, 0.4, 0.6]},
-    #   11: {"times": [...], "signals": [...]}
-    # }
-    dummy_data = {
-        10: {"times": [0, 1, 2, 4], "signals": [0.05, 0.32, 0.52, 0.68]},
-        11: {"times": [0, 1, 2, 4], "signals": [0.02, 0.22, 0.38, 0.60]},
-    }
-
-    for site, ts in dummy_data.items():
         try:
-            result = fit_site_timecourse(np.array(ts["times"]), np.array(ts["signals"]))
-            k_obs = result.params["exp_decay"].value
-            k_err = result.params["exp_decay"].stderr
+            # Fetch timecourse data for this nt_id and rg_id
+            time_data, fmod_data = fetch_timecourse_data(db_path, nt_id, rg_id)
 
-            console.print(f"[green]✓ Site {site}[/green]: k_obs = {k_obs:.4f} ± {k_err:.4f}")
+            # Actual fitting
+            result, outlier = fit_timecourse(time_data, fmod_data, kdeg0)
 
-            insert_probe_kinetic_rate(conn, nmr_reaction_id=f"{reaction_group_id}_nt{site}",
-                                      k_value=k_obs, k_error=k_err, species="DMS")
+            # Construct fit_result dict for insertion
+            fit_result = {
+                "rg_id": rg_id,
+                "nt_id": nt_id,
+                "kobs_val": result.params["log_kappa"].value,
+                "kobs_err": result.params["log_kappa"].stderr,
+                "kdeg_val": result.params["log_kdeg"].value,
+                "kdeg_err": result.params["log_kdeg"].stderr,
+                "fmod0": result.params["log_fmod_0"].value,
+                "fmod0_err": result.params["log_fmod_0"].stderr,
+                "r2": result.rsquared,
+                "chisq": result.chisqr,
+                "time_min": min(time_data),
+                "time_max": max(time_data)
+            }
+
+            console.print(
+                f"[green]✓ Free timecourse fit complete[/green]: "
+                f"kobs = {fit_result['kobs_val']:.4f} ± {fit_result['kobs_err']:.4f}, "
+                f"kdeg = {fit_result['kdeg_val']:.4f} ± {fit_result['kdeg_err']:.4f}, "
+                f"fmod0 = {fit_result['fmod0']:.4f} ± {fit_result['fmod0_err']:.4f}, "
+                f"r² = {fit_result['r2']:.4f}"
+            )
+
+            conn = connect_db(db_path)
+
+            # Check if the database is initialized and has the required columns
+            if not check_db(conn, "free_tc_fits", REQUIRED_COLUMNS):
+                console.print(f"[red]Error:[/red] Database initialization failed or missing required columns.")
+                conn.close()
+                return
+            else:
+                console.print(f"[green]✓ Database check passed and ready for Arrhenius fit import[/green]")
+
+
+            console.print(f"[green]✓ Free timecourse fit success [/green]: {fit_result['rsquared']:.4f} R²")
+            insert_success = insert_tc_fit(conn, fit_result)
+            count += insert_success
+            conn.close()
+
+
         except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Fit failed for site {site}: {e}")
+            console.print(f"[yellow]Warning:[/yellow] Free timecourse fit failed: {e}")
+
+    console.print(f"[green]✓ Free timecourse fits imported successfully[/green]: {count} fits inserted into the database.")

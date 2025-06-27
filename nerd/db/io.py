@@ -9,7 +9,7 @@ DEFAULT_DB_PATH = Path("nerd.sqlite3")  # fallback if not specified
 
 # ==== Connection + Database Initialization ===================================
 
-def connect_db(db_path: str = None) -> sqlite3.Connection:
+def connect_db(db_path: str) -> sqlite3.Connection:
     """Connect to the SQLite3 database."""
     db_file = Path(db_path) if db_path else DEFAULT_DB_PATH
     return sqlite3.connect(db_file)
@@ -282,28 +282,28 @@ def display_table(results, column_descriptions, title="Query Results"):
 
 # === Miscellaneous (might incorporate) ===
 
-def append_csv_to_sqlite(csv_file, table_name, db_file):
-    """Appends a CSV file to a given SQLite table with matching column names."""
+# def append_csv_to_sqlite(csv_file, table_name, db_file):
+#     """Appends a CSV file to a given SQLite table with matching column names."""
     
-    # Load CSV into a DataFrame
-    df = pd.read_csv(csv_file)
+#     # Load CSV into a DataFrame
+#     df = pd.read_csv(csv_file)
 
-    # Connect to SQLite database
-    conn = sqlite3.connect(db_file)
-    cursor = conn.cursor()
+#     # Connect to SQLite database
+#     conn = sqlite3.connect(db_file)
+#     cursor = conn.cursor()
 
-    # Get existing table column names
-    cursor.execute(f"PRAGMA table_info({table_name})")
-    existing_columns = {row[1] for row in cursor.fetchall()}  # Column names from DB
+#     # Get existing table column names
+#     cursor.execute(f"PRAGMA table_info({table_name})")
+#     existing_columns = {row[1] for row in cursor.fetchall()}  # Column names from DB
 
-    # Filter DataFrame to only include matching columns
-    df = df[[col for col in df.columns if col in existing_columns]]
+#     # Filter DataFrame to only include matching columns
+#     df = df[[col for col in df.columns if col in existing_columns]]
 
-    if df.empty:
-        print("No matching columns found. Nothing to insert.")
-    else:
-        # Append DataFrame to the table
-        df.to_sql(table_name, conn, if_exists="append", index=False)
-        print(f"Successfully appended {len(df)} rows to {table_name}.")
+#     if df.empty:
+#         print("No matching columns found. Nothing to insert.")
+#     else:
+#         # Append DataFrame to the table
+#         df.to_sql(table_name, conn, if_exists="append", index=False)
+#         print(f"Successfully appended {len(df)} rows to {table_name}.")
 
-    conn.close()
+#     conn.close()
