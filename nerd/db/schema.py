@@ -209,7 +209,7 @@ CREATE TABLE IF NOT EXISTS probe_melt_fits (
 # === Table: nmr_reactions ===
 CREATE_NMR_REACTIONS = """
 CREATE TABLE IF NOT EXISTS nmr_reactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER NOT NULL UNIQUE,                 -- Primary key for this table
     reaction_type TEXT NOT NULL,                 -- "deg", "add"
     temperature REAL NOT NULL,                   -- Temperature in Celsius
     replicate INTEGER NOT NULL,                  -- Replicate number
@@ -222,11 +222,13 @@ CREATE TABLE IF NOT EXISTS nmr_reactions (
     probe_solvent TEXT NOT NULL,                 -- Solvent used for the probe (e.g. "etoh", "dmso")
     substrate TEXT NOT NULL,                     -- Substrate used (e.g. "ATP", "GTP", "none" if degradation)
     substrate_conc REAL NOT NULL,                -- Concentration of the substrate in M (0 if degradation)
-    buffer TEXT NOT NULL,                        -- Buffer used for the reaction
+    buffer_id INT NOT NULL,                        -- Buffer id (foreign key to buffers table)
     nmr_machine TEXT NOT NULL,                   -- NMR machine used for the experiment
     kinetic_data_dir TEXT NOT NULL,              -- Directory containing kinetic data csv file
     mnova_analysis_dir TEXT,                     -- Directory containing MNova analysis files
     raw_fid_dir TEXT,                             -- Directory containing raw FID files
+    PRIMARY KEY(id AUTOINCREMENT),
+    FOREIGN KEY(buffer_id) REFERENCES buffers(id),
     UNIQUE(kinetic_data_dir)                   -- Ensure unique directory for kinetic data
 );
 """

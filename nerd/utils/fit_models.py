@@ -117,8 +117,8 @@ def fit_ODE_probe(dms_perc, peak_perc, ntp_conc):
 
 
 # === Time-course HDX model (free) ===
-def get_kdeg(temp, slope=slope, intercept=intercept):
-    return np.exp(slope / (temp + 273.15) + intercept)
+# def get_kdeg(temp, slope, intercept):
+#     return np.exp(slope / (temp + 273.15) + intercept)
 
 def fmod_model(x, log_kappa, log_kdeg, log_fmod_0):
     """

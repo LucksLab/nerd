@@ -3,7 +3,8 @@
 import csv
 from pathlib import Path
 from rich.console import Console
-from nerd.db.io import connect_db, init_db, check_db, insert_nmr_reaction
+from nerd.db.io import connect_db, init_db, check_db, insert_nmr_reaction, insert_buffer
+from nerd.db.fetch import fetch_buffer_id
 
 console = Console()
 
@@ -26,13 +27,12 @@ REQUIRED_COLUMNS = [
     "probe_solvent",         # Solvent used for the probe
     "substrate",             # Substrate used in the reaction
     "substrate_conc",        # Concentration of the substrate (M)
-    "buffer",                # Buffer used in the reaction
     "nmr_machine",           # NMR machine identifier or name
     "kinetic_data_dir"       # Directory containing kinetic data files
 ]
 
 # need to import buffer, construct (and nt_info), sequencing runs, then probing samples
-def import_buffer(csv_path: str, db_path: str = None):
+def import_buffer(csv_path: str, db_path: str):
     """
     Import buffer data into the buffers table.
     """
@@ -61,7 +61,7 @@ def import_buffer(csv_path: str, db_path: str = None):
 
         console.print(f"[green]✓ Imported {count} buffers[/green]")
 
-def run(csv_path: str, db_path: str = None):
+def run(csv_path: str, db_path: str):
     """
     Import NMR reaction metadata from a CSV into the nmr_reactions table.
     """
@@ -82,12 +82,7 @@ def run(csv_path: str, db_path: str = None):
 
     with open(csv_file, newline='', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
-
-        # get unique buffers
-        distinct_buffer = set(row['buffer'] for row in reader if 'buffer' in row)
-
-        
-
+                
         # Check for required columns
         missing = [col for col in REQUIRED_COLUMNS if col not in reader.fieldnames]
         if missing:
@@ -96,8 +91,16 @@ def run(csv_path: str, db_path: str = None):
 
         count = 0
         for row in reader:
-
             try:
+                # handle buffer (conver to ID)
+                buffer_name = row.get("buffer")
+                if buffer_name:
+                    buffer_id = fetch_buffer_id(buffer_name, db_path)
+                    row["buffer_id"] = buffer_id
+                else:
+                    console.print(f"[red]Error:[/red] Buffer '{row.get('buffer')}' not found in database.")
+                    raise ValueError(f"Buffer '{buffer_name}' not found in database. Create it first with import_buffer().")
+
                 insert_success = insert_nmr_reaction(conn, row)
                 count += insert_success
 

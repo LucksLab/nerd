@@ -169,3 +169,29 @@ def fetch_reaction_pH(db_path: str, rg_id: int) -> float:
         raise ValueError(f"Multiple pH values found for rg_id {rg_id}: {pH_values}")
 
     return pH_values[0]
+
+def fetch_buffer_id(buffer_name: str, db_path: str) -> Optional[int]:
+    """
+    Fetch the buffer ID for a given buffer name.
+    
+    Args:
+        buffer_name (str): Name of the buffer.
+        db_path (str): Path to the database file.
+    
+    Returns:
+        Optional[int]: Buffer ID if found, otherwise None.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT id FROM buffers WHERE name = ?
+    """, (buffer_name,))
+    
+    result = cursor.fetchone()
+    conn.close()
+    
+    if result:
+        return result[0]
+    else:
+        return None

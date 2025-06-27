@@ -106,3 +106,4 @@ def calc_kdeg(temp, pH):
     """
     Find NMR arrhenius at closest pH then calculate kdeg using the Arrhenius equation.
     """
+    return 0

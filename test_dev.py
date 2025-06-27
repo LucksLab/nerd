@@ -24,6 +24,12 @@ def test_all():
     io.init_db(conn)
     conn.close()
 
+    # Import buffers
+    nmr.import_buffer(
+        csv_path="test_data/nmr_buffers.csv",
+        db_path='test_output/nerd_dev.sqlite3'
+    )
+
     # Run the NMR importer with a sample CSV file
     nmr.run('test_data/nmr_degradation_samples.csv', db_path='test_output/nerd_dev.sqlite3')
 
@@ -44,7 +50,7 @@ def test_all():
     degradation.run(samples, None, db_path='test_output/nerd_dev.sqlite3')
 
     arrhenius.run(reaction_type="deg", data_source="nmr", species="none",
-                  buffer="schwalbe_buffer", db_path='test_output/nerd_dev.sqlite3')
+                  buffer="Schwalbe_bistris", db_path='test_output/nerd_dev.sqlite3')
     
     print("\n[IMPORT NMR ADDUCTION SAMPLES]")
 
@@ -63,36 +69,36 @@ def test_all():
     adduction.run(add_samples, None, db_path='test_output/nerd_dev.sqlite3')
 
     arrhenius.run(reaction_type="add", data_source="nmr", species="ATP",
-                  buffer="schwalbe_buffer", db_path='test_output/nerd_dev.sqlite3')
+                  buffer="Schwalbe_bistris", db_path='test_output/nerd_dev.sqlite3')
 
     arrhenius.run(reaction_type="add", data_source="nmr", species="CTP",
-                  buffer="schwalbe_buffer", db_path='test_output/nerd_dev.sqlite3')
+                  buffer="Schwalbe_bistris", db_path='test_output/nerd_dev.sqlite3')
 
     arrhenius.run(reaction_type="add", data_source="nmr", species="GTP",
-                  buffer="schwalbe_buffer", db_path='test_output/nerd_dev.sqlite3')
+                  buffer="Schwalbe_bistris", db_path='test_output/nerd_dev.sqlite3')
 
 
-    print("\n[IMPORT PROBING SAMPLES]")
+    # print("\n[IMPORT PROBING SAMPLES]")
 
-    probing_sample.import_buffer(
-        csv_path="test_data/probing_data/buffers.csv",
-        db_path='test_output/nerd_dev.sqlite3'
-    )
+    # probing_sample.import_buffer(
+    #     csv_path="test_data/probing_data/buffers.csv",
+    #     db_path='test_output/nerd_dev.sqlite3'
+    # )
 
-    probing_sample.import_construct(
-        csv_path="test_data/probing_data/constructs.csv",
-        db_path='test_output/nerd_dev.sqlite3'
-    )
+    # probing_sample.import_construct(
+    #     csv_path="test_data/probing_data/constructs.csv",
+    #     db_path='test_output/nerd_dev.sqlite3'
+    # )
 
-    probing_sample.import_seqrun(
-        csv_path="test_data/probing_data/sequencing_runs.csv",
-        db_path='test_output/nerd_dev.sqlite3'
-    )
+    # probing_sample.import_seqrun(
+    #     csv_path="test_data/probing_data/sequencing_runs.csv",
+    #     db_path='test_output/nerd_dev.sqlite3'
+    # )
 
-    probing_sample.import_samples(
-        csv_path="test_data/probing_data/probing_samples.csv",
-        db_path='test_output/nerd_dev.sqlite3'
-    )
+    # probing_sample.import_samples(
+    #     csv_path="test_data/probing_data/probing_samples.csv",
+    #     db_path='test_output/nerd_dev.sqlite3'
+    # )
 
     # fmod_calc.import_shapemapper() # imports to fmod_calc_run and fmod_vals tables in db
     # fmod_calc.run()
@@ -106,10 +112,10 @@ def test_all():
     
 
 if __name__ == "__main__":
-    #test_all()
+    test_all()
     
     # Import fmod_calc runs
-    fmod_calc.run(
-        fmod_calc_csv="test_data/probing_data/fmod_calc_runs.csv",
-        db_path='test_output/nerd_dev.sqlite3'
-    )
+    # fmod_calc.run(
+    #     fmod_calc_csv="test_data/probing_data/fmod_calc_runs.csv",
+    #     db_path='test_output/nerd_dev.sqlite3'
+    # )

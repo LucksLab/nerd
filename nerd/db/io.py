@@ -50,7 +50,7 @@ def insert_nmr_reaction(conn, reaction_metadata: dict):
         INSERT OR IGNORE INTO nmr_reactions (
             reaction_type, substrate, substrate_conc,
             temperature, replicate,
-            probe, probe_conc, buffer, probe_solvent,
+            probe, probe_conc, buffer_id, probe_solvent,
             num_scans, time_per_read, total_kinetic_reads, total_kinetic_time,
             nmr_machine, kinetic_data_dir, mnova_analysis_dir, raw_fid_dir
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -62,7 +62,7 @@ def insert_nmr_reaction(conn, reaction_metadata: dict):
         reaction_metadata.get("replicate"),
         reaction_metadata.get("probe"),
         reaction_metadata.get("probe_conc"),
-        reaction_metadata.get("buffer"),
+        reaction_metadata.get("buffer_id"),
         reaction_metadata.get("probe_solvent"),
         reaction_metadata.get("num_scans"),
         reaction_metadata.get("time_per_read"),
@@ -229,36 +229,24 @@ def fetch_all_nmr_samples(conn, reaction_type='deg'):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT id, temperature, replicate,
-            probe, probe_conc, buffer, probe_solvent, substrate, substrate_conc,
+            probe, probe_conc, buffer_id, probe_solvent, substrate, substrate_conc,
             nmr_machine, kinetic_data_dir
         FROM nmr_reactions
         WHERE reaction_type = ?
     """, (reaction_type,))
     return cursor.fetchall(), cursor.description
 
-def fetch_kinetic_rates_for_reactions(conn, reaction_ids):
-    """
-    Fetches kinetic rates for a list of NMR reaction IDs.
-
-    Parameters:
-    - conn: SQLite connection object
-    - reaction_ids: List of NMR reaction IDs to fetch rates for
-
-    Returns:
-    - List of tuples containing k_value, k_error, species, nmr_reaction_id
-    - Cursor description
-    """
-    if not reaction_ids:
-        return [], None
+def fetch_kinetic_rates(conn, buffer_id: int, species: str, reaction_type: str):
     cursor = conn.cursor()
-    placeholders = ','.join('?' for _ in reaction_ids)
-    query = f"""
-        SELECT nmr_reaction_id, species, nr.temperature, k_value, k_error
-        FROM nmr_kinetic_rates
-        JOIN nmr_reactions nr ON nmr_kinetic_rates.nmr_reaction_id = nr.id
-        WHERE nr.id IN ({placeholders})
+    query = """
+        SELECT nkr.nmr_reaction_id, nkr.species, nr.temperature, nkr.k_value, nkr.k_error
+        FROM nmr_kinetic_rates nkr
+        JOIN nmr_reactions nr ON nkr.nmr_reaction_id = nr.id
+        WHERE nr.buffer_id = ?
+          AND nr.reaction_type = ?
+          AND nkr.species = ?
     """
-    cursor.execute(query, reaction_ids)
+    cursor.execute(query, (buffer_id, reaction_type, species))
     return cursor.fetchall(), cursor.description
 
 # === Display table ===

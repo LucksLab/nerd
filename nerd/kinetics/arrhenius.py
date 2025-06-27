@@ -5,8 +5,9 @@ import pandas as pd
 from pathlib import Path
 from rich.console import Console
 
-from nerd.db.io import connect_db, fetch_all_nmr_samples, fetch_kinetic_rates_for_reactions, check_db, insert_arrhenius_fit
+from nerd.db.io import connect_db, fetch_kinetic_rates, check_db, insert_arrhenius_fit
 from nerd.utils.fit_models import fit_linear
+from nerd.db.fetch import fetch_buffer_id
 
 console = Console()
 
@@ -26,7 +27,7 @@ def rows_to_dicts(rows, description):
     return [dict(zip(column_names, row)) for row in rows]
 
 def run(reaction_type="deg", data_source="nmr", species = "dms", 
-        buffer = "schwalbe_buffer", db_path: str = None):
+        buffer = "Schwalbe_bistris", db_path: str = None):
     """
     CLI entrypoint for Arrhenius fitting.
     """
@@ -34,21 +35,19 @@ def run(reaction_type="deg", data_source="nmr", species = "dms",
     count = 0
 
     if data_source == "nmr":
-        # Fetch k_values from the database
-        conn = connect_db(db_path)
-        rows, description = fetch_all_nmr_samples(conn, reaction_type=reaction_type)
-        dict_rows = rows_to_dicts(rows, description)
-        filtered = [r for r in dict_rows if (r["buffer"] == buffer) and (r["substrate"] == species)]
-        reaction_ids = [r["id"] for r in filtered]
-        data, description = fetch_kinetic_rates_for_reactions(conn, reaction_ids)
-        dict_data = rows_to_dicts(data, description)
+        conn = connect_db(db_path)  # row_factory set inside
+        buffer_id = fetch_buffer_id(buffer, db_path)
+
+        data, description = fetch_kinetic_rates(conn, buffer_id, species, reaction_type)
         conn.close()
+
         if not data:
             console.print(f"[red]No kinetic rates found for reaction type '{reaction_type}' with species '{species}' and buffer '{buffer}'[/red]")
             return
 
-        x_vals = np.array([1 / r["temperature"] for r in dict_data])
-        y_vals = np.array([np.log(r["k_value"]) for r in dict_data])
+        data = rows_to_dicts(data, description)
+        x_vals = np.array([1 / r["temperature"] for r in data])
+        y_vals = np.array([np.log(r["k_value"]) for r in data])
 
     try:
         result = fit_linear(x_vals, y_vals)
