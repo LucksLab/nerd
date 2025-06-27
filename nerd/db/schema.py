@@ -258,6 +258,7 @@ CREATE TABLE IF NOT EXISTS arrhenius_fits (
     reaction_type TEXT NOT NULL,                 -- "deg_nmr", "add_nmr", "rna_probe"
     data_source TEXT NOT NULL,                   -- "nmr", "probe_global", "probe_free"
     substrate TEXT NOT NULL,                     -- Substrate for which the fit is calculated (e.g. "ATP", "GTP", "none" for degradation)
+    buffer_id INTEGER NOT NULL,                  -- Foreign key to buffers table
     slope REAL NOT NULL,                         -- Slope of the Arrhenius fit (activation energy)
     slope_err REAL NOT NULL,                     -- Standard error of the slope
     intercept REAL NOT NULL,                     -- Intercept of the Arrhenius fit (log pre-exponential factor)
@@ -265,6 +266,7 @@ CREATE TABLE IF NOT EXISTS arrhenius_fits (
     r2 REAL NOT NULL,                            -- R-squared value of the fit
     model_file TEXT,                             -- optional path to serialized fit object
     PRIMARY KEY(id AUTOINCREMENT),
+    FOREIGN KEY(buffer_id) REFERENCES buffers(id),
     UNIQUE(reaction_type, data_source, substrate) -- Ensure unique fits per reaction type and data source
 );
 """

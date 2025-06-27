@@ -195,3 +195,33 @@ def fetch_buffer_id(buffer_name: str, db_path: str) -> Optional[int]:
         return result[0]
     else:
         return None
+    
+
+def fetch_arrhenius_closest_pH(db_path: str, reaction_type: str, species: str, pH: float) -> list:
+    """
+    Fetch Arrhenius parameters for the buffer with the closest pH.
+
+    Args:
+        db_path (str): Path to the database file.
+        reaction_type (str): Type of reaction (e.g., "deg", "add").
+        species (str): Species involved in the reaction (data_source column).
+        pH (float): Target pH to find the closest match in buffers.
+
+    Returns:
+        list: List of tuples containing Arrhenius parameters.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT af.slope, af.slope_err, af.intercept, af.intercept_err, b.pH
+        FROM arrhenius_fits af
+        JOIN buffers b ON af.buffer_id = b.id
+        WHERE af.reaction_type = ? AND af.substrate = ?
+        ORDER BY ABS(b.pH - ?) ASC
+        LIMIT 1
+    """, (reaction_type, species, pH))
+
+    result = cursor.fetchall()
+    conn.close()
+    return result

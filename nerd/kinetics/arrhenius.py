@@ -14,6 +14,8 @@ console = Console()
 REQUIRED_COLUMNS = [
     "reaction_type",  # Type of reaction (e.g. "deg")
     "data_source",    # Source of data (e.g. "nmr")
+    "substrate",      # Substrate used in the reaction (e.g. "dms")
+    "buffer_id",      # ID of the buffer used in the reaction
     "slope",          # Slope of the Arrhenius fit
     "slope_err",      # Standard error of the slope
     "intercept",      # Intercept of the Arrhenius fit
@@ -62,6 +64,7 @@ def run(reaction_type="deg", data_source="nmr", species = "dms",
             "reaction_type": reaction_type,
             "data_source": data_source,
             "substrate": species,
+            "buffer_id": buffer_id,
             "slope": slope,
             "slope_err": slope_err,
             "intercept": intercept,

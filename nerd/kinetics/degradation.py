@@ -5,6 +5,7 @@ from pathlib import Path
 from rich.console import Console
 from nerd.db.io import connect_db, insert_fitted_kinetic_rate, check_db
 from nerd.utils.fit_models import fit_exp_decay
+from nerd.db.fetch import fetch_arrhenius_closest_pH
 
 console = Console()
 
@@ -101,9 +102,26 @@ def run(all_samples: list, select_id: list = None, db_path: str = None):
 
     console.print(f"[green]✓ Imported kinetic fits for {count} NMR degradation samples[/green]")
 
+from numpy import exp
 
 def calc_kdeg(temp, pH):
     """
     Find NMR arrhenius at closest pH then calculate kdeg using the Arrhenius equation.
     """
-    return 0
+
+    # Fetch Arrhenius parameters for the given temperature and pH (deg)
+    arrhenius_params = fetch_arrhenius_closest_pH(
+        db_path='test_output/nerd_dev.sqlite3',
+        reaction_type="deg",
+        species="dms",
+        pH=pH
+    )
+    if not arrhenius_params:
+        console.print(f"[red]Error:[/red] No Arrhenius parameters found for pH {pH}")
+        return None
+    
+    slope, slope_err, intercept, intercept_err, pH_value = arrhenius_params[0]
+
+    kdeg =  exp(slope / (temp + 273.15) + intercept)
+
+    return kdeg

@@ -97,14 +97,15 @@ def insert_arrhenius_fit(conn, fit_result: dict):
     cursor = conn.cursor()
     cursor.execute("""
         INSERT OR IGNORE INTO arrhenius_fits (
-            reaction_type, data_source, substrate,
+            reaction_type, data_source, substrate, buffer_id,
             slope, slope_err,
             intercept, intercept_err,
             r2, model_file
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (fit_result.get("reaction_type"),
         fit_result.get("data_source"),
         fit_result.get("substrate"),
+        fit_result.get("buffer_id"),
         fit_result.get("slope"),
         fit_result.get("slope_err"),
         fit_result.get("intercept"),
