@@ -158,7 +158,8 @@ CREATE TABLE IF NOT EXISTS free_tc_fits (
     time_max REAL NOT NULL,                          -- Maximum time (in seconds) used in fit
     PRIMARY KEY(id AUTOINCREMENT),
     FOREIGN KEY(rg_id) REFERENCES reaction_groups(rg_id),
-    FOREIGN KEY(nt_id) REFERENCES nucleotides(id)
+    FOREIGN KEY(nt_id) REFERENCES nucleotides(id),
+    UNIQUE(rg_id, nt_id)                             -- Ensure unique fits per reaction group and nucleotide
 );
 """
 
@@ -180,7 +181,8 @@ CREATE TABLE IF NOT EXISTS global_tc_deg_fits (
     time_max REAL NOT NULL,                          -- Maximum time (in seconds) used in fit
     PRIMARY KEY(id AUTOINCREMENT),
     FOREIGN KEY(rg_id) REFERENCES reaction_groups(rg_id),
-    FOREIGN KEY(nt_id) REFERENCES nucleotides(id)
+    FOREIGN KEY(nt_id) REFERENCES nucleotides(id),
+    UNIQUE(rg_id, nt_id)                             -- Ensure unique fits per reaction group and nucleotide
 );
 """
 

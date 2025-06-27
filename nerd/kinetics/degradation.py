@@ -100,3 +100,9 @@ def run(all_samples: list, select_id: list = None, db_path: str = None):
             console.print(f"[red]Fit failed:[/red] {e}")
 
     console.print(f"[green]✓ Imported kinetic fits for {count} NMR degradation samples[/green]")
+
+
+def calc_kdeg(temp, pH):
+    """
+    Find NMR arrhenius at closest pH then calculate kdeg using the Arrhenius equation.
+    """

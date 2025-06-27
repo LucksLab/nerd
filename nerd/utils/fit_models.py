@@ -33,7 +33,6 @@ def fit_linear(x, y):
     return result
 
 # === ODE fit (NTP adduction) ===
-
 def fit_ODE_probe(dms_perc, peak_perc, ntp_conc):
 
     # for whichever has a shorter length between dms_perc and peak_perc, use those time values
@@ -93,11 +92,9 @@ def fit_ODE_probe(dms_perc, peak_perc, ntp_conc):
     t = t_obs
 
     # Observed data
-    # Replace this with your actual data
     y_obs = np.array([U_data, S_data, M_data])
 
     # Define parameters
-
     k_deg_0 = 1e-3  # initial guess for k_deg
     k_add_0 = 0.003  # initial guess for k_add
     params = Parameters()
@@ -119,6 +116,71 @@ def fit_ODE_probe(dms_perc, peak_perc, ntp_conc):
     return out.params, r_squared, chi_sq
 
 
+# === Time-course HDX model (free) ===
+def get_kdeg(temp, slope=slope, intercept=intercept):
+    return np.exp(slope / (temp + 273.15) + intercept)
+
+def fmod_model(x, log_kappa, log_kdeg, log_fmod_0):
+    """
+    Free HDX-like model for probing time-course data.
+
+    fmod(x) = 1 - exp(-kappa * (1 - exp(-kdeg * x))) + fmod_0
+    
+    where:
+    - kappa is the observed rate constant for the probing reaction
+    - kdeg is the rate constant for the degradation reaction
+    - fmod_0 is the initial fraction of deuterium incorporation
+    """
+    
+    kappa = np.exp(log_kappa)
+    kdeg = np.exp(log_kdeg)
+    fmod_0 = np.exp(log_fmod_0)
+    return 1 - np.exp(- (kappa) * (1 - np.exp(-kdeg * x))) + fmod_0
+
+def fit_timecourse(time_data, fmod_data, kdeg0, constrained_kdeg = None):
+
+    # Initialize model
+    model = lmfit.Model(fmod_model)
+
+    # Initial parameter estimates
+    kappa0 = -np.log(1 - fmod_data.max())
+    fmod_00 = max(fmod_data.min(), 1e-6)  # Avoid log(0) errors
+    
+    # Create parameters for the model
+    params = model.make_params(
+        log_kappa = np.log(kappa0), 
+        log_kdeg = np.log(kdeg0), 
+        log_fmod_0 = np.log(fmod_00)
+    )
+    
+    # Constrain kdeg if specified (for refitting with globa kdeg)
+    if constrained_kdeg is not None:
+        # this value is log already
+        params['log_kdeg'].set(value = constrained_kdeg, vary=False)
+
+    # Fit the model to the data
+    result = model.fit(fmod_data, params, x = time_data)
+    
+    # OUTLIER MECHANISM Remove outlier outside of 1.5σ and refit (CURRENTLY DISABLED)
+    outlier = np.abs(result.residual) > 1000 * np.std(result.residual)
+    
+    if sum(outlier) > 0:
+        time_data = time_data[~outlier]
+        fmod_data = fmod_data[~outlier]
+    
+        # Initial values = values from previous fit
+        params = model.make_params(
+            log_kappa=result.best_values['log_kappa'], 
+            log_kdeg=result.best_values['log_kdeg'], 
+            log_fmod_0=result.best_values['log_fmod_0']
+        )
+        
+        result = model.fit(fmod_data, params, x=time_data)
+
+    return result, outlier
+
+
+# === Time-course HDX model (global) ===
 def melt_fit(x, a, b, c, d, f, g):
     # a: slope of the unfolded state
     # b: y-intercept of the unfolded state

@@ -194,6 +194,35 @@ def insert_seq_sample(conn, sample_data: dict):
     conn.commit()
     return cursor.rowcount > 0
 
+def insert_tc_fit(conn, fit_data: dict):
+
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO free_tc_fits (
+            rg_id, nt_id,
+            kobs_val, kobs_err,
+            kdeg_val, kdeg_err,
+            fmod0, fmod0_err,
+            r2, chisq,
+            time_min, time_max
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        fit_data.get("rg_id"),
+        fit_data.get("nt_id"),
+        fit_data.get("kobs_val"),
+        fit_data.get("kobs_err"),
+        fit_data.get("kdeg_val"),
+        fit_data.get("kdeg_err"),
+        fit_data.get("fmod0"),
+        fit_data.get("fmod0_err"),
+        fit_data.get("r2"),
+        fit_data.get("chisq"),
+        fit_data.get("time_min"),
+        fit_data.get("time_max")
+    ))
+    conn.commit()
+    return cursor.rowcount > 0
+
 # === Query Functions ===
 
 def fetch_all_nmr_samples(conn, reaction_type='deg'):
@@ -262,13 +291,30 @@ def display_table(results, column_descriptions, title="Query Results"):
 
     console.print(table)
 
-# === Example Query Function ===
+# === Miscellaneous (might incorporate) ===
 
-def fetch_probe_rates_for_reaction(conn, reaction_id):
+def append_csv_to_sqlite(csv_file, table_name, db_file):
+    """Appends a CSV file to a given SQLite table with matching column names."""
+    
+    # Load CSV into a DataFrame
+    df = pd.read_csv(csv_file)
+
+    # Connect to SQLite database
+    conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
-    cursor.execute("""
-        SELECT k_value, k_error, species
-        FROM probe_kinetic_rates
-        WHERE nmr_reaction_id = ?
-    """, (reaction_id,))
-    return cursor.fetchall()
+
+    # Get existing table column names
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    existing_columns = {row[1] for row in cursor.fetchall()}  # Column names from DB
+
+    # Filter DataFrame to only include matching columns
+    df = df[[col for col in df.columns if col in existing_columns]]
+
+    if df.empty:
+        print("No matching columns found. Nothing to insert.")
+    else:
+        # Append DataFrame to the table
+        df.to_sql(table_name, conn, if_exists="append", index=False)
+        print(f"Successfully appended {len(df)} rows to {table_name}.")
+
+    conn.close()

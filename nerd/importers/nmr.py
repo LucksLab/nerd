@@ -7,6 +7,11 @@ from nerd.db.io import connect_db, init_db, check_db, insert_nmr_reaction
 
 console = Console()
 
+# Define required columns (match schema)
+BUFFER_REQUIRED_COLUMNS = [
+    "name", "pH", "composition", "disp_name"
+]
+
 # List of required columns for NMR reaction metadata import.
 REQUIRED_COLUMNS = [
     "reaction_type",         # Type of reaction, e.g., "deg" or "add"
@@ -25,6 +30,36 @@ REQUIRED_COLUMNS = [
     "nmr_machine",           # NMR machine identifier or name
     "kinetic_data_dir"       # Directory containing kinetic data files
 ]
+
+# need to import buffer, construct (and nt_info), sequencing runs, then probing samples
+def import_buffer(csv_path: str, db_path: str = None):
+    """
+    Import buffer data into the buffers table.
+    """
+    csv_file = Path(csv_path)
+    if not csv_file.exists():
+        console.print(f"[red]Error:[/red] Buffer CSV file not found: {csv_file}")
+        return
+
+    conn = connect_db(db_path)
+    check_db(conn, "buffers", BUFFER_REQUIRED_COLUMNS)
+
+    with open(csv_file, newline='', encoding='utf-8-sig') as f:
+        reader = csv.DictReader(f)
+        missing = [col for col in BUFFER_REQUIRED_COLUMNS if col not in reader.fieldnames]
+        if missing:
+            console.print(f"[red]Error:[/red] Missing required columns: {missing}")
+            return
+
+        count = 0
+        for row in reader:
+            try:
+                insert_success = insert_buffer(conn, row)
+                count += insert_success
+            except Exception as e:
+                console.print(f"[yellow]Warning:[/yellow] Skipped row due to error: {e}")
+
+        console.print(f"[green]✓ Imported {count} buffers[/green]")
 
 def run(csv_path: str, db_path: str = None):
     """
@@ -48,6 +83,11 @@ def run(csv_path: str, db_path: str = None):
     with open(csv_file, newline='', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
 
+        # get unique buffers
+        distinct_buffer = set(row['buffer'] for row in reader if 'buffer' in row)
+
+        
+
         # Check for required columns
         missing = [col for col in REQUIRED_COLUMNS if col not in reader.fieldnames]
         if missing:
@@ -56,6 +96,7 @@ def run(csv_path: str, db_path: str = None):
 
         count = 0
         for row in reader:
+
             try:
                 insert_success = insert_nmr_reaction(conn, row)
                 count += insert_success
