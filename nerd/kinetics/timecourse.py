@@ -105,4 +105,20 @@ def free_fit(rg_id, db_path):
     console.print(f"[green]✓ Free timecourse fits imported successfully[/green]: {count} fits inserted into the database.")
 
 
-def run()
+def run(db_path):
+    """
+    Main CLI entrypoint: fits free timecourse data and stores result to DB.
+    """
+    console.print("[blue]Running free timecourse fits...[/blue]")
+    
+    all_rg_ids = fetch_all_rg_ids(db_path)
+
+    for rg_id in all_rg_ids:
+        console.print(f"[blue]Processing reaction group ID:[/blue] {rg_id}")
+        
+        try:
+            free_fit(rg_id, db_path)
+        except Exception as e:
+            console.print(f"[red]Error processing rg_id {rg_id}:[/red] {e}")
+
+    console.print("[green]✓ Free timecourse fits completed successfully[/green]")
