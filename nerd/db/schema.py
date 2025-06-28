@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS sequencing_samples (
     seqrun_id INTEGER NOT NULL,                  -- Foreign key to sequencing_runs table
     sample_name TEXT NOT NULL,                   -- Name of the sequencing sample
     fq_dir TEXT NOT NULL,                        -- Directory containing fastq files
+    to_drop INTEGER NOT NULL DEFAULT 0,          -- 1 if sample should be dropped, 0 otherwise
     PRIMARY KEY(id AUTOINCREMENT),
     FOREIGN KEY(seqrun_id) REFERENCES sequencing_runs(id),
     UNIQUE(seqrun_id, sample_name, fq_dir)       -- Ensure unique samples by run ID, name, and directory

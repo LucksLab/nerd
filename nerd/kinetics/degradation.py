@@ -42,6 +42,13 @@ def fit_kinetic_trace(csv_path: str):
 
     return k, k_err, rsq, chisq
 
+def global_fit_probing(rg_id: int, db_path: str):
+    """
+    Fit degradation kinetics for a reaction group (rg_id) and store results in the database.
+    This function is a placeholder for future global fitting logic.
+    """
+    console.print(f"[yellow]Warning:[/yellow] Global fitting for rg_id {rg_id} is not implemented yet.")
+    return None
 
 def run(all_samples: list, select_id: list = None, db_path: str = None):
     """

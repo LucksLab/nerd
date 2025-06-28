@@ -104,6 +104,64 @@ def free_fit(rg_id, db_path):
 
     console.print(f"[green]✓ Free timecourse fits imported successfully[/green]: {count} fits inserted into the database.")
 
+def mark_samples_to_drop(qc_csv_path, db_path):
+    """
+    Marks sequencing samples as 'to_drop' based on qc annotations from a CSV.
+    The CSV should have columns: rg_id, qc_comment
+    Accepted qc_comment values: drop_tp0, drop_tp1, drop_tp2, ..., bad_rg
+    """
+    import csv
+
+    # Load QC annotations
+    qc_annotations = []
+    with open(qc_csv_path, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            qc_annotations.append({'rg_id': int(row['rg_id']), 'qc_comment': row['qc_comment']})
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    for annotation in qc_annotations:
+        rg_id = annotation['rg_id']
+        qc_comment = annotation['qc_comment']
+
+        # Step 1: Get relevant reactions in the reaction group
+        cursor.execute("""
+            SELECT pr.reaction_time, pr.treated, pr.s_id
+            FROM reaction_groups rg
+            JOIN probing_reactions pr ON rg.rxn_id = pr.id
+            WHERE rg.rg_id = ?
+        """, (rg_id,))
+        results = cursor.fetchall()
+
+        # Multiply treated by reaction time and sort by time
+        time_sids = [(rt * treated, s_id) for rt, treated, s_id in results]
+        time_sids.sort(key=lambda x: x[0])
+        unique_times = sorted(set(t for t, _ in time_sids))
+
+        # Map each unique time to a tp label
+        tp_map = {t: f'tp{i}' for i, t in enumerate(unique_times)}
+        tp_sids = {tp_map[t]: s_id for t, s_id in time_sids if t in tp_map}
+
+        if qc_comment == 'bad_rg':
+            s_ids = [s_id for _, s_id in time_sids]
+        elif qc_comment.startswith('drop_tp'):
+            target_tp = qc_comment.split('_')[1]
+            s_ids = [tp_sids.get(target_tp)] if tp_sids.get(target_tp) else []
+        else:
+            print(f"[WARN] Unknown qc_comment '{qc_comment}' for rg_id {rg_id}")
+            continue
+
+        # Mark each s_id in sequencing_samples as to_drop = 1
+        for s_id in s_ids:
+            if s_id is not None:
+                cursor.execute("UPDATE sequencing_samples SET to_drop = 1 WHERE id = ?", (s_id,))
+                print(f"[INFO] Marked s_id {s_id} (rg_id {rg_id}, {qc_comment}) as to_drop")
+
+    conn.commit()
+    conn.close()
+
 
 def run(db_path):
     """
