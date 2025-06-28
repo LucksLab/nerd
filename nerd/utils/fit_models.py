@@ -140,11 +140,11 @@ def fmod_model(x, log_kappa, log_kdeg, log_fmod_0):
 def fit_timecourse(time_data, fmod_data, kdeg0, constrained_kdeg = None):
 
     # Initialize model
-    model = lmfit.Model(fmod_model)
+    model = Model(fmod_model)
 
     # Initial parameter estimates
-    kappa0 = -np.log(1 - fmod_data.max())
-    fmod_00 = max(fmod_data.min(), 1e-6)  # Avoid log(0) errors
+    kappa0 = -np.log(1 - max(fmod_data))
+    fmod_00 = max(min(fmod_data), 1e-6)  # Avoid log(0) errors
     
     # Create parameters for the model
     params = model.make_params(

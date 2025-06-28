@@ -87,7 +87,7 @@ def fetch_timecourse_data(db_path: str, nt_id: int, rg_id: int) -> tuple:
     query = """
         SELECT pr.reaction_time, fv.fmod_val, pr.treated
         FROM fmod_vals fv
-        JOIN probing_reactions pr ON fv.id = pr.rxn_id
+        JOIN probing_reactions pr ON fv.rxn_id = pr.id
         JOIN reaction_groups rg ON rg.rxn_id = pr.id
         WHERE rg.rg_id = ?
         AND fv.nt_id = ?
@@ -225,3 +225,25 @@ def fetch_arrhenius_closest_pH(db_path: str, reaction_type: str, species: str, p
     result = cursor.fetchall()
     conn.close()
     return result
+
+
+def fetch_all_rg_ids(db_path: str) -> list:
+    """
+    Fetch all reaction group IDs from the database.
+    
+    Args:
+        db_path (str): Path to the database file.
+    
+    Returns:
+        list: List of reaction group IDs.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT DISTINCT rg_id FROM reaction_groups")
+    rg_ids = [row[0] for row in cursor.fetchall()]
+    
+    conn.close()
+
+
+    return rg_ids

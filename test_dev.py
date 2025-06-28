@@ -1,5 +1,5 @@
 from nerd.importers import fmod_calc, probing_sample, nmr
-from nerd.kinetics import degradation, adduction, arrhenius
+from nerd.kinetics import degradation, adduction, arrhenius, timecourse
 #from nerd.energy import meltfit, calc_K
 from nerd.db import io
 
@@ -52,56 +52,61 @@ def test_all():
     arrhenius.run(reaction_type="deg", data_source="nmr", species="dms",
                   buffer="Schwalbe_bistris", db_path='test_output/nerd_dev.sqlite3')
     
-    # print("\n[IMPORT NMR ADDUCTION SAMPLES]")
+    print("\n[IMPORT NMR ADDUCTION SAMPLES]")
 
-    # # Run the NMR importer with a sample CSV file
-    # nmr.run('test_data/nmr_adduction_samples.csv', db_path='test_output/nerd_dev.sqlite3')
+    # Run the NMR importer with a sample CSV file
+    nmr.run('test_data/nmr_adduction_samples.csv', db_path='test_output/nerd_dev.sqlite3')
 
-    # print("\n[ADDUCTION NMR]")
+    print("\n[ADDUCTION NMR]")
 
-    # # Display samples to analyze
-    # conn = io.connect_db('test_output/nerd_dev.sqlite3')
-    # add_samples, add_columns = io.fetch_all_nmr_samples(conn, 'add')
-    # conn.close()
+    # Display samples to analyze
+    conn = io.connect_db('test_output/nerd_dev.sqlite3')
+    add_samples, add_columns = io.fetch_all_nmr_samples(conn, 'add')
+    conn.close()
 
-    # #io.display_table(add_samples, add_columns, title="All NMR Adduction Samples")
+    #io.display_table(add_samples, add_columns, title="All NMR Adduction Samples")
 
-    # adduction.run(add_samples, None, db_path='test_output/nerd_dev.sqlite3')
+    adduction.run(add_samples, None, db_path='test_output/nerd_dev.sqlite3')
 
-    # arrhenius.run(reaction_type="add", data_source="nmr", species="ATP",
-    #               buffer="Schwalbe_bistris", db_path='test_output/nerd_dev.sqlite3')
+    arrhenius.run(reaction_type="add", data_source="nmr", species="ATP",
+                  buffer="Schwalbe_bistris", db_path='test_output/nerd_dev.sqlite3')
 
-    # arrhenius.run(reaction_type="add", data_source="nmr", species="CTP",
-    #               buffer="Schwalbe_bistris", db_path='test_output/nerd_dev.sqlite3')
+    arrhenius.run(reaction_type="add", data_source="nmr", species="CTP",
+                  buffer="Schwalbe_bistris", db_path='test_output/nerd_dev.sqlite3')
 
-    # arrhenius.run(reaction_type="add", data_source="nmr", species="GTP",
-    #               buffer="Schwalbe_bistris", db_path='test_output/nerd_dev.sqlite3')
+    arrhenius.run(reaction_type="add", data_source="nmr", species="GTP",
+                  buffer="Schwalbe_bistris", db_path='test_output/nerd_dev.sqlite3')
 
 
-    # print("\n[IMPORT PROBING SAMPLES]")
+    print("\n[IMPORT PROBING SAMPLES]")
 
-    # probing_sample.import_buffer(
-    #     csv_path="test_data/probing_data/buffers.csv",
-    #     db_path='test_output/nerd_dev.sqlite3'
-    # )
+    probing_sample.import_buffer(
+        csv_path="test_data/probing_data/buffers.csv",
+        db_path='test_output/nerd_dev.sqlite3'
+    )
 
-    # probing_sample.import_construct(
-    #     csv_path="test_data/probing_data/constructs.csv",
-    #     db_path='test_output/nerd_dev.sqlite3'
-    # )
+    probing_sample.import_construct(
+        csv_path="test_data/probing_data/constructs.csv",
+        db_path='test_output/nerd_dev.sqlite3'
+    )
 
-    # probing_sample.import_seqrun(
-    #     csv_path="test_data/probing_data/sequencing_runs.csv",
-    #     db_path='test_output/nerd_dev.sqlite3'
-    # )
+    probing_sample.import_seqrun(
+        csv_path="test_data/probing_data/sequencing_runs.csv",
+        db_path='test_output/nerd_dev.sqlite3'
+    )
 
-    # probing_sample.import_samples(
-    #     csv_path="test_data/probing_data/probing_samples.csv",
-    #     db_path='test_output/nerd_dev.sqlite3'
-    # )
+    probing_sample.import_samples(
+        csv_path="test_data/probing_data/probing_samples.csv",
+        db_path='test_output/nerd_dev.sqlite3'
+    )
 
-    # fmod_calc.import_shapemapper() # imports to fmod_calc_run and fmod_vals tables in db
-    # fmod_calc.run()
+    print("\n[IMPORT FMOD CALC RUNS]")
+
+    # Import fmod_calc runs
+    fmod_calc.run(
+        fmod_calc_csv="test_data/probing_data/fmod_calc_runs.csv",
+        db_path='test_output/nerd_dev.sqlite3'
+    )
 
     # timecourse.run() # free fits writes to free_fits table in db
     # timecourse.run() # global deg fit to get k_deg
@@ -112,16 +117,16 @@ def test_all():
     
 
 if __name__ == "__main__":
-    test_all()
+    #test_all()
     
-    # Import fmod_calc runs
-    # fmod_calc.run(
-    #     fmod_calc_csv="test_data/probing_data/fmod_calc_runs.csv",
-    #     db_path='test_output/nerd_dev.sqlite3'
-    # )
 
-    kdeg = degradation.calc_kdeg(
-        temp=298.15,  # Example temperature in Kelvin
-        pH=6.5
+    timecourse.free_fit(
+        rg_id=62,
+        db_path='test_output/nerd_dev.sqlite3'
     )
-    print(f"Calculated kdeg: {kdeg:.4f} s^-1 at 25°C and pH 6.5")
+
+    # kdeg = degradation.calc_kdeg(
+    #     temp=298.15,  # Example temperature in Kelvin
+    #     pH=6.5
+    # )
+    # print(f"Calculated kdeg: {kdeg:.4f} s^-1 at 25°C and pH 6.5")

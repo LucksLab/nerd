@@ -43,34 +43,43 @@ def free_fit(rg_id, db_path):
     count = 0
     for nt_id in nt_ids:
         try:
+
             # Fetch timecourse data for this nt_id and rg_id
             time_data, fmod_data = fetch_timecourse_data(db_path, nt_id, rg_id)
 
+            if time_data is None or fmod_data is None:
+                console.print(f"[yellow]Warning:[/yellow] No timecourse data found for rg_id {rg_id}, nt_id {nt_id}. Skipping.")
+                continue
+            elif len(time_data) < 3 or len(fmod_data) < 3:
+                console.print(f"[yellow]Warning:[/yellow] Not enough data points for fitting for rg_id {rg_id}, nt_id {nt_id}. Skipping.")
+                continue
             # Actual fitting
             result, outlier = fit_timecourse(time_data, fmod_data, kdeg0)
-
             # Construct fit_result dict for insertion
             fit_result = {
                 "rg_id": rg_id,
                 "nt_id": nt_id,
                 "kobs_val": result.params["log_kappa"].value,
-                "kobs_err": result.params["log_kappa"].stderr,
+                "kobs_err": result.params["log_kappa"].stderr if result.params["log_kappa"].stderr is not None else -1,
                 "kdeg_val": result.params["log_kdeg"].value,
-                "kdeg_err": result.params["log_kdeg"].stderr,
+                "kdeg_err": result.params["log_kdeg"].stderr if result.params["log_kdeg"].stderr is not None else -1,
                 "fmod0": result.params["log_fmod_0"].value,
-                "fmod0_err": result.params["log_fmod_0"].stderr,
+                "fmod0_err": result.params["log_fmod_0"].stderr if result.params["log_fmod_0"].stderr is not None else -1,
                 "r2": result.rsquared,
                 "chisq": result.chisqr,
                 "time_min": min(time_data),
                 "time_max": max(time_data)
             }
 
+            def fmt(val):
+                return f"{val:.4f}" if val is not None else "None"
+
             console.print(
                 f"[green]✓ Free timecourse fit complete[/green]: "
-                f"kobs = {fit_result['kobs_val']:.4f} ± {fit_result['kobs_err']:.4f}, "
-                f"kdeg = {fit_result['kdeg_val']:.4f} ± {fit_result['kdeg_err']:.4f}, "
-                f"fmod0 = {fit_result['fmod0']:.4f} ± {fit_result['fmod0_err']:.4f}, "
-                f"r² = {fit_result['r2']:.4f}"
+                f"kobs = {fmt(fit_result['kobs_val'])} ± {fmt(fit_result['kobs_err'])}, "
+                f"kdeg = {fmt(fit_result['kdeg_val'])} ± {fmt(fit_result['kdeg_err'])}, "
+                f"fmod0 = {fmt(fit_result['fmod0'])} ± {fmt(fit_result['fmod0_err'])}, "
+                f"r² = {fmt(fit_result['r2'])}"
             )
 
             conn = connect_db(db_path)
@@ -81,10 +90,10 @@ def free_fit(rg_id, db_path):
                 conn.close()
                 return
             else:
-                console.print(f"[green]✓ Database check passed and ready for Arrhenius fit import[/green]")
+                console.print(f"[green]✓ Database check passed and ready for free timecourse fit import[/green]")
 
 
-            console.print(f"[green]✓ Free timecourse fit success [/green]: {fit_result['rsquared']:.4f} R²")
+            console.print(f"[green]✓ Free timecourse fit success [/green]: {fit_result['r2']:.4f} R²")
             insert_success = insert_tc_fit(conn, fit_result)
             count += insert_success
             conn.close()
@@ -94,3 +103,6 @@ def free_fit(rg_id, db_path):
             console.print(f"[yellow]Warning:[/yellow] Free timecourse fit failed: {e}")
 
     console.print(f"[green]✓ Free timecourse fits imported successfully[/green]: {count} fits inserted into the database.")
+
+
+def run()
