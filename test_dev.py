@@ -120,13 +120,18 @@ if __name__ == "__main__":
     #test_all()
     
 
-    timecourse.free_fit(
-        rg_id=62,
-        db_path='test_output/nerd_dev.sqlite3'
-    )
+    # timecourse.free_fit(
+    #     rg_id=62,
+    #     db_path='test_output/nerd_dev.sqlite3'
+    # )
 
     # kdeg = degradation.calc_kdeg(
     #     temp=298.15,  # Example temperature in Kelvin
     #     pH=6.5
     # )
     # print(f"Calculated kdeg: {kdeg:.4f} s^-1 at 25°C and pH 6.5")
+
+    timecourse.mark_samples_to_drop(
+        qc_csv_path='test_data/probing_data/rg_qc_annotations.csv',
+        db_path='test_output/nerd_dev.sqlite3'
+    )

@@ -1,4 +1,4 @@
-# nerd/kinetics/timecourse.py
+#/kinetics/timecourse.py
 
 import pandas as pd
 import numpy as np
@@ -6,8 +6,10 @@ from rich.console import Console
 from lmfit.models import ExponentialModel, ConstantModel
 from nerd.db.io import connect_db, init_db, check_db, insert_tc_fit
 from nerd.utils.fit_models import fit_timecourse 
-from nerd.db.fetch import fetch_all_nt, fetch_timecourse_data, fetch_reaction_temp, fetch_reaction_pH
+from nerd.db.fetch import fetch_all_nt, fetch_timecourse_data, fetch_reaction_temp, fetch_reaction_pH, fetch_all_rg_ids, fetch_rxn_ids, fetch_fmod_val
 from nerd.kinetics.degradation import calc_kdeg
+from nerd.db.update import update_sample_to_drop, update_sample_fmod_val
+import sqlite3
 
 console = Console()
 
@@ -114,53 +116,79 @@ def mark_samples_to_drop(qc_csv_path, db_path):
 
     # Load QC annotations
     qc_annotations = []
-    with open(qc_csv_path, 'r') as f:
+    with open(qc_csv_path, 'r', encoding = 'utf-8-sig') as f:
         reader = csv.DictReader(f)
         for row in reader:
             qc_annotations.append({'rg_id': int(row['rg_id']), 'qc_comment': row['qc_comment']})
-
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
 
     for annotation in qc_annotations:
         rg_id = annotation['rg_id']
         qc_comment = annotation['qc_comment']
 
         # Step 1: Get relevant reactions in the reaction group
-        cursor.execute("""
-            SELECT pr.reaction_time, pr.treated, pr.s_id
-            FROM reaction_groups rg
-            JOIN probing_reactions pr ON rg.rxn_id = pr.id
-            WHERE rg.rg_id = ?
-        """, (rg_id,))
-        results = cursor.fetchall()
+        results = fetch_rxn_ids(db_path, rg_id)
 
         # Multiply treated by reaction time and sort by time
         time_sids = [(rt * treated, s_id) for rt, treated, s_id in results]
         time_sids.sort(key=lambda x: x[0])
         unique_times = sorted(set(t for t, _ in time_sids))
-
+        print(unique_times)
         # Map each unique time to a tp label
         tp_map = {t: f'tp{i}' for i, t in enumerate(unique_times)}
         tp_sids = {tp_map[t]: s_id for t, s_id in time_sids if t in tp_map}
-
+        print(tp_map)
+        print(tp_sids)
         if qc_comment == 'bad_rg':
             s_ids = [s_id for _, s_id in time_sids]
         elif qc_comment.startswith('drop_tp'):
             target_tp = qc_comment.split('_')[1]
             s_ids = [tp_sids.get(target_tp)] if tp_sids.get(target_tp) else []
+        elif qc_comment == 'average_tp2':
+            tp2 = tp_sids.get('tp2')
+            tp3 = tp_sids.get('tp3')
+            if tp2 is None or tp3 is None:
+                console.print(f"[yellow]Warning:[/yellow] tp2 or tp3 missing for rg_id {rg_id}")
+                continue
+
+            result2 = fetch_fmod_val(db_path, tp2)
+            result3 = fetch_fmod_val(db_path, tp3)
+
+            if result2 is None or result3 is None:
+                print(f"[yellow]Warning:[/yellow] Could not retrieve fmod_vals for tp2 or tp3 (rg_id {rg_id})")
+                continue
+
+            val2, rxn_time2 = result2
+            val3, rxn_time3 = result3
+
+            print(result2, result3)
+
+            assert rxn_time2 == rxn_time3, "rxn_times for tp2 and tp3 must match"
+
+            avg_val = (val2 + val3) / 2
+            drop_success = update_sample_to_drop(db_path, tp3, rg_id, qc_comment)
+            update_success = update_sample_fmod_val(db_path, tp2, avg_val)
+
+            if drop_success:
+                print(f"[INFO] Dropped tp3 (s_id {tp3}) for rg_id {rg_id}")
+            else:
+                print(f"[yellow]Warning:[/yellow] Failed to drop tp3 (s_id {tp3}) for rg_id {rg_id}")
+
+            if update_success:
+                print(f"[green]Success:[/green] Updated tp2 (s_id {tp2}) with avg fmod_val {avg_val:.4f}")
+            else:
+                print(f"[yellow]Warning:[/yellow] Failed to update tp2 (s_id {tp2}) for rg_id {rg_id}")
         else:
-            print(f"[WARN] Unknown qc_comment '{qc_comment}' for rg_id {rg_id}")
+            print(f"[yellow]Warning:[/yellow] Unknown qc_comment '{qc_comment}' for rg_id {rg_id}")
             continue
 
         # Mark each s_id in sequencing_samples as to_drop = 1
         for s_id in s_ids:
             if s_id is not None:
-                cursor.execute("UPDATE sequencing_samples SET to_drop = 1 WHERE id = ?", (s_id,))
-                print(f"[INFO] Marked s_id {s_id} (rg_id {rg_id}, {qc_comment}) as to_drop")
-
-    conn.commit()
-    conn.close()
+                update_success = update_sample_to_drop(db_path, s_id, rg_id, qc_comment)
+                if update_success:
+                    print(f"[green]Success:[/green] Marked s_id {s_id} (rg_id {rg_id}, {qc_comment}) as to_drop")
+                else:
+                    print(f"[yellow]Warning:[/yellow] Failed to mark s_id {s_id} (rg_id {rg_id}, {qc_comment}) as to_drop")
 
 
 def run(db_path):

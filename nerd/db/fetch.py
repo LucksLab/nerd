@@ -247,3 +247,59 @@ def fetch_all_rg_ids(db_path: str) -> list:
 
 
     return rg_ids
+
+
+def fetch_rxn_ids(db_path: str, rg_id: int) -> list:
+    """
+    Fetch all reaction IDs associated with a given reaction group ID (rg_id).
+    
+    Args:
+        db_path (str): Path to the database file.
+        rg_id (int): Reaction group ID.
+    
+    Returns:
+        list: List of reaction IDs.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT pr.reaction_time, pr.treated, pr.s_id
+        FROM reaction_groups rg
+        JOIN probing_reactions pr ON rg.rxn_id = pr.id
+        WHERE rg.rg_id = ?
+    """, (rg_id,))
+    results = cursor.fetchall()
+        
+    conn.close()
+    
+    return results
+
+def fetch_fmod_val(db_path: str, s_id: int) -> Optional[tuple]:
+    """
+    Fetch the fmod_val for a given sequencing sample ID (s_id).
+    
+    Args:
+        db_path (str): Path to the database file.
+        s_id (int): Sequencing sample ID.
+    
+    Returns:
+        Optional[float]: The fmod_val if found, otherwise None.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT fmod_val, pr.reaction_time
+        FROM fmod_vals
+        JOIN probing_reactions pr ON fmod_vals.rxn_id = pr.id
+        WHERE pr.s_id = ?
+    """, (s_id,))
+    
+    result = cursor.fetchone()
+    conn.close()
+    
+    if result:
+        return result  # Return fmod_val and reaction_time
+    else:
+        return None
