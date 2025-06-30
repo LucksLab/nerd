@@ -2,7 +2,7 @@ from nerd.importers import fmod_calc, probing_sample, nmr
 from nerd.kinetics import degradation, adduction, arrhenius, timecourse
 #from nerd.energy import meltfit, calc_K
 from nerd.db import io
-
+from nerd.utils import plotting
 
 # === Paths to example input files ===
 SAMPLE_SHEET = "test_data/sample_sheet.csv"
@@ -135,3 +135,7 @@ if __name__ == "__main__":
         qc_csv_path='test_data/probing_data/rg_qc_annotations.csv',
         db_path='test_output/nerd_dev.sqlite3'
     )
+
+    # timecourse.plot_all_aggregated_timecourses(
+    #     db_path='test_output/nerd_dev.sqlite3'
+    # )

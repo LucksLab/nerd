@@ -1,9 +1,10 @@
-# nerd/utils/plotting.py
-
 import matplotlib.pyplot as plt
 from rich.table import Table
 from rich.console import Console
 import numpy as np
+from nerd.db.fetch import fetch_timecourse_records
+import pandas as pd
+import sqlite3
 
 console = Console()
 
@@ -79,26 +80,11 @@ def display_fit_params(result, title="Fit Results"):
     console.print(table)
 
 
-def plot_aggregate_timecourse(rg_id, rxns_to_remove):
-    db_path = '/projects/b1044/Computational_Output/EKC/EKC.01_SHAPE_standardization/EKC.01.060.developing_DB_input/new.db'
-    # Define the query to get fmod_val and reaction_time with a join between the necessary tables
-    query = f"""
-        SELECT fv.fmod_val, pr.reaction_time, n.site, n.base, pr.treated, fv.read_depth, pr.RT, fv.valtype, pr.temperature, c.disp_name, rg.rg_id, pr.buffer_id, sr.id
-        FROM probing_reactions pr
-        JOIN fmod_vals fv ON pr.id = fv.rxn_id
-        JOIN nucleotides n ON fv.nt_id = n.id
-        JOIN constructs c ON pr.construct_id = c.id
-        JOIN sequencing_samples ss ON pr.s_id = ss.id
-        JOIN reaction_groups rg ON rg.rxn_id = pr.id
-        JOIN sequencing_runs sr on ss.seqrun_id = sr.id
-        WHERE rg.rg_id = {rg_id}
-        AND fv.fmod_val IS NOT NULL
-    """
-
-    # Import data into dataframe
-    conn = sqlite3.connect(db_path)
-    rg_df = pd.read_sql(query, conn)
-    conn.close()
+def plot_aggregate_timecourse(rg_id, db_path):
+    columns = ['fmod_val', 'reaction_time', 'site', 'base', 'treated', 'read_depth', 'RT', 'valtype',
+               'temperature', 'disp_name', 'rg_id', 'buffer_id', 'id']
+    data = fetch_timecourse_records(db_path, rg_id)
+    rg_df = pd.DataFrame(data, columns=columns)
     # Filter RT == 'MRT' and valtype == 'modrate'
     rg_df = rg_df[(rg_df['RT'] == 'MRT') & (rg_df['valtype'] == 'modrate')]
 
@@ -124,43 +110,19 @@ def plot_aggregate_timecourse(rg_id, rxns_to_remove):
     rg_df_grouped['adjust_factor'] =  temp_mode.values[0] / rg_df_grouped['temperature']
     rg_df_grouped['adj_fmod_val'] = rg_df_grouped['fmod_val'] * rg_df_grouped['adjust_factor']
 
-    # apply comment
-    if rg_id not in rg_qc_comments:
-        print(f'rg {rg_id} passed manual qc')
-    else:
-        print(f'rg {rg_id} failed manual qc')
-        qc_comment = rg_qc_comments[rg_id].split(',')
-        print(qc_comment)
-
-        mask = len(rg_df_grouped) * [1]
-        for comment in qc_comment:
-            print(comment)
-            if 'drop' in comment:
-                which_tp = int(comment.split('drop_tp')[1])
-                print(which_tp)
-                mask[which_tp] = 0
-            elif 'average_tp2' in comment:
-                reaction_times_with_counts = rg_df_grouped['reaction_time'].value_counts()
-                reaction_times_with_counts = reaction_times_with_counts[reaction_times_with_counts > 1]
-                print(reaction_times_with_counts)
-        print(mask)
-        # apply mask
-        rg_df_grouped['mask'] = mask
-
-        # filter mask
-        rg_df_filtered = rg_df_grouped[rg_df_grouped['mask'] == 0]
-        rxns_to_remove[rg_id] = list(rg_df_filtered['reaction_time'])
-        rg_df_grouped = rg_df_grouped[rg_df_grouped['mask'] == 1]
-        # filtered data
     
     fig, ax = plt.subplots(figsize=(5, 3))
     plt.scatter(rg_df_grouped['reaction_time'], rg_df_grouped['adj_fmod_val'])
-    try:
-        plt.scatter(rg_df_filtered['reaction_time'], rg_df_filtered['adj_fmod_val'], color='red', marker='x')
-    except:
-        pass
+    # try:
+    #     plt.scatter(rg_df_filtered['reaction_time'], rg_df_filtered['adj_fmod_val'], color='red', marker='x')
+    # except:
+    #     pass
     plt.xlabel('Reaction Time (s)')
     plt.ylabel('Fraction Modified')
     plt.title(f'rg {rg_id} - {construct[0]} - temp {temp[0]} C - buff{buffer[0]}')
-    plt.show()
-    return rg_df, rg_df_grouped, rxns_to_remove
+    # create directory if it does not exist f'test_output/plots/aggregate_timecourses'
+    import os
+    os.makedirs('test_output/plots/aggregate_timecourses', exist_ok=True)
+    
+    plt.savefig(f'test_output/plots/aggregate_timecourses/rg_{rg_id}_agg_timecourse.png', bbox_inches='tight')
+    return

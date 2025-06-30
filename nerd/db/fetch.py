@@ -1,5 +1,3 @@
-# nerd/db/fetch.py
-
 import sqlite3
 from pathlib import Path
 from nerd.db.schema import ALL_TABLES
@@ -275,9 +273,9 @@ def fetch_rxn_ids(db_path: str, rg_id: int) -> list:
     
     return results
 
-def fetch_fmod_val(db_path: str, s_id: int) -> Optional[tuple]:
+def fetch_fmod_vals(db_path: str, s_id: int) -> Optional[tuple]:
     """
-    Fetch the fmod_val for a given sequencing sample ID (s_id).
+    Fetch all fmod_vals for a given sequencing sample ID (s_id).
     
     Args:
         db_path (str): Path to the database file.
@@ -296,10 +294,41 @@ def fetch_fmod_val(db_path: str, s_id: int) -> Optional[tuple]:
         WHERE pr.s_id = ?
     """, (s_id,))
     
-    result = cursor.fetchone()
+    result = cursor.fetchall()
     conn.close()
     
     if result:
         return result  # Return fmod_val and reaction_time
     else:
         return None
+
+def fetch_timecourse_records(db_path: str, rg_id: int) -> list:
+    """
+    Fetch raw timecourse records for a given reaction group ID.
+
+    Args:
+        db_path (str): Path to the SQLite database.
+        rg_id (int): Reaction group ID.
+
+    Returns:
+        list: List of tuples for each record.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT fv.fmod_val, pr.reaction_time, n.site, n.base, pr.treated,
+               fv.read_depth, pr.RT, fv.valtype, pr.temperature,
+               c.disp_name, rg.rg_id, pr.buffer_id, sr.id
+        FROM probing_reactions pr
+        JOIN fmod_vals fv ON pr.id = fv.rxn_id
+        JOIN nucleotides n ON fv.nt_id = n.id
+        JOIN constructs c ON pr.construct_id = c.id
+        JOIN sequencing_samples ss ON pr.s_id = ss.id
+        JOIN reaction_groups rg ON rg.rxn_id = pr.id
+        JOIN sequencing_runs sr ON ss.seqrun_id = sr.id
+        WHERE rg.rg_id = ?
+        AND fv.fmod_val IS NOT NULL
+    """, (rg_id,))
+    records = cursor.fetchall()
+    conn.close()
+    return records
