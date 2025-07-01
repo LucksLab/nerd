@@ -195,11 +195,11 @@ def insert_seq_sample(conn, sample_data: dict):
     conn.commit()
     return cursor.rowcount > 0
 
-def insert_tc_fit(conn, fit_data: dict):
+def insert_tc_fit(conn, fit_data: dict, insert_to_table: str):
 
     cursor = conn.cursor()
-    cursor.execute("""
-        INSERT OR IGNORE INTO free_tc_fits (
+    cursor.execute(f"""
+        INSERT OR IGNORE INTO {insert_to_table} (
             rg_id, nt_id,
             kobs_val, kobs_err,
             kdeg_val, kdeg_err,

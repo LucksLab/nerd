@@ -52,7 +52,7 @@ def global_fit_probing(rg_id: int, db_path: str):
 
     return None
 
-def run(all_samples: list, select_id: list = [], db_path: str):
+def run(all_samples: list, select_id: list = [], db_path: str  = '.'):
     """
     Main CLI entrypoint: fits degradation kinetics and stores result to DB.
     """

@@ -238,7 +238,13 @@ def fetch_all_rg_ids(db_path: str) -> list:
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    cursor.execute("SELECT DISTINCT rg_id FROM reaction_groups")
+    cursor.execute("""
+        SELECT DISTINCT reaction_groups.rg_id 
+        FROM reaction_groups
+        JOIN probing_reactions pr ON reaction_groups.rxn_id = pr.id
+        JOIN sequencing_samples ss ON pr.s_id = ss.id
+        WHERE ss.to_drop = 0
+    """)
     rg_ids = [row[0] for row in cursor.fetchall()]
     
     conn.close()
@@ -265,7 +271,8 @@ def fetch_rxn_ids(db_path: str, rg_id: int) -> list:
         SELECT pr.reaction_time, pr.treated, pr.s_id
         FROM reaction_groups rg
         JOIN probing_reactions pr ON rg.rxn_id = pr.id
-        WHERE rg.rg_id = ?
+        JOIN sequencing_samples ss ON pr.s_id = ss.id
+        WHERE rg.rg_id = ? AND ss.to_drop = 0
     """, (rg_id,))
     results = cursor.fetchall()
         
@@ -460,3 +467,34 @@ def fetch_dataset_freefit_params(db_path: str, rg_id: int, nt_ids: list) -> tupl
     fmod0_array = [record[2] for record in records]
     
     return kappa_array, kdeg_array, fmod0_array
+
+
+def fetch_global_kdeg_val(db_path: str, rg_id: int, model: str, species: str) -> float:
+    """
+    Fetch the global kdeg value for a given reaction group ID (rg_id).
+    
+    Args:
+        db_path (str): Path to the database file.
+        rg_id (int): Reaction group ID.
+    
+    Returns:
+        float: Global kdeg value.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT k_value
+        FROM probing_kinetic_rates
+        WHERE rg_id = ?
+        AND model = ?
+        AND species = ?
+    """, (rg_id, model, species))
+
+    result = cursor.fetchone()
+    conn.close()
+    
+    if result:
+        return result[0]
+    else:
+        raise ValueError(f"No global kdeg value found for rg_id {rg_id}")

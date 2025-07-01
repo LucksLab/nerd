@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS free_tc_fits (
 
 # === Table: constrained_tc_deg_fits ===
 CREATE_CONSTRAINED_TC_FITS = """ 
-CREATE TABLE IF NOT EXISTS constrained_tc_deg_fits (
+CREATE TABLE IF NOT EXISTS constrained_tc_fits (
     id INTEGER NOT NULL UNIQUE,                      -- Primary key for this table
     rg_id INTEGER NOT NULL,                          -- Foreign key to reaction_groups table
     nt_id INTEGER NOT NULL,                          -- Foreign key to nucleotides table
@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS constrained_tc_deg_fits (
     kdeg_val REAL NOT NULL,                          -- Degradation rate constant value (global fit)
     kdeg_err REAL NOT NULL,                          -- Error in degradation rate constant (global fit)
     fmod0 REAL NOT NULL,                             -- Initial fraction modified (global fit)
-    fmod_err REAL NOT NULL,                          -- Error in initial fraction modified (global fit)
+    fmod0_err REAL NOT NULL,                          -- Error in initial fraction modified (global fit)
     r2 REAL NOT NULL,                                -- R-squared value of the fit
     chisq REAL NOT NULL,                             -- Chi-squared value of the fit
     time_min REAL NOT NULL,                          -- Minimum time (in seconds) used in fit

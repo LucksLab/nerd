@@ -7,6 +7,7 @@ from lmfit.models import ExponentialModel, ConstantModel, LinearModel
 import numpy as np
 from scipy.integrate import solve_ivp
 from lmfit import Parameters, minimize
+from typing import Optional
 
 # === Exponential decay (degradation) ===
 def fit_exp_decay(x, y):
@@ -149,33 +150,35 @@ def fit_timecourse(time_data, fmod_data, kdeg0, constrained_kdeg = None):
     # Create parameters for the model
     params = model.make_params(
         log_kappa = np.log(kappa0), 
-        log_kdeg = np.log(kdeg0), 
         log_fmod_0 = np.log(fmod_00)
     )
-    
-    # Constrain kdeg if specified (for refitting with globa kdeg)
-    if constrained_kdeg is not None:
+
+    # constrained kdeg if specified
+    if constrained_kdeg:
+        params.add('log_kdeg', value = kdeg0, vary = False)
+    else:
         # this value is log already
-        params['log_kdeg'].set(value = constrained_kdeg, vary=False)
+        params.add('log_kdeg', value = np.log(kdeg0), vary = True)
 
     # Fit the model to the data
     result = model.fit(fmod_data, params, x = time_data)
     
+    outlier = None
     # OUTLIER MECHANISM Remove outlier outside of 1.5σ and refit (CURRENTLY DISABLED)
-    outlier = np.abs(result.residual) > 1000 * np.std(result.residual)
+    # outlier = np.abs(result.residual) > 1000 * np.std(result.residual)
     
-    if sum(outlier) > 0:
-        time_data = time_data[~outlier]
-        fmod_data = fmod_data[~outlier]
+    # if sum(outlier) > 0:
+    #     time_data = time_data[~outlier]
+    #     fmod_data = fmod_data[~outlier]
     
-        # Initial values = values from previous fit
-        params = model.make_params(
-            log_kappa=result.best_values['log_kappa'], 
-            log_kdeg=result.best_values['log_kdeg'], 
-            log_fmod_0=result.best_values['log_fmod_0']
-        )
+    #     # Initial values = values from previous fit
+    #     params = model.make_params(
+    #         log_kappa=result.best_values['log_kappa'], 
+    #         log_kdeg=result.best_values['log_kdeg'], 
+    #         log_fmod_0=result.best_values['log_fmod_0']
+    #     )
         
-        result = model.fit(fmod_data, params, x=time_data)
+    #     result = model.fit(fmod_data, params, x=time_data)
 
     return result, outlier
 
@@ -188,10 +191,9 @@ from lmfit import Parameters, minimize
 # Create parameters from arrays
 def create_params(kappa_array, kdeg_array, fmod0_array):
     fit_params = Parameters()
-
     # Ensure kdeg_array contains only positive values to avoid NaN
     log_kdeg_global = np.array(kdeg_array).mean()
-
+    # calc from NMR
 
     for i in range(len(kappa_array)):
         log_kappa = kappa_array[i]
@@ -236,7 +238,8 @@ def objective(params, x, data):
     return resid.flatten()
 
 # Global fitting entry point
-def global_fit_timecourse(time_data_array, fmod_data_array, kappa_array, kdeg_array, fmod0_array):
+def global_fit_timecourse(time_data_array, fmod_data_array, kappa_array, kdeg_array, fmod0_array) -> Optional[tuple]:
+
     global_params = create_params(kappa_array, kdeg_array, fmod0_array)
     x_data, y_dataset = create_dataset(time_data_array, fmod_data_array)
 

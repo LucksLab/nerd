@@ -3,10 +3,12 @@
 import pandas as pd
 import numpy as np
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
+
 from lmfit.models import ExponentialModel, ConstantModel
 from nerd.db.io import connect_db, init_db, check_db, insert_tc_fit, insert_fitted_probing_kinetic_rate
 from nerd.utils.fit_models import fit_timecourse, global_fit_timecourse
-from nerd.db.fetch import fetch_all_nt, fetch_timecourse_data, fetch_reaction_temp, fetch_reaction_pH, fetch_all_rg_ids, fetch_rxn_ids, fetch_fmod_vals, fetch_filtered_freefit_sites, fetch_dataset_freefit_params, fetch_dataset_fmods
+from nerd.db.fetch import fetch_all_nt, fetch_timecourse_data, fetch_reaction_temp, fetch_reaction_pH, fetch_all_rg_ids, fetch_rxn_ids, fetch_fmod_vals, fetch_filtered_freefit_sites, fetch_dataset_freefit_params, fetch_dataset_fmods, fetch_global_kdeg_val
 from nerd.kinetics.degradation import calc_kdeg
 from nerd.db.update import update_sample_to_drop, update_sample_fmod_val
 import sqlite3
@@ -26,100 +28,112 @@ def plot_all_aggregated_timecourses(db_path):
         except Exception as e:
             console.print(f"[red]Error plotting aggregated fit for rg_id {rg_id}:[/red] {e}")
 
-def free_fit(rg_id, db_path):
+
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
+
+console = Console()
+
+def single_fit(rg_id, db_path, constrained_kdeg=False):
     """
     Free fit to a rg_id, loops over each site
     """
 
     REQUIRED_COLUMNS = [
-        "rg_id",        # Foreign key to reaction_groups table
-        "nt_id",        # Foreign key to nucleotides table
-        "kobs_val",     # Observed rate constant value
-        "kobs_err",     # Error in observed rate constant
-        "kdeg_val",     # Degradation rate constant value
-        "kdeg_err",     # Error in degradation rate constant
-        "fmod0",        # Initial fraction modified
-        "fmod0_err",    # Error in initial fraction modified
-        "r2",           # R-squared value of the fit
-        "chisq",        # Chi-squared value of the fit
-        "time_min",     # Minimum time (in seconds) used in fit
-        "time_max"      # Maximum time (in seconds) used in fit
+        "rg_id", "nt_id", "kobs_val", "kobs_err",
+        "kdeg_val", "kdeg_err", "fmod0", "fmod0_err",
+        "r2", "chisq", "time_min", "time_max"
     ]
-
-    # Guess kdeg0 using NMR deg with closest pH
 
     temp = fetch_reaction_temp(db_path, rg_id)
     pH = fetch_reaction_pH(db_path, rg_id)
-    kdeg0 = calc_kdeg(temp, pH)
 
-    # Fetch all nt (nt_ids)
+    console.print()
+    if constrained_kdeg:
+        kdeg0 = fetch_global_kdeg_val(db_path, rg_id, "global_deg", "dms")
+        console.print(f"[blue]Using constrained kdeg value from probing_kinetic_rates table: {kdeg0:.4f} s^-1[/blue]")
+        fit_mode = "Constrained kdeg"
+        insert_to_table = "constrained_tc_fits"
+    else:
+        kdeg0 = calc_kdeg(temp, pH, db_path)
+        console.print(f"[blue]Using calculated kdeg value from NMR: {kdeg0:.4f} s^-1[/blue]")
+        fit_mode = "Free"
+        insert_to_table = "free_tc_fits"
+    console.print()
+
     nt_ids = fetch_all_nt(db_path, rg_id)
-
     count = 0
-    for nt_id in nt_ids:
-        try:
 
-            # Fetch timecourse data for this nt_id and rg_id
-            time_data, fmod_data = fetch_timecourse_data(db_path, nt_id, rg_id)
+    with Progress(
+        SpinnerColumn(),
+        "[progress.description]{task.description}",
+        BarColumn(),
+        "[progress.percentage]{task.percentage:>3.0f}%",
+        TimeElapsedColumn(),
+        console=console
+    ) as progress:
+        task = progress.add_task(f"Fitting {len(nt_ids)} nts in rg_id {rg_id}...", total=len(nt_ids))
 
-            if time_data is None or fmod_data is None:
-                console.print(f"[yellow]Warning:[/yellow] No timecourse data found for rg_id {rg_id}, nt_id {nt_id}. Skipping.")
-                continue
-            elif len(time_data) < 3 or len(fmod_data) < 3:
-                console.print(f"[yellow]Warning:[/yellow] Not enough data points for fitting for rg_id {rg_id}, nt_id {nt_id}. Skipping.")
-                continue
-            # Actual fitting
-            result, outlier = fit_timecourse(time_data, fmod_data, kdeg0)
-            # Construct fit_result dict for insertion
-            fit_result = {
-                "rg_id": rg_id,
-                "nt_id": nt_id,
-                "kobs_val": result.params["log_kappa"].value,
-                "kobs_err": result.params["log_kappa"].stderr if result.params["log_kappa"].stderr is not None else -1,
-                "kdeg_val": result.params["log_kdeg"].value,
-                "kdeg_err": result.params["log_kdeg"].stderr if result.params["log_kdeg"].stderr is not None else -1,
-                "fmod0": result.params["log_fmod_0"].value,
-                "fmod0_err": result.params["log_fmod_0"].stderr if result.params["log_fmod_0"].stderr is not None else -1,
-                "r2": result.rsquared,
-                "chisq": result.chisqr,
-                "time_min": min(time_data),
-                "time_max": max(time_data)
-            }
+        for nt_id in nt_ids:
+            try:
+                time_data, fmod_data = fetch_timecourse_data(db_path, nt_id, rg_id)
 
-            def fmt(val):
-                return f"{val:.4f}" if val is not None else "None"
+                if time_data is None or fmod_data is None:
+                    console.print(f"  [yellow]Warning:[/yellow] No timecourse data for rg_id {rg_id}, nt_id {nt_id}. Skipping.")
+                    progress.advance(task)
+                    continue
+                elif len(time_data) < 3:
+                    console.print(f"  [yellow]Warning:[/yellow] Not enough data for rg_id {rg_id}, nt_id {nt_id}. Skipping.")
+                    progress.advance(task)
+                    continue
 
-            console.print(
-                f"[green]✓ Free timecourse fit complete[/green]: "
-                f"kobs = {fmt(fit_result['kobs_val'])} ± {fmt(fit_result['kobs_err'])}, "
-                f"kdeg = {fmt(fit_result['kdeg_val'])} ± {fmt(fit_result['kdeg_err'])}, "
-                f"fmod0 = {fmt(fit_result['fmod0'])} ± {fmt(fit_result['fmod0_err'])}, "
-                f"r² = {fmt(fit_result['r2'])}"
-            )
+                result, outlier = fit_timecourse(time_data, fmod_data, kdeg0, constrained_kdeg)
 
-            conn = connect_db(db_path)
+                fit_result = {
+                    "rg_id": rg_id,
+                    "nt_id": nt_id,
+                    "kobs_val": result.params["log_kappa"].value,
+                    "kobs_err": result.params["log_kappa"].stderr or -1,
+                    "kdeg_val": result.params["log_kdeg"].value,
+                    "kdeg_err": result.params["log_kdeg"].stderr or -1,
+                    "fmod0": result.params["log_fmod_0"].value,
+                    "fmod0_err": result.params["log_fmod_0"].stderr or -1,
+                    "r2": result.rsquared,
+                    "chisq": result.chisqr,
+                    "time_min": min(time_data),
+                    "time_max": max(time_data)
+                }
 
-            # Check if the database is initialized and has the required columns
-            if not check_db(conn, "free_tc_fits", REQUIRED_COLUMNS):
-                console.print(f"[red]Error:[/red] Database initialization failed or missing required columns.")
+                def fmt(val): return f"{val:.4f}" if val is not None else "None"
+
+                console.print(
+                    f"  [green]✓ Fit[/green] nt_id {nt_id}: "
+                    f"kobs = {fmt(fit_result['kobs_val'])} ± {fmt(fit_result['kobs_err'])}, "
+                    f"kdeg = {fmt(fit_result['kdeg_val'])} ± {fmt(fit_result['kdeg_err'])}, "
+                    f"fmod0 = {fmt(fit_result['fmod0'])} ± {fmt(fit_result['fmod0_err'])}, "
+                    f"r² = {fmt(fit_result['r2'])}"
+                )
+
+                conn = connect_db(db_path)
+                if not check_db(conn, insert_to_table, REQUIRED_COLUMNS):
+                    console.print(f"  [red]Error:[/red] Database missing required columns.")
+                    conn.close()
+                    return
+                else:
+                    console.print(f"  [green]✓ DB ready for {fit_mode} import[/green]")
+
+                insert_success = insert_tc_fit(conn, fit_result, insert_to_table)
+                count += insert_success
                 conn.close()
-                return
-            else:
-                console.print(f"[green]✓ Database check passed and ready for free timecourse fit import[/green]")
 
+            except Exception as e:
+                console.print(f"  [yellow]Warning:[/yellow] {fit_mode} fit failed for nt_id {nt_id}: {e}")
+            finally:
+                progress.advance(task)
 
-            console.print(f"[green]✓ Free timecourse fit success [/green]: {fit_result['r2']:.4f} R²")
-            insert_success = insert_tc_fit(conn, fit_result)
-            count += insert_success
-            conn.close()
-
-
-        except Exception as e:
-            console.print(f"[yellow]Warning:[/yellow] Free timecourse fit failed: {e}")
-
-    console.print(f"[green]✓ Free timecourse fits imported successfully[/green]: {count} fits inserted into the database.")
-
-
+    console.rule(f"[bold green]✓ {fit_mode} timecourse fits imported[/bold green]")
+    console.print(f"[bold green]{count} fits inserted into the database.[/bold green]")
+    console.print()
 
 def mark_samples_to_drop(qc_csv_path, db_path):
     """
@@ -225,71 +239,107 @@ def global_fit(rg_id, db_path, mode):
     # Mode 1: all nucleotides with R2 > threshold
     # Mode 2: A's and C's with R2 > threshold
 
-    if mode == 'all':
-        select_nts = fetch_filtered_freefit_sites(db_path, rg_id, bases = [], r2_thres = 0.8)
-    elif mode == 'ac_only':
-        select_nts = fetch_filtered_freefit_sites(db_path, rg_id, bases = ['A', 'C'], r2_thres = 0.8)
-    else:
-        raise ValueError(f"Invalid mode: {mode}. Use 'all' or 'ac_only'.")
-    
-    if not select_nts:
-        console.print(f"[yellow]Warning:[/yellow] No suitable nucleotides found for global fitting in rg_id {rg_id} with mode {mode}.")
+    try:
+
+        if mode == 'all':
+            select_nts = fetch_filtered_freefit_sites(db_path, rg_id, bases = [], r2_thres = 0.8)
+        elif mode == 'ac_only':
+            select_nts = fetch_filtered_freefit_sites(db_path, rg_id, bases = ['A', 'C'], r2_thres = 0.8)
+        else:
+            raise ValueError(f"Invalid mode: {mode}. Use 'all' or 'ac_only'.")
+        
+        if not select_nts:
+            console.print(f"[yellow]Warning:[/yellow] No suitable nucleotides found for global fitting in rg_id {rg_id} with mode {mode}.")
+            return None
+        console.print(f"[blue]Selected nucleotides for global fitting in rg_id {rg_id} ({mode} mode): {select_nts}[/blue]")
+        # Fetch initial guess parameters for global fit
+        # kappa, kdeg, fmod0
+        kappa_array, kdeg_array, fmod0_array = fetch_dataset_freefit_params(db_path, rg_id, select_nts) # for use initial guess
+        temp = fetch_reaction_temp(db_path, rg_id)
+        pH = fetch_reaction_pH(db_path, rg_id)
+
+        # if want to use nmr,
+        #kdeg0 = np.log(calc_kdeg(temp, pH, db_path))
+
+        # change kdeg_array to be the same value for all sites
+        #kdeg_array = [kdeg0] * len(kdeg_array)  # needs to be in log scale
+
+        # time and fmod data for global fit
+        time_data_array, fmod_data_array = fetch_dataset_fmods(db_path, rg_id, select_nts)
+
+        # check if all lens are the same across all arrays (kappa, kdeg, fmod0, time, fmod)
+        if not (len(kappa_array) == len(kdeg_array) == len(fmod0_array) == len(time_data_array) == len(fmod_data_array)):
+            console.print("[red]Error:[/red] Length mismatch in arrays for global fit. Please check the data.")
+            return None
+
+        console.print(f"[blue]Global fitting with {len(kappa_array)} nucleotides selected...[/blue]")
+
+
+
+        # perform global fit
+        kdeg_val, kdeg_err, chiseq, r2 = global_fit_timecourse(time_data_array, fmod_data_array, kappa_array, kdeg_array, fmod0_array)
+
+        console.print(f"[green]✓ Global fit for rg_id {rg_id} completed successfully[/green]: "
+                      f"kdeg = {kdeg_val:.4f} ± {kdeg_err:.4f}, "
+                      f"chisq = {chiseq:.4f}, r² = {r2:.4f}")
+        
+        # insert kdeg val to probing_kinetic_rates table
+        fit_result = {
+            "rg_id": rg_id,
+            "model": "global_deg",
+            "k_value": kdeg_val,
+            "k_error": kdeg_err,
+            "chisq": chiseq,
+            "r2": r2,
+            "species": "dms"
+        }
+
+        conn = connect_db(db_path)
+        insert_success = insert_fitted_probing_kinetic_rate(conn, fit_result)
+        conn.close()
+        if insert_success:
+            console.print(f"[green]✓ Global fit for rg_id {rg_id} inserted successfully[/green]")
+        else:
+            console.print(f"[red]Error:[/red] Failed to insert global fit for rg_id {rg_id}")
+            
+    except Exception as e:
+        console.print(f"[yellow]Warning: Error during global fit or insert for rg_id {rg_id}:[/yellow] {e}")
         return None
-    console.print(f"[blue]Selected nucleotides for global fitting in rg_id {rg_id} ({mode} mode): {select_nts}[/blue]")
-    # Fetch initial guess parameters for global fit
-    # kappa, kdeg, fmod0
-    kappa_array, kdeg_array, fmod0_array = fetch_dataset_freefit_params(db_path, rg_id, select_nts) # for use initial guess
-    
-    # time and fmod data for global fit
-    time_data_array, fmod_data_array = fetch_dataset_fmods(db_path, rg_id, select_nts)
-
-    # check if all lens are the same across all arrays (kappa, kdeg, fmod0, time, fmod)
-    if not (len(kappa_array) == len(kdeg_array) == len(fmod0_array) == len(time_data_array) == len(fmod_data_array)):
-        console.print("[red]Error:[/red] Length mismatch in arrays for global fit. Please check the data.")
-        return None
-
-    console.print(f"[blue]Global fitting with {len(kappa_array)} nucleotides selected...[/blue]")
-
-    # perform global fit
-    kdeg_val, kdeg_err, chiseq, r2 = global_fit_timecourse(time_data_array, fmod_data_array, kappa_array, kdeg_array, fmod0_array)
-
-    # insert kdeg val to probing_kinetic_rates table
-    fit_result = {
-        "rg_id": rg_id,
-        "model": "global_deg",
-        "k_value": kdeg_val,
-        "k_error": kdeg_err,
-        "chisq": chiseq,
-        "r2": r2,
-        "species": "dms"
-    }
-
-    conn = connect_db(db_path)
-    insert_success = insert_fitted_probing_kinetic_rate(conn, fit_result)
-    conn.close()
-
-    if insert_success:
-        console.print(f"[green]✓ Global fit for rg_id {rg_id} completed successfully[/green]: kdeg = {kdeg_val:.4f} ± {kdeg_err:.4f} s^-1, R² = {r2:.4f}, χ² = {chiseq:.4f}")
-        return kdeg_val, kdeg_err
-    else:
-        console.print(f"[red]Error:[/red] Failed to insert global fit result for rg_id {rg_id} into the database.")
-
-    return None
 
 def run(db_path):
     """
     Main CLI entrypoint: fits free timecourse data and stores result to DB.
     """
     console.print("[blue]Running free timecourse fits...[/blue]")
-    
+
     all_rg_ids = fetch_all_rg_ids(db_path)
 
     for rg_id in all_rg_ids:
+        # Step 0: Mark samples to drop based on QC annotations
+        try:
+            mark_samples_to_drop(qc_csv_path='test_data/probing_data/rg_qc_annotations.csv', db_path=db_path)
+        except Exception as e:
+            console.print(f"[red]Error marking samples to drop for rg_id {rg_id}:[/red] {e}")
+            continue
+
         console.print(f"[blue]Processing reaction group ID:[/blue] {rg_id}")
         
+        # Step 1: free fit
         try:
-            free_fit(rg_id, db_path)
+            single_fit(rg_id, db_path)
         except Exception as e:
             console.print(f"[red]Error processing rg_id {rg_id}:[/red] {e}")
+        
+        # Step 2: global deg fit
+        try:
+            global_fit(rg_id, db_path, mode='all')
+        except Exception as e:
+            console.print(f"[red]Error performing global fit for rg_id {rg_id}:[/red] {e}")
+
+        # Step 3: refit with constrained kdeg
+        try:
+            single_fit(rg_id, db_path, constrained_kdeg=True)
+        except Exception as e:
+            console.print(f"[red]Error refitting with constrained kdeg for rg_id {rg_id}:[/red] {e}")
 
     console.print("[green]✓ Free timecourse fits completed successfully[/green]")
