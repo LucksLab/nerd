@@ -23,14 +23,14 @@ def fit_exp_decay(x, y):
     return result
 
 # === Linear fit (Arrhenius) ===
-def fit_linear(x, y):
+def fit_linear(x, y, weights = None):
     """
     Fit a linear model to the data.
     y = m * x + b
     """
     model = LinearModel()
     params = model.guess(y, x=x)
-    result = model.fit(y, params, x=x)
+    result = model.fit(y, params, x=x, weights=weights)
     return result
 
 # === ODE fit (NTP adduction) ===

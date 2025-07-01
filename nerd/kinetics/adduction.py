@@ -106,7 +106,7 @@ def run(all_samples: list, select_id: list = [], db_path: str = ''):
                 console.print(f"[green]✓ Database check passed and ready for NMR import[/green]")
 
             # Fit the kinetic trace
-            k, k_err, rsq, chisq = fit_kinetic_trace(peak_perc_csv, dms_perc_csv, ntp_conc)
+            k, k_err, rsq, chisq = fit_kinetic_trace(str(peak_perc_csv), str(dms_perc_csv), ntp_conc)
             console.print(f"[green]✓ Fit complete[/green]: k = {k:.4f} ± {k_err:.4f}, R² = {rsq:.4f}, χ² = {chisq:.4f}")
 
             # Prepare reaction metadata

@@ -50,9 +50,13 @@ def run(reaction_type="deg", data_source="nmr", species = "dms",
         data = rows_to_dicts(data, description)
         x_vals = np.array([1 / r["temperature"] for r in data])
         y_vals = np.array([np.log(r["k_value"]) for r in data])
+        y_errs = np.array([r["k_error"] / r["k_value"] for r in data]) if "k_error" in description else None
+        weights = 1 / y_errs**2 if y_errs is not None else None
+    
+    # elif data_source == "probing":
 
     try:
-        result = fit_linear(x_vals, y_vals)
+        result = fit_linear(x_vals, y_vals, weights = weights)
 
         slope = result.params["slope"].value
         slope_err = result.params["slope"].stderr
