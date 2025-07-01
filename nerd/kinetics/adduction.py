@@ -4,7 +4,9 @@ import pandas as pd
 from pathlib import Path
 from rich.console import Console
 from nerd.db.io import connect_db, insert_fitted_kinetic_rate, check_db
+from nerd.utils.param_aggregation import process_aggregation
 from nerd.utils.fit_models import fit_ODE_probe
+from nerd.db.fetch import fetch_melted_probing_data
 
 console = Console()
 
@@ -19,7 +21,7 @@ REQUIRED_COLUMNS = [
     "species",          # Species for which the rate is calculated (e.g. "dms", "atp-c8", etc.)
 ]
 
-def fit_kinetic_trace(peak_perc_csv: str, dms_perc_csv: str, ntp_conc: float = None):
+def fit_kinetic_trace(peak_perc_csv: str, dms_perc_csv: str, ntp_conc: float):
     """
     Fit adduction kinetics from 2 CSV file containing time and fraction_species 
     data for DMS and some reporter atom for NTP (ex. C8 for ATP).
@@ -44,8 +46,24 @@ def fit_kinetic_trace(peak_perc_csv: str, dms_perc_csv: str, ntp_conc: float = N
 
     return k, k_err, r2, chisq
 
+def process_param_aggregation():
 
-def run(all_samples: list, select_id: list = None, db_path: str = None):
+    # Fetch all fitted kobs params (melted temps >60C)
+    try:
+        result = fetch_melted_probing_data(
+            db_path='test_output/nerd_dev.sqlite3',
+            temp_thres=60
+            )
+        if result is not None:
+            records, description = result
+            process_aggregation(records, description, db_path='test_output/nerd_dev.sqlite3', console=console)
+        else:
+            console.print("[red]Error:[/red] No data returned from fetch_melted_probing_data")
+    except Exception as e:
+        console.print(f"[red]Error fetching data:[/red] {e}")
+
+
+def run(all_samples: list, select_id: list = [], db_path: str = ''):
     """
     Main CLI entrypoint: fits adduction curve to ODE and stores result to DB.
     """

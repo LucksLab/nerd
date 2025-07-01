@@ -1,7 +1,7 @@
 from nerd.importers import fmod_calc, probing_sample, nmr
 from nerd.kinetics import degradation, adduction, arrhenius, timecourse
 #from nerd.energy import meltfit, calc_K
-from nerd.db import io
+from nerd.db import io, fetch
 from nerd.utils import plotting
 
 # === Paths to example input files ===
@@ -47,7 +47,7 @@ def test_all():
     #user_input = '1, 2, 3'
     #user_input = '1'
 
-    degradation.run(samples, None, db_path='test_output/nerd_dev.sqlite3')
+    degradation.run(samples, [], db_path='test_output/nerd_dev.sqlite3')
 
     arrhenius.run(reaction_type="deg", data_source="nmr", species="dms",
                   buffer="Schwalbe_bistris", db_path='test_output/nerd_dev.sqlite3')
@@ -66,7 +66,7 @@ def test_all():
 
     #io.display_table(add_samples, add_columns, title="All NMR Adduction Samples")
 
-    adduction.run(add_samples, None, db_path='test_output/nerd_dev.sqlite3')
+    adduction.run(add_samples, [], db_path='test_output/nerd_dev.sqlite3')
 
     arrhenius.run(reaction_type="add", data_source="nmr", species="ATP",
                   buffer="Schwalbe_bistris", db_path='test_output/nerd_dev.sqlite3')
@@ -109,27 +109,14 @@ def test_all():
     )
 
     print("\n[PROBING SAMPLES]")
-    # timecourse.run(db_path='test_output/nerd_dev.sqlite3')
-    # timecourse.single_fit(
-    #     rg_id=64,
-    #     db_path='test_output/nerd_dev.sqlite3',
-    #     constrained_kdeg=False
-    # )
-    # timecourse.global_fit(
-    #     rg_id=64,
-    #     db_path='test_output/nerd_dev.sqlite3',
-    #     mode = 'ac_only')
-    
-    # timecourse.single_fit(
-    #     rg_id = 64,
-    #     db_path = 'test_output/nerd_dev.sqlite3',
-    #     constrained_kdeg = True
-    # )
+    timecourse.run(db_path='test_output/nerd_dev.sqlite3')
 
+
+    print("\n[ADDUCTION FITTING]")
     # adduction from melted (fourU, HIV)
     # adduction from single (P4P6)
     
 
 if __name__ == "__main__":
     #test_all()
-    timecourse.run(db_path='test_output/nerd_dev.sqlite3')
+    adduction.process_param_aggregation()

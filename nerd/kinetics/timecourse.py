@@ -1,17 +1,13 @@
 #/kinetics/timecourse.py
 
-import pandas as pd
-import numpy as np
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
 
-from lmfit.models import ExponentialModel, ConstantModel
-from nerd.db.io import connect_db, init_db, check_db, insert_tc_fit, insert_fitted_probing_kinetic_rate
+from nerd.db.io import connect_db, check_db, insert_tc_fit, insert_fitted_probing_kinetic_rate
 from nerd.utils.fit_models import fit_timecourse, global_fit_timecourse
-from nerd.db.fetch import fetch_all_nt, fetch_timecourse_data, fetch_reaction_temp, fetch_reaction_pH, fetch_all_rg_ids, fetch_rxn_ids, fetch_fmod_vals, fetch_filtered_freefit_sites, fetch_dataset_freefit_params, fetch_dataset_fmods, fetch_global_kdeg_val
+from nerd.db.fetch import fetch_all_nt, fetch_timecourse_data, fetch_reaction_temp, fetch_reaction_pH, fetch_all_rg_ids, fetch_rxn_ids, fetch_filtered_freefit_sites, fetch_dataset_freefit_params, fetch_dataset_fmods, fetch_global_kdeg_val
 from nerd.kinetics.degradation import calc_kdeg
 from nerd.db.update import update_sample_to_drop, update_sample_fmod_val
-import sqlite3
 from nerd.utils.plotting import plot_aggregate_timecourse
 
 
@@ -28,9 +24,6 @@ def plot_all_aggregated_timecourses(db_path):
         except Exception as e:
             console.print(f"[red]Error plotting aggregated fit for rg_id {rg_id}:[/red] {e}")
 
-
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
 
 console = Console()
 
@@ -277,7 +270,13 @@ def global_fit(rg_id, db_path, mode):
 
 
         # perform global fit
-        kdeg_val, kdeg_err, chiseq, r2 = global_fit_timecourse(time_data_array, fmod_data_array, kappa_array, kdeg_array, fmod0_array)
+        result = global_fit_timecourse(time_data_array, fmod_data_array, kappa_array, kdeg_array, fmod0_array)
+        
+        if result is None:
+            console.print(f"[red]Error:[/red] Global fit failed for rg_id {rg_id}")
+            return None
+            
+        kdeg_val, kdeg_err, chiseq, r2 = result
 
         console.print(f"[green]✓ Global fit for rg_id {rg_id} completed successfully[/green]: "
                       f"kdeg = {kdeg_val:.4f} ± {kdeg_err:.4f}, "

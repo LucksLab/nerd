@@ -1,7 +1,6 @@
 import sqlite3
-from pathlib import Path
-from nerd.db.schema import ALL_TABLES
 from typing import Optional
+from collections import defaultdict
 
 def fetch_run_name(db_path: str, sample_name: str) -> Optional[str]:
     """
@@ -383,8 +382,6 @@ def fetch_filtered_freefit_sites(db_path: str, rg_id: int, bases: list = [], r2_
     conn.close()
     return nt_ids
 
-import sqlite3
-from collections import defaultdict
 
 def fetch_dataset_fmods(db_path: str, rg_id: int, nt_ids: list) -> tuple:
     """
@@ -468,7 +465,6 @@ def fetch_dataset_freefit_params(db_path: str, rg_id: int, nt_ids: list) -> tupl
     
     return kappa_array, kdeg_array, fmod0_array
 
-
 def fetch_global_kdeg_val(db_path: str, rg_id: int, model: str, species: str) -> float:
     """
     Fetch the global kdeg value for a given reaction group ID (rg_id).
@@ -498,3 +494,39 @@ def fetch_global_kdeg_val(db_path: str, rg_id: int, model: str, species: str) ->
         return result[0]
     else:
         raise ValueError(f"No global kdeg value found for rg_id {rg_id}")
+    
+
+def fetch_melted_probing_data(db_path: str, temp_thres: float = 60) -> Optional[tuple]:
+    """
+    Fetch melted probing fit param (kobs) for a given reaction group ID (rg_id).
+    
+    Args:
+        db_path (str): Path to the database file.
+        temp_thres (float): Minimum temperature threshold to filter results.
+    
+    Returns:
+        tuple: (records, description) where records is a list of tuples containing the data,
+               and description is a list of column names.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT rg.rg_id, cf.kobs_val, cf.kobs_err, n.id, n.base,
+                   pr.temperature, pr.replicate,
+                   pr.RT, pr.done_by, pr.buffer_id, pr.construct_id
+        FROM constrained_tc_fits cf
+        JOIN reaction_groups rg ON cf.rg_id = rg.rg_id
+        JOIN probing_reactions pr ON rg.rxn_id = pr.id
+        JOIN nucleotides n ON cf.nt_id = n.id
+        JOIN sequencing_samples ss ON pr.s_id = ss.id
+        AND pr.temperature >= ?
+        AND cf.kobs_err > 0
+        AND ss.to_drop = 0
+    """, (temp_thres,))
+
+    records = cursor.fetchall()
+    description = [desc[0] for desc in cursor.description]
+    conn.close()
+    
+    return records, description
