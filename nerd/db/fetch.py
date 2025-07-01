@@ -273,7 +273,7 @@ def fetch_rxn_ids(db_path: str, rg_id: int) -> list:
     
     return results
 
-def fetch_fmod_vals(db_path: str, s_id: int) -> Optional[tuple]:
+def fetch_fmod_vals(db_path: str, s_id: int) -> Optional[list]:
     """
     Fetch all fmod_vals for a given sequencing sample ID (s_id).
     
@@ -282,7 +282,7 @@ def fetch_fmod_vals(db_path: str, s_id: int) -> Optional[tuple]:
         s_id (int): Sequencing sample ID.
     
     Returns:
-        Optional[float]: The fmod_val if found, otherwise None.
+        Optional[list]: List of tuples containing fmod_val and reaction_time if found, otherwise None.
     """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -332,3 +332,131 @@ def fetch_timecourse_records(db_path: str, rg_id: int) -> list:
     records = cursor.fetchall()
     conn.close()
     return records
+
+
+def fetch_filtered_freefit_sites(db_path: str, rg_id: int, bases: list = [], r2_thres: float = 0.8) -> list:
+    """
+    Fetch nucleotides that passed the free fit with a specified R2 threshold and specified bases.
+
+    Args:
+        db_path (str): Path to the database file.
+        rg_id (int): Reaction group ID.
+        bases (list): List of bases to filter on (e.g., ['A', 'C']).
+        r2_thres (float): Minimum R-squared value threshold.
+
+    Returns:
+        list: List of nt_ids that match the filter criteria.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    if bases:
+        placeholders = ','.join(['?'] * len(bases))
+        query = f"""
+            SELECT DISTINCT n.id
+            FROM free_tc_fits ft
+            JOIN nucleotides n ON ft.nt_id = n.id
+            WHERE ft.rg_id = ?
+            AND ft.r2 > ?
+            AND n.base IN ({placeholders})
+        """
+        params = [rg_id, r2_thres] + bases
+    else:
+        query = """
+            SELECT DISTINCT n.id
+            FROM free_tc_fits ft
+            JOIN nucleotides n ON ft.nt_id = n.id
+            WHERE ft.rg_id = ?
+            AND ft.r2 > ?
+        """
+        params = [rg_id, r2_thres]
+
+    cursor.execute(query, params)
+    nt_ids = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return nt_ids
+
+import sqlite3
+from collections import defaultdict
+
+def fetch_dataset_fmods(db_path: str, rg_id: int, nt_ids: list) -> tuple:
+    """
+    Fetch the dataset for fmod values and reaction times for a given reaction group ID (rg_id),
+    grouped by nt_id.
+    
+    Args:
+        db_path (str): Path to the database file.
+        rg_id (int): Reaction group ID.
+        nt_ids (list): List of nucleotide IDs to filter the results.
+    
+    Returns:
+        tuple: (time_data_list, fmod_data_list), each a list of lists, grouped by nt_id.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # Prepare SQL placeholders
+    placeholders = ','.join('?' * len(nt_ids))
+
+    cursor.execute(f"""
+        SELECT pr.reaction_time, fv.fmod_val, fv.nt_id, pr.treated
+        FROM fmod_vals fv
+        JOIN probing_reactions pr ON fv.rxn_id = pr.id
+        JOIN reaction_groups rg ON rg.rxn_id = pr.id
+        WHERE rg.rg_id = ?
+        AND fv.fmod_val IS NOT NULL
+        AND fv.nt_id IN ({placeholders})
+        ORDER BY fv.nt_id, pr.reaction_time
+    """, (rg_id, *nt_ids))
+
+    records = cursor.fetchall()
+    conn.close()
+
+    # time = time * treated (untreated time = 0)
+    records = [(time * treated, fmod, nt_id) for time, fmod, nt_id, treated in records]
+
+    # Group by nt_id
+    time_data_dict = defaultdict(list)
+    fmod_data_dict = defaultdict(list)
+
+    for time, fmod, nt_id in records:
+        time_data_dict[nt_id].append(time)
+        fmod_data_dict[nt_id].append(fmod)
+
+    # Return as list of lists in the order of nt_ids provided
+    time_data = [time_data_dict[nt_id] for nt_id in nt_ids]
+    fmod_data = [fmod_data_dict[nt_id] for nt_id in nt_ids]
+
+    return time_data, fmod_data
+
+def fetch_dataset_freefit_params(db_path: str, rg_id: int, nt_ids: list) -> tuple:
+    """
+    Fetch the free fit parameters for a given reaction group ID (rg_id).
+    
+    Args:
+        db_path (str): Path to the database file.
+        rg_id (int): Reaction group ID.
+        nt_ids (list): List of nucleotide IDs to filter the results. If empty, fetch all.
+    
+    Returns:
+        tuple: (kappa_array, kdeg_array, fmod0_array) where each is a list of corresponding values.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT kobs_val, kdeg_val, fmod0
+        FROM free_tc_fits
+        WHERE rg_id = ?
+        AND nt_id IN ({})
+        ORDER BY nt_id ASC
+    """.format(','.join('?' * len(nt_ids))), (rg_id, *nt_ids))
+    
+    records = cursor.fetchall()
+    conn.close()
+    
+    kappa_array = [record[0] for record in records]
+    kdeg_array = [record[1] for record in records]
+    fmod0_array = [record[2] for record in records]
+    
+    return kappa_array, kdeg_array, fmod0_array

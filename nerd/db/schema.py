@@ -164,9 +164,9 @@ CREATE TABLE IF NOT EXISTS free_tc_fits (
 );
 """
 
-# === Table: global_tc_deg_fits ===
-CREATE_GLOBAL_TC_DEG_FITS = """ 
-CREATE TABLE IF NOT EXISTS global_tc_deg_fits (
+# === Table: constrained_tc_deg_fits ===
+CREATE_CONSTRAINED_TC_FITS = """ 
+CREATE TABLE IF NOT EXISTS constrained_tc_deg_fits (
     id INTEGER NOT NULL UNIQUE,                      -- Primary key for this table
     rg_id INTEGER NOT NULL,                          -- Foreign key to reaction_groups table
     nt_id INTEGER NOT NULL,                          -- Foreign key to nucleotides table
@@ -187,9 +187,9 @@ CREATE TABLE IF NOT EXISTS global_tc_deg_fits (
 );
 """
 
-# === Table: probe_melt_fits ===
-CREATE_PROBE_MELT_FITS = """
-CREATE TABLE IF NOT EXISTS probe_melt_fits (
+# === Table: probing_melt_fits ===
+CREATE_PROBING_MELT_FITS = """
+CREATE TABLE IF NOT EXISTS probing_melt_fits (
     id INTEGER NOT NULL UNIQUE,                      -- Primary key for this table
     rg_id INTEGER NOT NULL,                          -- Foreign key to reaction_groups table
     nt_id INTEGER NOT NULL,                          -- Foreign key to nucleotides table
@@ -252,6 +252,23 @@ CREATE TABLE IF NOT EXISTS nmr_kinetic_rates (
 );
 """
 
+# === Table: probing_kinetic_rates ===
+CREATE_PROBING_KINETIC_RATES = """
+CREATE TABLE IF NOT EXISTS probing_kinetic_rates (
+    id INTEGER NOT NULL UNIQUE,                  -- Primary key for this table
+    rg_id INTEGER,                               -- Foreign key to reaction_groups table
+    model TEXT NOT NULL,                         -- Model used for fitting (e.g. "global_deg", "agg_add")
+    k_value REAL NOT NULL,                       -- Fitted kinetic rate value
+    k_error REAL NOT NULL,                       -- Fitted kinetic rate std error
+    r2 REAL NOT NULL,                            -- R-squared value of the fit
+    chisq REAL NOT NULL,                         -- Chi-squared value of the fit
+    species TEXT NOT NULL,                       -- Species for which the rate is calculated (e.g. "dms", "rna_A", "rna_C", "rna_G", etc.)
+    PRIMARY KEY(id AUTOINCREMENT),
+    FOREIGN KEY(rg_id) REFERENCES reaction_groups(id),
+    UNIQUE(rg_id, species)                       -- Ensure unique rates per reaction group and species
+);
+"""
+
 # === Table: arrhenius_fits ===
 CREATE_ARRHENIUS_FITS = """
 CREATE TABLE IF NOT EXISTS arrhenius_fits (
@@ -284,9 +301,10 @@ ALL_TABLES = [
     CREATE_FMOD_CALC_RUNS,
     CREATE_FMOD_VALS,
     CREATE_FREE_TC_FITS,
-    CREATE_GLOBAL_TC_DEG_FITS,
+    CREATE_CONSTRAINED_TC_FITS,
     CREATE_NMR_KINETIC_RATES,
     CREATE_NMR_REACTIONS,
     CREATE_ARRHENIUS_FITS,
-    CREATE_PROBE_MELT_FITS
+    CREATE_PROBING_MELT_FITS,
+    CREATE_PROBING_KINETIC_RATES
 ]

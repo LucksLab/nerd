@@ -4,13 +4,14 @@ import pandas as pd
 import numpy as np
 from rich.console import Console
 from lmfit.models import ExponentialModel, ConstantModel
-from nerd.db.io import connect_db, init_db, check_db, insert_tc_fit
-from nerd.utils.fit_models import fit_timecourse 
-from nerd.db.fetch import fetch_all_nt, fetch_timecourse_data, fetch_reaction_temp, fetch_reaction_pH, fetch_all_rg_ids, fetch_rxn_ids, fetch_fmod_vals
+from nerd.db.io import connect_db, init_db, check_db, insert_tc_fit, insert_fitted_probing_kinetic_rate
+from nerd.utils.fit_models import fit_timecourse, global_fit_timecourse
+from nerd.db.fetch import fetch_all_nt, fetch_timecourse_data, fetch_reaction_temp, fetch_reaction_pH, fetch_all_rg_ids, fetch_rxn_ids, fetch_fmod_vals, fetch_filtered_freefit_sites, fetch_dataset_freefit_params, fetch_dataset_fmods
 from nerd.kinetics.degradation import calc_kdeg
 from nerd.db.update import update_sample_to_drop, update_sample_fmod_val
 import sqlite3
 from nerd.utils.plotting import plot_aggregate_timecourse
+
 
 console = Console()
 
@@ -118,6 +119,8 @@ def free_fit(rg_id, db_path):
 
     console.print(f"[green]✓ Free timecourse fits imported successfully[/green]: {count} fits inserted into the database.")
 
+
+
 def mark_samples_to_drop(qc_csv_path, db_path):
     """
     Marks sequencing samples as 'to_drop' based on qc annotations from a CSV.
@@ -146,9 +149,7 @@ def mark_samples_to_drop(qc_csv_path, db_path):
         # Multiply treated by reaction time and sort by time
         time_sids = [(rt * treated, s_id) for rt, treated, s_id in results]
         time_sids.sort(key=lambda x: x[0])
-        print(time_sids)
         unique_times = sorted(set(t for t, _ in time_sids))
-        print(unique_times)
         # Map each unique time to a tp label
         tp_map = {t: f'tp{i}' for i, t in enumerate(unique_times)}
         from collections import defaultdict
@@ -157,8 +158,7 @@ def mark_samples_to_drop(qc_csv_path, db_path):
             if t in tp_map:
                 tp_sids[tp_map[t]].append(s_id)
         tp_sids = dict(tp_sids)  # convert back to regular dict
-        print(tp_map)
-        print(tp_sids)
+
         if qc_comment == 'bad_rg':
             s_ids = [s_id for _, s_id in time_sids]
         elif qc_comment.startswith('drop_tp'):
@@ -214,6 +214,67 @@ def mark_samples_to_drop(qc_csv_path, db_path):
                 else:
                     console.print(f"[yellow]Warning:[/yellow] Failed to mark s_id {s_id} (rg_id {rg_id}, {qc_comment}) as to_drop")
 
+def global_fit(rg_id, db_path, mode):
+    """
+    Placeholder for global fitting logic.
+    This function is not implemented yet.
+    require free fit to be done first
+    """
+
+    # need logic to select what to global fit
+    # Mode 1: all nucleotides with R2 > threshold
+    # Mode 2: A's and C's with R2 > threshold
+
+    if mode == 'all':
+        select_nts = fetch_filtered_freefit_sites(db_path, rg_id, bases = [], r2_thres = 0.8)
+    elif mode == 'ac_only':
+        select_nts = fetch_filtered_freefit_sites(db_path, rg_id, bases = ['A', 'C'], r2_thres = 0.8)
+    else:
+        raise ValueError(f"Invalid mode: {mode}. Use 'all' or 'ac_only'.")
+    
+    if not select_nts:
+        console.print(f"[yellow]Warning:[/yellow] No suitable nucleotides found for global fitting in rg_id {rg_id} with mode {mode}.")
+        return None
+    console.print(f"[blue]Selected nucleotides for global fitting in rg_id {rg_id} ({mode} mode): {select_nts}[/blue]")
+    # Fetch initial guess parameters for global fit
+    # kappa, kdeg, fmod0
+    kappa_array, kdeg_array, fmod0_array = fetch_dataset_freefit_params(db_path, rg_id, select_nts) # for use initial guess
+    
+    # time and fmod data for global fit
+    time_data_array, fmod_data_array = fetch_dataset_fmods(db_path, rg_id, select_nts)
+
+    # check if all lens are the same across all arrays (kappa, kdeg, fmod0, time, fmod)
+    if not (len(kappa_array) == len(kdeg_array) == len(fmod0_array) == len(time_data_array) == len(fmod_data_array)):
+        console.print("[red]Error:[/red] Length mismatch in arrays for global fit. Please check the data.")
+        return None
+
+    console.print(f"[blue]Global fitting with {len(kappa_array)} nucleotides selected...[/blue]")
+
+    # perform global fit
+    kdeg_val, kdeg_err, chiseq, r2 = global_fit_timecourse(time_data_array, fmod_data_array, kappa_array, kdeg_array, fmod0_array)
+
+    # insert kdeg val to probing_kinetic_rates table
+    fit_result = {
+        "rg_id": rg_id,
+        "model": "global_deg",
+        "k_value": kdeg_val,
+        "k_error": kdeg_err,
+        "chisq": chiseq,
+        "r2": r2,
+        "species": "dms"
+    }
+
+    conn = connect_db(db_path)
+    insert_success = insert_fitted_probing_kinetic_rate(conn, fit_result)
+    conn.close()
+
+    if insert_success:
+        console.print(f"[green]✓ Global fit for rg_id {rg_id} completed successfully[/green]: kdeg = {kdeg_val:.4f} ± {kdeg_err:.4f} s^-1, R² = {r2:.4f}, χ² = {chiseq:.4f}")
+        return kdeg_val, kdeg_err
+    else:
+        console.print(f"[red]Error:[/red] Failed to insert global fit result for rg_id {rg_id} into the database.")
+
+    return None
 
 def run(db_path):
     """

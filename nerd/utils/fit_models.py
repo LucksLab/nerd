@@ -180,6 +180,91 @@ def fit_timecourse(time_data, fmod_data, kdeg0, constrained_kdeg = None):
     return result, outlier
 
 
+# === Global time-course HDX model ===
+
+import numpy as np
+from lmfit import Parameters, minimize
+
+# Create parameters from arrays
+def create_params(kappa_array, kdeg_array, fmod0_array):
+    fit_params = Parameters()
+
+    # Ensure kdeg_array contains only positive values to avoid NaN
+    log_kdeg_global = np.array(kdeg_array).mean()
+
+
+    for i in range(len(kappa_array)):
+        log_kappa = kappa_array[i]
+        log_fmod_0 = fmod0_array[i]
+
+        fit_params.add(f'log_kappa_{i+1}', value=log_kappa)
+        fit_params.add(f'log_kdeg_{i+1}', value=log_kdeg_global)
+        fit_params.add(f'log_fmod0_{i+1}', value=log_fmod_0)
+
+        if i > 0:
+            fit_params[f'log_kdeg_{i+1}'].expr = 'log_kdeg_1'
+
+    return fit_params
+
+# Dataset creation assumes input: list of (x_values, y_values) for each site
+def create_dataset(time_data_array, fmod_data_array):
+    # time_data_array: list of arrays (one per site)
+    # fmod_data_array: list of arrays (one per site)
+    y_dataset = np.array(fmod_data_array)
+
+    # check all time arrays are identical
+    if not all(np.array_equal(time_data_array[0], time_array) for time_array in time_data_array):
+        raise ValueError("All time arrays must be identical for global fitting.")
+
+    x_data = np.array(time_data_array[0])  # assume all time arrays are identical
+    return x_data, y_dataset
+
+
+# Model for each dataset
+def fmod_dataset(params, i, x):
+    log_kappa = params[f'log_kappa_{i+1}']
+    log_kdeg = params[f'log_kdeg_{i+1}']
+    log_fmod0 = params[f'log_fmod0_{i+1}']
+    return fmod_model(x, log_kappa, log_kdeg, log_fmod0)
+
+# Objective function
+def objective(params, x, data):
+    ndata, _ = data.shape
+    resid = np.zeros_like(data)
+    for i in range(ndata):
+        resid[i, :] = data[i, :] - fmod_dataset(params, i, x)
+    return resid.flatten()
+
+# Global fitting entry point
+def global_fit_timecourse(time_data_array, fmod_data_array, kappa_array, kdeg_array, fmod0_array):
+    global_params = create_params(kappa_array, kdeg_array, fmod0_array)
+    x_data, y_dataset = create_dataset(time_data_array, fmod_data_array)
+
+    assert x_data.shape[0] == y_dataset.shape[1], "Mismatch between time points and fmod data"
+
+    try:
+        out = minimize(objective, global_params, args=(x_data, y_dataset))
+    except Exception as e:
+        print(f'Global fitting failed: {e}')
+        return None
+
+    # Compute predicted values
+    ndata, npoints = y_dataset.shape
+    predicted = np.zeros_like(y_dataset)
+    for i in range(ndata):
+        predicted[i, :] = fmod_dataset(out.params, i, x_data)
+
+    # Flatten arrays for R² calculation
+    y_true = y_dataset.flatten()
+    y_pred = predicted.flatten()
+
+    ss_res = np.sum((y_true - y_pred) ** 2)
+    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+    r2 = 1 - ss_res / ss_tot
+
+    return out.params['log_kdeg_1'].value, out.params['log_kdeg_1'].stderr, out.chisqr, r2
+
+
 # === Time-course HDX model (global) ===
 def melt_fit(x, a, b, c, d, f, g):
     # a: slope of the unfolded state

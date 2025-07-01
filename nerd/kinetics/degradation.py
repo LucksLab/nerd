@@ -48,9 +48,11 @@ def global_fit_probing(rg_id: int, db_path: str):
     This function is a placeholder for future global fitting logic.
     """
     console.print(f"[yellow]Warning:[/yellow] Global fitting for rg_id {rg_id} is not implemented yet.")
+
+
     return None
 
-def run(all_samples: list, select_id: list = None, db_path: str = None):
+def run(all_samples: list, select_id: list = [], db_path: str):
     """
     Main CLI entrypoint: fits degradation kinetics and stores result to DB.
     """
@@ -111,14 +113,14 @@ def run(all_samples: list, select_id: list = None, db_path: str = None):
 
 from numpy import exp
 
-def calc_kdeg(temp, pH):
+def calc_kdeg(temp, pH, db_path):
     """
     Find NMR arrhenius at closest pH then calculate kdeg using the Arrhenius equation.
     """
 
     # Fetch Arrhenius parameters for the given temperature and pH (deg)
     arrhenius_params = fetch_arrhenius_closest_pH(
-        db_path='test_output/nerd_dev.sqlite3',
+        db_path=db_path,
         reaction_type="deg",
         species="dms",
         pH=pH

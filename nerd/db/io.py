@@ -224,6 +224,24 @@ def insert_tc_fit(conn, fit_data: dict):
     conn.commit()
     return cursor.rowcount > 0
 
+def insert_fitted_probing_kinetic_rate(conn, fit_result: dict):
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO probing_kinetic_rates (
+            rg_id, model, k_value, k_error, r2, chisq, species
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        fit_result.get("rg_id"),
+        fit_result.get("model"),
+        fit_result.get("k_value"),
+        fit_result.get("k_error"),
+        fit_result.get("r2"),
+        fit_result.get("chisq"),
+        fit_result.get("species")
+    ))
+    conn.commit()
+    return cursor.rowcount > 0
+
 # === Query Functions ===
 
 def fetch_all_nmr_samples(conn, reaction_type='deg'):
