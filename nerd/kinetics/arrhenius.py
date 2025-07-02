@@ -29,7 +29,7 @@ def rows_to_dicts(rows, description):
     return [dict(zip(column_names, row)) for row in rows]
 
 def run(reaction_type="deg", data_source="nmr", species = "dms", 
-        buffer = "Schwalbe_bistris", db_path: str = None):
+        buffer = "Schwalbe_bistris", db_path: str = ''):
     """
     CLI entrypoint for Arrhenius fitting.
     """

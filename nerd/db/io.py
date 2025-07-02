@@ -225,12 +225,12 @@ def insert_tc_fit(conn, fit_data: dict, insert_to_table: str):
     return cursor.rowcount > 0
 
 def insert_fitted_probing_kinetic_rate(conn, fit_result: dict):
+
     cursor = conn.cursor()
-    cursor.execute("""
-        INSERT OR IGNORE INTO probing_kinetic_rates (
-            rg_id, model, k_value, k_error, r2, chisq, species
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (
+
+    # Base columns and values
+    columns = ["rg_id", "model", "k_value", "k_error", "r2", "chisq", "species"]
+    values = [
         fit_result.get("rg_id"),
         fit_result.get("model"),
         fit_result.get("k_value"),
@@ -238,8 +238,28 @@ def insert_fitted_probing_kinetic_rate(conn, fit_result: dict):
         fit_result.get("r2"),
         fit_result.get("chisq"),
         fit_result.get("species")
-    ))
+    ]
+
+    # Optionally add nt_id
+    if "nt_id" in fit_result:
+        columns.append("nt_id")
+        values.append(fit_result.get("nt_id"))
+
+    # Construct query
+    placeholders = ", ".join(["?"] * len(columns))
+    columns_str = ", ".join(columns)
+
+    query = f"""
+        INSERT OR IGNORE INTO probing_kinetic_rates (
+            {columns_str}
+        ) VALUES (
+            {placeholders}
+        )
+    """
+
+    cursor.execute(query, values)
     conn.commit()
+
     return cursor.rowcount > 0
 
 # === Query Functions ===
@@ -316,6 +336,7 @@ def insert_melted_probing_rates(fetched_result: tuple, db_path: str, console: Co
     conn = connect_db(db_path)
 
     count = 0
+
     for row in records:
         # Create dictionary from row data using column names
         row_dict = dict(zip(column_names, row))
@@ -327,18 +348,16 @@ def insert_melted_probing_rates(fetched_result: tuple, db_path: str, console: Co
             "chisq": row_dict['chisq'],
             "r2": row_dict['r2'],
             "species": 'rna_' + row_dict['base'],
-            "nt_id":  int(row_dict['id'])
+            "nt_id":  int(row_dict['id']),
+            "rxn_id": int(row_dict['rxn_id'])
         }
 
         insert_success = insert_fitted_probing_kinetic_rate(conn, fit_result)
+        count += insert_success
         
-        if insert_success:
-            count += insert_success
-            console.print(f"[green]✓ Inserted ind_add rate for rg_id {fit_result['rg_id']} ({fit_result['species']})[/green]")
-        else:
-            console.print(f"[red]✗ Failed to insert ind_add rate for rg_id {fit_result['rg_id']} ({fit_result['species']})[/red]")
-
     conn.close()
+
+    console.print(f"[green]✓ Inserted {count} probing kinetic rates ({count / len(records) * 100:.1f}%)[/green]")
 
     return count
 

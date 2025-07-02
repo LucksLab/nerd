@@ -114,9 +114,7 @@ def test_all():
 
     print("\n[ADDUCTION FITTING]")
     adduction.process_melted_param_aggregation()
-    # adduction from single (P4P6)
-    
+    adduction.process_melted_ind_params(db_path='test_output/nerd_dev.sqlite3')    
 
 if __name__ == "__main__":
-    #test_all()
-    #adduction.process_melted_ind_params(db_path='test_output/nerd_dev.sqlite3')
+    test_all()

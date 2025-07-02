@@ -264,9 +264,12 @@ CREATE TABLE IF NOT EXISTS probing_kinetic_rates (
     chisq REAL,                                  -- Chi-squared value of the fit
     species TEXT NOT NULL,                       -- Species for which the rate is calculated (e.g. "dms", "rna_A", "rna_C", "rna_G", etc.)
     nt_id INTEGER,                               -- Foreign key to nucleotides table (optional, if extracted individually)
+    rxn_id INTEGER,                              -- Foreign key to probing_reactions table (optional, if extracted individually)
     PRIMARY KEY(id AUTOINCREMENT),
     FOREIGN KEY(rg_id) REFERENCES reaction_groups(id),
-    UNIQUE(rg_id, model, species)                       -- Ensure unique rates per reaction group and species
+    FOREIGN KEY(nt_id) REFERENCES nucleotides(id),
+    FOREIGN KEY(rxn_id) REFERENCES probing_reactions(id),
+    UNIQUE(rg_id, model, species, nt_id, rxn_id)        -- Ensure unique rates per reaction group and species
 );
 """
 

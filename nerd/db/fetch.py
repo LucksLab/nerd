@@ -512,7 +512,7 @@ def fetch_melted_probing_data(db_path: str, temp_thres: float = 60) -> Optional[
     cursor = conn.cursor()
     
     cursor.execute("""
-        SELECT rg.rg_id, cf.kobs_val, cf.kobs_err, cf.chisq, cf.r2, n.id, n.base,
+        SELECT rg.rg_id, rg.rxn_id, cf.kobs_val, cf.kobs_err, cf.chisq, cf.r2, n.id, n.base,
                    pr.temperature, pr.replicate,
                    pr.RT, pr.done_by, pr.buffer_id, pr.construct_id
         FROM constrained_tc_fits cf
