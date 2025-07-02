@@ -266,7 +266,7 @@ CREATE TABLE IF NOT EXISTS probing_kinetic_rates (
     nt_id INTEGER,                               -- Foreign key to nucleotides table (optional, if extracted individually)
     PRIMARY KEY(id AUTOINCREMENT),
     FOREIGN KEY(rg_id) REFERENCES reaction_groups(id),
-    UNIQUE(rg_id, species)                       -- Ensure unique rates per reaction group and species
+    UNIQUE(rg_id, model, species)                       -- Ensure unique rates per reaction group and species
 );
 """
 
@@ -278,6 +278,7 @@ CREATE TABLE IF NOT EXISTS arrhenius_fits (
     data_source TEXT NOT NULL,                   -- "nmr", "probe_global", "probe_free"
     substrate TEXT NOT NULL,                     -- Substrate for which the fit is calculated (e.g. "ATP", "GTP", "none" for degradation)
     buffer_id INTEGER NOT NULL,                  -- Foreign key to buffers table
+    rg_id INTEGER,                               -- Foreign key to reaction_groups table
     slope REAL NOT NULL,                         -- Slope of the Arrhenius fit (activation energy)
     slope_err REAL NOT NULL,                     -- Standard error of the slope
     intercept REAL NOT NULL,                     -- Intercept of the Arrhenius fit (log pre-exponential factor)

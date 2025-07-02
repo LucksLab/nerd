@@ -113,10 +113,10 @@ def test_all():
 
 
     print("\n[ADDUCTION FITTING]")
-    # adduction from melted (fourU, HIV)
+    adduction.process_melted_param_aggregation()
     # adduction from single (P4P6)
     
 
 if __name__ == "__main__":
     #test_all()
-    adduction.process_param_aggregation()
+    #adduction.process_melted_ind_params(db_path='test_output/nerd_dev.sqlite3')

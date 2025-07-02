@@ -64,7 +64,9 @@ def run(all_samples: list, select_id: list = [], db_path: str  = '.'):
         reaction_id = sample[0]
         kinetic_trace_dir = sample[-1]
 
-        if select_id is not None and reaction_id not in select_id:
+        # If select_id is provided, only process samples with reaction_id in select_id
+        # If select_id is empty, process all samples
+        if (len(select_id) > 0) and (reaction_id not in select_id):
             continue
 
         csv_file = Path(f'test_data/{kinetic_trace_dir}')

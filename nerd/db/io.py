@@ -298,6 +298,50 @@ def display_table(results, column_descriptions, title="Query Results"):
 
     console.print(table)
 
+
+def insert_melted_probing_rates(fetched_result: tuple, db_path: str, console: Console):
+    """
+    Insert aggregated probing rates into the database.
+
+    Args:
+        fetched_result (tuple): Tuple containing (records, description) where records is a list of tuples
+                               containing the data, and description is a list of column names.
+        db_path (str): Path to the database file.
+        console (Console): Rich console for output.
+    """
+    
+    records, description = fetched_result
+    column_names = [desc for desc in description]
+    # Import probing kinetic rate
+    conn = connect_db(db_path)
+
+    count = 0
+    for row in records:
+        # Create dictionary from row data using column names
+        row_dict = dict(zip(column_names, row))
+        fit_result = {
+            "rg_id": int(row_dict['rg_id']),
+            "model": "melted_ind_obs",
+            "k_value": row_dict['kobs_val'],
+            "k_error": row_dict['kobs_err'],
+            "chisq": row_dict['chisq'],
+            "r2": row_dict['r2'],
+            "species": 'rna_' + row_dict['base'],
+            "nt_id":  int(row_dict['id'])
+        }
+
+        insert_success = insert_fitted_probing_kinetic_rate(conn, fit_result)
+        
+        if insert_success:
+            count += insert_success
+            console.print(f"[green]✓ Inserted ind_add rate for rg_id {fit_result['rg_id']} ({fit_result['species']})[/green]")
+        else:
+            console.print(f"[red]✗ Failed to insert ind_add rate for rg_id {fit_result['rg_id']} ({fit_result['species']})[/red]")
+
+    conn.close()
+
+    return count
+
 # === Miscellaneous (might incorporate) ===
 
 # def append_csv_to_sqlite(csv_file, table_name, db_file):

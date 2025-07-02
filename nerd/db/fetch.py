@@ -512,7 +512,7 @@ def fetch_melted_probing_data(db_path: str, temp_thres: float = 60) -> Optional[
     cursor = conn.cursor()
     
     cursor.execute("""
-        SELECT rg.rg_id, cf.kobs_val, cf.kobs_err, n.id, n.base,
+        SELECT rg.rg_id, cf.kobs_val, cf.kobs_err, cf.chisq, cf.r2, n.id, n.base,
                    pr.temperature, pr.replicate,
                    pr.RT, pr.done_by, pr.buffer_id, pr.construct_id
         FROM constrained_tc_fits cf
@@ -530,3 +530,31 @@ def fetch_melted_probing_data(db_path: str, temp_thres: float = 60) -> Optional[
     conn.close()
     
     return records, description
+
+
+def fetch_probing_kinetic_rate(conn: sqlite3.Connection, buffer_id: int, species: str, reaction_type: str) -> Optional[float]:
+    """
+    Fetch the probing kinetic rate (kobs) for a given reaction group ID (rg_id) and nucleotide ID (nt_id).
+    
+    Args:
+        conn (sqlite3.Connection): SQLite connection object.
+        buffer_id (int): Buffer ID to filter the results.
+        species (str): Species involved in the reaction.
+        reaction_type (str): Type of reaction (e.g., "deg", "add").
+    
+    Returns:
+        Optional[tuple]: Probing kinetic rate k_value, k_err and description if found, otherwise None.
+    """
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT kr.k_value, kr.k_error
+        FROM probing_kinetic_rates kr
+        JOIN reaction_groups rg ON kr.rg_id = rg.rg_id
+        JOIN probing_reactions pr ON rg.rxn_id = pr.id
+        WHERE pr.buffer_id = ?
+        AND kr.species = ?
+        AND kr.model = ?
+    """, (buffer_id, species, reaction_type))
+
+    result = cursor.fetchone()
+    return result[0] if result else None

@@ -3,7 +3,7 @@
 import pandas as pd
 from pathlib import Path
 from rich.console import Console
-from nerd.db.io import connect_db, insert_fitted_kinetic_rate, check_db
+from nerd.db.io import connect_db, insert_fitted_kinetic_rate, check_db, insert_melted_probing_rates
 from nerd.utils.param_aggregation import process_aggregation
 from nerd.utils.fit_models import fit_ODE_probe
 from nerd.db.fetch import fetch_melted_probing_data
@@ -46,22 +46,36 @@ def fit_kinetic_trace(peak_perc_csv: str, dms_perc_csv: str, ntp_conc: float):
 
     return k, k_err, r2, chisq
 
-def process_param_aggregation():
+def process_melted_param_aggregation(db_path: str = 'test_output/nerd_dev.sqlite3'):
 
     # Fetch all fitted kobs params (melted temps >60C)
     try:
         result = fetch_melted_probing_data(
-            db_path='test_output/nerd_dev.sqlite3',
+            db_path=db_path,
             temp_thres=60
             )
         if result is not None:
             records, description = result
-            process_aggregation(records, description, db_path='test_output/nerd_dev.sqlite3', console=console)
+            process_aggregation(records, description, db_path=db_path, console=console)
         else:
             console.print("[red]Error:[/red] No data returned from fetch_melted_probing_data")
     except Exception as e:
         console.print(f"[red]Error fetching data:[/red] {e}")
 
+
+def process_melted_ind_params(db_path: str = 'test_output/nerd_dev.sqlite3'):
+
+    try:
+        # Fetch all melted probing data
+        result = fetch_melted_probing_data(db_path=db_path, temp_thres=60)
+
+        if result:
+            success_inserts = insert_melted_probing_rates(result, db_path=db_path, console=console)
+            console.print(f"[green]✓ Inserted melted probing rates for {success_inserts} records[/green]")
+        else:
+            console.print("[red]Error:[/red] No data returned from fetch_melted_probing_data")
+    except Exception as e:
+        console.print(f"[red]Error extracting melted individual parameters:[/red] {e}") 
 
 def run(all_samples: list, select_id: list = [], db_path: str = ''):
     """
@@ -77,7 +91,9 @@ def run(all_samples: list, select_id: list = [], db_path: str = ''):
         substrate = sample[-4]
         ntp_conc = sample[-3]
 
-        if select_id is not None and reaction_id not in select_id:
+        # If select_id is provided, only process samples with reaction_id in select_id
+        # If select_id is empty, process all samples
+        if (len(select_id) > 0) and (reaction_id not in select_id):
             continue
 
         # Split csv by comma and confirm there are exactly 2 files

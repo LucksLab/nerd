@@ -53,7 +53,24 @@ def run(reaction_type="deg", data_source="nmr", species = "dms",
         y_errs = np.array([r["k_error"] / r["k_value"] for r in data]) if "k_error" in description else None
         weights = 1 / y_errs**2 if y_errs is not None else None
     
-    # elif data_source == "probing":
+    elif data_source == "probing":
+        conn = connect_db(db_path)
+        buffer_id = fetch_buffer_id(buffer, db_path)
+        # TOWRITE
+        data, description = fetch_probing_kinetic_rates(conn, buffer_id, species, reaction_type)
+        conn.close()
+
+        if not data:
+            console.print(f"[red]No probing kinetic rates found for reaction type '{reaction_type}' with species '{species}' and buffer '{buffer}'[/red]")
+            return
+        data = rows_to_dicts(data, description)
+        x_vals = np.array([1 / r["temperature"] for r in data])
+        y_vals = np.array([np.log(r["k_value"]) for r in data])
+        y_errs = np.array([r["k_error"] / r["k_value"] for r in data]) if "k_error" in description else None
+        weights = 1 / y_errs**2 if y_errs is not None else None
+    else:
+        console.print(f"[red]Unsupported data source: {data_source}[/red]")
+        return
 
     try:
         result = fit_linear(x_vals, y_vals, weights = weights)
@@ -69,6 +86,7 @@ def run(reaction_type="deg", data_source="nmr", species = "dms",
             "data_source": data_source,
             "substrate": species,
             "buffer_id": buffer_id,
+            "rg_id": None, # only for probing data
             "slope": slope,
             "slope_err": slope_err,
             "intercept": intercept,
@@ -98,3 +116,4 @@ def run(reaction_type="deg", data_source="nmr", species = "dms",
         console.print(f"[red]Fit failed:[/red] {e}")
 
     console.print(f"[green]Imported Arrhenius fits for {count} samples[/green]")
+
