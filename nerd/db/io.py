@@ -363,6 +363,64 @@ def insert_melted_probing_rates(fetched_result: tuple, db_path: str, console: Co
 
     return count
 
+def insert_tempgrad_groups(conn, tg_assignments):
+    """
+    Insert temperature gradient group assignments into the tempgrad_groups table.
+
+    Args:
+        conn (sqlite3.Connection): SQLite database connection.
+        tg_assignments (list of tuples): Each tuple should contain:
+            (tg_id, rg_id, buffer_id, construct_id, RT, probe, probe_concentration, temperature, replicate)
+    """
+    cursor = conn.cursor()
+    cursor.executemany("""
+        INSERT OR IGNORE INTO tempgrad_groups (
+            tg_id, rg_id, buffer_id, construct_id, RT, probe,
+            probe_concentration, temperature, replicate
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, tg_assignments)
+    conn.commit()
+
+
+def insert_tempgrad_group(db_path, tempgrad_insert_dict):
+    """
+    Insert a single temperature gradient group into the tempgrad_groups table.
+
+    Args:
+        db_path (str): Path to the SQLite database file.
+        tempgrad_insert_dict (dict): Dictionary containing the data to insert.
+            Expected keys: 'tg_id', 'rg_id', 'buffer_id', 'construct_id',
+                           'RT', 'probe', 'probe_concentration', 'temperature', 'replicate'.
+
+    Returns:
+        bool: True if insertion was successful, False otherwise.
+    """
+    conn = connect_db(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT OR IGNORE INTO tempgrad_groups (
+            tg_id, rg_id, buffer_id, construct_id, RT, probe,
+            probe_concentration, temperature, replicate
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        tempgrad_insert_dict['tg_id'],
+        tempgrad_insert_dict['rg_id'],
+        tempgrad_insert_dict['buffer_id'],
+        tempgrad_insert_dict['construct_id'],
+        tempgrad_insert_dict['RT'],
+        tempgrad_insert_dict['probe'],
+        tempgrad_insert_dict['probe_concentration'],
+        tempgrad_insert_dict['temperature'],
+        tempgrad_insert_dict['replicate']
+    ))
+
+    conn.commit()
+    success = cursor.rowcount > 0
+    conn.close()
+    
+    return success
+
 # === Miscellaneous (might incorporate) ===
 
 # def append_csv_to_sqlite(csv_file, table_name, db_file):

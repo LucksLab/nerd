@@ -575,14 +575,13 @@ def fetch_distinct_tempgrad_group(db_path: str) -> list:
 
     cursor.execute("""
         SELECT DISTINCT
-            pr.rg_id,
             pr.buffer_id,
             pr.construct_id,
             pr.RT,
             pr.probe,
             pr.probe_concentration
         FROM probing_reactions pr
-        WHERE pr.treated = 1
+        WHERE pr.probe_concentration > 0.0
     """)
 
     results = cursor.fetchall()

@@ -44,12 +44,12 @@ CREATE TABLE IF NOT EXISTS reaction_groups (
 # temperature_gradient group shares buffer, construct, probe, probe_conc, RT
 
 CREATE_TEMPGRAD_GROUPS = """
-CREATE TABLE IF NOT EXISTS arrhenius_groups (
+CREATE TABLE IF NOT EXISTS tempgrad_groups (
     id INTEGER NOT NULL UNIQUE,                  -- Primary key for this table
     tg_id INTEGER NOT NULL,                      -- Temperature gradient group identifier
-    rg_id INTEGER NOT NULL,                  -- Foreign key to reaction_groups table
-    buffer_id INTEGER NOT NULL,              -- Foreign key to buffers table
-    construct_id INTEGER NOT NULL,           -- Foreign key to constructs table
+    rg_id INTEGER NOT NULL,                      -- Foreign key to reaction_groups table
+    buffer_id INTEGER NOT NULL,                  -- Foreign key to buffers table
+    construct_id INTEGER NOT NULL,               -- Foreign key to constructs table
     RT TEXT NOT NULL,                            -- Reverse transcription enzyme or protocol ("MRT", "SSIII", etc.)
     probe TEXT NOT NULL,                         -- Name of chemical probe (e.g. "dms")
     probe_concentration REAL NOT NULL,           -- Concentration of probe (M)
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS arrhenius_groups (
     replicate INTEGER NOT NULL,                  -- Replicate number
     PRIMARY KEY(id AUTOINCREMENT),
     FOREIGN KEY(rg_id) REFERENCES reaction_groups(id),
-    UNIQUE(tg_id, rg_id)                               -- Ensure unique temperature gradient group IDs
+    UNIQUE(tg_id, rg_id)                         -- Ensure unique temperature gradient group IDs
 """
 
 

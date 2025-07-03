@@ -1,8 +1,9 @@
 from nerd.importers import fmod_calc, probing_sample, nmr
 from nerd.kinetics import degradation, adduction, arrhenius, timecourse
 #from nerd.energy import meltfit, calc_K
-from nerd.db import io, fetch
+from nerd.db import io, fetch, update
 from nerd.utils import plotting
+
 
 # === Paths to example input files ===
 SAMPLE_SHEET = "test_data/sample_sheet.csv"
@@ -121,4 +122,7 @@ if __name__ == "__main__":
     #timecourse.run(db_path='test_output/nerd_dev.sqlite3')
     #adduction.process_melted_param_aggregation()
     #adduction.process_melted_ind_params(db_path='test_output/nerd_dev.sqlite3') 
-    print(fetch.fetch_distinct_tempgrad_groups('test_output/nerd_dev.sqlite3'))
+    tempgrad_conditions = fetch.fetch_distinct_tempgrad_group('test_output/nerd_dev.sqlite3')
+    rg_to_tg = update.assign_tempgrad_groups('test_output/nerd_dev.sqlite3', tempgrad_conditions)
+
+    print(rg_to_tg)
