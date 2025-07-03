@@ -240,10 +240,12 @@ def insert_fitted_probing_kinetic_rate(conn, fit_result: dict):
         fit_result.get("species")
     ]
 
-    # Optionally add nt_id
+    # Optionally add nt_id and rxn_id
     if "nt_id" in fit_result:
         columns.append("nt_id")
         values.append(fit_result.get("nt_id"))
+        columns.append("rxn_id")
+        values.append(fit_result.get("rxn_id"))
 
     # Construct query
     placeholders = ", ".join(["?"] * len(columns))

@@ -117,4 +117,8 @@ def test_all():
     adduction.process_melted_ind_params(db_path='test_output/nerd_dev.sqlite3')    
 
 if __name__ == "__main__":
-    test_all()
+    #est_all()
+    #timecourse.run(db_path='test_output/nerd_dev.sqlite3')
+    #adduction.process_melted_param_aggregation()
+    #adduction.process_melted_ind_params(db_path='test_output/nerd_dev.sqlite3') 
+    print(fetch.fetch_distinct_tempgrad_groups('test_output/nerd_dev.sqlite3'))

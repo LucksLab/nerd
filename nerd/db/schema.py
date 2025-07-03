@@ -40,6 +40,27 @@ CREATE TABLE IF NOT EXISTS reaction_groups (
 );
 """
 
+# === Table: tempgrad_group ===
+# temperature_gradient group shares buffer, construct, probe, probe_conc, RT
+
+CREATE_TEMPGRAD_GROUPS = """
+CREATE TABLE IF NOT EXISTS arrhenius_groups (
+    id INTEGER NOT NULL UNIQUE,                  -- Primary key for this table
+    tg_id INTEGER NOT NULL,                      -- Temperature gradient group identifier
+    rg_id INTEGER NOT NULL,                  -- Foreign key to reaction_groups table
+    buffer_id INTEGER NOT NULL,              -- Foreign key to buffers table
+    construct_id INTEGER NOT NULL,           -- Foreign key to constructs table
+    RT TEXT NOT NULL,                            -- Reverse transcription enzyme or protocol ("MRT", "SSIII", etc.)
+    probe TEXT NOT NULL,                         -- Name of chemical probe (e.g. "dms")
+    probe_concentration REAL NOT NULL,           -- Concentration of probe (M)
+    temperature REAL NOT NULL,                   -- Temperature of the reaction (Celsius)
+    replicate INTEGER NOT NULL,                  -- Replicate number
+    PRIMARY KEY(id AUTOINCREMENT),
+    FOREIGN KEY(rg_id) REFERENCES reaction_groups(id),
+    UNIQUE(tg_id, rg_id)                               -- Ensure unique temperature gradient group IDs
+"""
+
+
 # === Table: constructs ===
 CREATE_CONSTRUCTS = """ 
 CREATE TABLE IF NOT EXISTS constructs (
@@ -272,6 +293,7 @@ CREATE TABLE IF NOT EXISTS probing_kinetic_rates (
     UNIQUE(rg_id, model, species, nt_id, rxn_id)        -- Ensure unique rates per reaction group and species
 );
 """
+
 
 # === Table: arrhenius_fits ===
 CREATE_ARRHENIUS_FITS = """

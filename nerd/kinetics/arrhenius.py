@@ -28,6 +28,7 @@ def rows_to_dicts(rows, description):
     column_names = [desc[0] for desc in description]
     return [dict(zip(column_names, row)) for row in rows]
 
+
 def run(reaction_type="deg", data_source="nmr", species = "dms", 
         buffer = "Schwalbe_bistris", db_path: str = ''):
     """
@@ -53,21 +54,6 @@ def run(reaction_type="deg", data_source="nmr", species = "dms",
         y_errs = np.array([r["k_error"] / r["k_value"] for r in data]) if "k_error" in description else None
         weights = 1 / y_errs**2 if y_errs is not None else None
     
-    elif data_source == "probing":
-        conn = connect_db(db_path)
-        buffer_id = fetch_buffer_id(buffer, db_path)
-        # TOWRITE
-        data, description = fetch_probing_kinetic_rates(conn, buffer_id, species, reaction_type)
-        conn.close()
-
-        if not data:
-            console.print(f"[red]No probing kinetic rates found for reaction type '{reaction_type}' with species '{species}' and buffer '{buffer}'[/red]")
-            return
-        data = rows_to_dicts(data, description)
-        x_vals = np.array([1 / r["temperature"] for r in data])
-        y_vals = np.array([np.log(r["k_value"]) for r in data])
-        y_errs = np.array([r["k_error"] / r["k_value"] for r in data]) if "k_error" in description else None
-        weights = 1 / y_errs**2 if y_errs is not None else None
     else:
         console.print(f"[red]Unsupported data source: {data_source}[/red]")
         return
@@ -117,3 +103,29 @@ def run(reaction_type="deg", data_source="nmr", species = "dms",
 
     console.print(f"[green]Imported Arrhenius fits for {count} samples[/green]")
 
+def run_probing(reaction_type="probing", data_source="nmr", species = "dms", 
+        buffer = "Schwalbe_bistris", db_path: str = ''):
+    """
+    CLI entrypoint for Arrhenius fitting for probing data.
+    """
+
+    if data_source == "probing":
+        conn = connect_db(db_path)
+        buffer_id = fetch_buffer_id(buffer, db_path)
+        # List all unique groups to run Arrhenius (unique combinations - model agg (unique construct, buffer, rt, species))
+        # model ind (unique construct, buffer, rt, species)
+
+        
+        data, description = fetch_probing_kinetic_rates(conn, buffer_id, species, reaction_type)
+        conn.close()
+
+        if not data:
+            console.print(f"[red]No probing kinetic rates found for reaction type '{reaction_type}' with species '{species}' and buffer '{buffer}'[/red]")
+            return
+        data = rows_to_dicts(data, description)
+        x_vals = np.array([1 / r["temperature"] for r in data])
+        y_vals = np.array([np.log(r["k_value"]) for r in data])
+        y_errs = np.array([r["k_error"] / r["k_value"] for r in data]) if "k_error" in description else None
+        weights = 1 / y_errs**2 if y_errs is not None else None
+
+    return

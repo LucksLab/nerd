@@ -558,3 +558,33 @@ def fetch_probing_kinetic_rate(conn: sqlite3.Connection, buffer_id: int, species
 
     result = cursor.fetchone()
     return result[0] if result else None
+
+
+def fetch_distinct_tempgrad_group(db_path: str) -> list:
+    """
+    Fetch distinct temperature gradient groups from the database.
+
+    Args:
+        db_path (str): Path to the database file.
+
+    Returns:
+        list: List of tuples containing distinct temperature gradient groups.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT DISTINCT
+            pr.rg_id,
+            pr.buffer_id,
+            pr.construct_id,
+            pr.RT,
+            pr.probe,
+            pr.probe_concentration
+        FROM probing_reactions pr
+        WHERE pr.treated = 1
+    """)
+
+    results = cursor.fetchall()
+    conn.close()
+    return results
