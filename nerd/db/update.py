@@ -26,8 +26,6 @@ def assign_tempgrad_groups(db_path: str, results: list) -> int:
             condition_to_tg[cond] = tg_counter
             tg_counter += 1
 
-    print(condition_to_tg)
-
     # Step 2: Loop through each rg_id and fetch its condition tuple
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -43,7 +41,7 @@ def assign_tempgrad_groups(db_path: str, results: list) -> int:
     for rg_id, buffer_id, construct_id, RT, probe, probe_concentration, temp, rep in cursor.fetchall():
         cond_tuple = (buffer_id, construct_id, RT, probe, probe_concentration)
         tg_id = condition_to_tg.get(cond_tuple)
-        print(tg_id)
+
         if tg_id is not None:
             # insert into tempgrad_groups table
             tempgrad_insert_dict = {

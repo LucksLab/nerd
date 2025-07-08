@@ -101,6 +101,8 @@ def test_all():
         db_path='test_output/nerd_dev.sqlite3'
     )
 
+    probing_sample.process_tempgrad_groups(db_path='test_output/nerd_dev.sqlite3')
+
     print("\n[IMPORT FMOD CALC RUNS]")
 
     # Import fmod_calc runs
@@ -117,12 +119,29 @@ def test_all():
     adduction.process_melted_param_aggregation()
     adduction.process_melted_ind_params(db_path='test_output/nerd_dev.sqlite3')    
 
-if __name__ == "__main__":
-    #est_all()
-    #timecourse.run(db_path='test_output/nerd_dev.sqlite3')
-    #adduction.process_melted_param_aggregation()
-    #adduction.process_melted_ind_params(db_path='test_output/nerd_dev.sqlite3') 
-    tempgrad_conditions = fetch.fetch_distinct_tempgrad_group('test_output/nerd_dev.sqlite3')
-    rg_to_tg = update.assign_tempgrad_groups('test_output/nerd_dev.sqlite3', tempgrad_conditions)
+    arrhenius.run_probing(
+        reaction_type="global_deg",
+        species="dms",
+        db_path='test_output/nerd_dev.sqlite3'
+    )
 
-    print(rg_to_tg)
+    for base in ["A", "C", "G", "T"]:
+        arrhenius.run_probing(
+            reaction_type="melted_agg_obs",
+            species=f"rna_{base}",
+            db_path='test_output/nerd_dev.sqlite3'
+        )
+        
+        arrhenius.run_probing(
+            reaction_type="melted_ind_obs",
+            species="rna_{base}",
+            db_path='test_output/nerd_dev.sqlite3'
+        )
+
+if __name__ == "__main__":
+    #test_all()
+    arrhenius.run_probing(
+            reaction_type="melted_agg_obs_by_fam",
+            species=f"rna_A",
+            db_path='test_output/nerd_dev.sqlite3'
+        )

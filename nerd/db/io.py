@@ -2,7 +2,7 @@
 
 import sqlite3
 from pathlib import Path
-from nerd.db.schema import ALL_TABLES
+from nerd.db.schema import ALL_TABLES, ALL_INDEXES
 from rich.console import Console
 console = Console()
 DEFAULT_DB_PATH = Path("nerd.sqlite3")  # fallback if not specified
@@ -14,14 +14,18 @@ def connect_db(db_path: str) -> sqlite3.Connection:
     db_file = Path(db_path) if db_path else DEFAULT_DB_PATH
     return sqlite3.connect(db_file)
 
-
 def init_db(conn: sqlite3.Connection):
-    """Create tables defined in schema.py if they don't exist."""
+    """Create tables and indexes defined in schema.py if they don't exist."""
     cursor = conn.cursor()
-    for stmt in ALL_TABLES:
-        cursor.execute(stmt)
-    conn.commit()
 
+    for stmt in ALL_TABLES:
+        cursor.executescript(stmt)  # safer for multi-line CREATE TABLE statements
+
+    for index_stmt in ALL_INDEXES:
+        cursor.executescript(index_stmt)
+
+    conn.commit()
+    
 def check_db(conn: sqlite3.Connection, TABLE: str, REQUIRED_COLUMNS: list):
     """Check if a table exists and has the required columns."""
     cursor = conn.cursor()
@@ -95,14 +99,12 @@ def insert_fitted_kinetic_rate(conn, fit_result: dict):
 
 def insert_arrhenius_fit(conn, fit_result: dict):
     cursor = conn.cursor()
-    cursor.execute("""
-        INSERT OR IGNORE INTO arrhenius_fits (
-            reaction_type, data_source, substrate, buffer_id,
-            slope, slope_err,
-            intercept, intercept_err,
-            r2, model_file
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (fit_result.get("reaction_type"),
+    print(f"INSERT INTO arrhenius_fits: {fit_result}")
+    # Base columns and values
+    columns = ["reaction_type", "data_source", "substrate", "buffer_id", 
+               "slope", "slope_err", "intercept", "intercept_err", "r2", "model_file"]
+    values = [
+        fit_result.get("reaction_type"),
         fit_result.get("data_source"),
         fit_result.get("substrate"),
         fit_result.get("buffer_id"),
@@ -111,8 +113,32 @@ def insert_arrhenius_fit(conn, fit_result: dict):
         fit_result.get("intercept"),
         fit_result.get("intercept_err"),
         fit_result.get("r2"),
-        fit_result.get("model_file"),
-    ))
+        fit_result.get("model_file")
+    ]
+    
+    # Optionally add tg_id and nt_id
+    if "tg_id" in fit_result:
+        columns.append("tg_id")
+        values.append(fit_result.get("tg_id"))
+    
+    if "nt_id" in fit_result:
+        columns.append("nt_id")
+        values.append(fit_result.get("nt_id"))
+    
+    # Construct query
+    placeholders = ", ".join(["?"] * len(columns))
+    columns_str = ", ".join(columns)
+    
+    query = f"""
+        INSERT INTO arrhenius_fits (
+            {columns_str}
+        ) VALUES (
+            {placeholders}
+        )
+    """
+    print(query, values)
+    cursor.execute(query, values)
+    print(f"Inserted {cursor.rowcount} rows into arrhenius_fits")
     conn.commit()
     return cursor.rowcount > 0
 
@@ -422,6 +448,50 @@ def insert_tempgrad_group(db_path, tempgrad_insert_dict):
     return success
 
 # === Miscellaneous (might incorporate) ===
+from collections import defaultdict
+
+def group_fam_tg_ids(db_path: str) -> dict[int, dict]:
+    """
+    Group tg_ids by construct family and probing conditions.
+    
+    Returns:
+        dict: fam_tg_id (int) -> dict with 'family' and 'tg_ids' keys
+    """
+    conn = connect_db(db_path)
+    cursor = conn.cursor()
+
+    # Fetch construct family + probing conditions for all tg_ids
+    cursor.execute("""
+        SELECT 
+            tg.tg_id,
+            tg.buffer_id,
+            tg.RT,
+            tg.probe,
+            tg.probe_concentration,
+            c.family
+        FROM tempgrad_groups tg
+        JOIN constructs c ON tg.construct_id = c.id
+    """)
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    # Group tg_ids by (family, buffer_id, RT, probe, probe_concentration)
+    group_dict = defaultdict(set)  # use set to deduplicate tg_ids
+    for tg_id, buffer_id, RT, probe, probe_conc, family in rows:
+        group_key = (family, buffer_id, RT, probe, probe_conc)
+        group_dict[group_key].add(tg_id)  # set prevents duplicates
+
+    # Convert to indexed dict with family name
+    fam_tg_dict = {}
+    for i, (group_key, tg_set) in enumerate(group_dict.items(), start=1):
+        family, _, _, _, _ = group_key
+        fam_tg_dict[i] = {
+            "family": family,
+            "tg_ids": sorted(tg_set)  # sort for consistent order
+        }
+    print(fam_tg_dict)
+    return fam_tg_dict
 
 # def append_csv_to_sqlite(csv_file, table_name, db_file):
 #     """Appends a CSV file to a given SQLite table with matching column names."""

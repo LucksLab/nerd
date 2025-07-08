@@ -4,7 +4,8 @@ import csv
 from pathlib import Path
 from rich.console import Console
 from nerd.db.io import connect_db, check_db, insert_buffer, insert_construct, insert_nt_info, insert_seq_run
-
+from nerd.db.fetch import fetch_distinct_tempgrad_group
+from nerd.db.update import assign_tempgrad_groups
 import sqlite3
 import pandas as pd
 import numpy as np
@@ -28,7 +29,7 @@ SEQRUN_REQUIRED_COLUMNS = [
 ]
 
 # need to import buffer, construct (and nt_info), sequencing runs, then probing samples
-def import_buffer(csv_path: str, db_path: str = None):
+def import_buffer(csv_path: str, db_path: str = ''):
     """
     Import buffer data into the buffers table.
     """
@@ -396,3 +397,31 @@ def import_samples(csv_path: str, db_path: str = None):
     conn.commit()
     conn.close()
     print("Sample import completed!")
+
+
+### Automate tempgrad assignment
+
+def process_tempgrad_groups(db_path: str) -> int:
+    """
+    Assign a tg_id to each rg_id in the reaction_groups table based on shared condition sets.
+    This function fetches distinct conditions from the probing_reactions table and assigns a unique tg_id
+    to each unique set of conditions. It then updates the tempgrad_groups table with these assignments
+    and returns the count of successful insertions.
+
+    Args:
+        db_path (str): Path to the database file.
+    Returns:
+        int: Count of successful insertions into the tempgrad_groups table.
+    This function assumes that the probing_reactions table has the following columns:
+        - buffer_id
+        - construct_id 
+        - RT (reaction time)
+        - probe
+        - probe_concentration
+    """
+
+    tempgrad_conditions = fetch_distinct_tempgrad_group(db_path)
+    count_insert_success = assign_tempgrad_groups(db_path, tempgrad_conditions)
+    console.print(f"[green]✓ Imported {count_insert_success} tempgrad groups[/green]")
+
+    return count_insert_success

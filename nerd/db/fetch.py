@@ -587,3 +587,58 @@ def fetch_distinct_tempgrad_group(db_path: str) -> list:
     results = cursor.fetchall()
     conn.close()
     return results
+
+
+def fetch_probing_kinetic_rates(db_path: str, model: str, species: str) -> list:
+    """
+    Fetch reaction group IDs that have rates for a given reaction type and species.
+
+    Args:
+        db_path (str): Path to the database file.
+        model (str): Type of reaction (e.g., "global_deg", "melted_agg_obs", "melted_ind_obs").
+        species (str): Species involved in the reaction (e.g. "dms", "rna_A", "rna_C", "rna_T", "rna_G").
+
+    Returns:
+        list: List of tuples containing tg_id, rg_id, nt_id, rxn_id, k_value, k_error.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT tg.tg_id, kr.rg_id, kr.nt_id, kr.rxn_id, kr.k_value, kr.k_error, tg.temperature, tg.buffer_id, tg.construct_id
+        FROM probing_kinetic_rates kr
+        JOIN tempgrad_groups tg ON kr.rg_id = tg.rg_id
+        WHERE kr.model = ?
+        AND kr.species = ?
+        AND kr.r2 > 0.8
+    """, (model, species))
+
+    results = cursor.fetchall()
+    description = [desc for desc in cursor.description]
+    conn.close()
+    
+    return results, description
+
+
+def fetch_construct_disp_name(db_path: str, construct_id: int) -> Optional[str]:
+    """
+    Fetch the display name of a construct given its ID.
+    
+    Args:
+        db_path (str): Path to the database file.
+        construct_id (int): ID of the construct.
+    
+    Returns:
+        Optional[str]: Display name of the construct if found, otherwise None.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT disp_name FROM constructs WHERE id = ?
+    """, (construct_id,))
+    
+    result = cursor.fetchone()
+    conn.close()
+    
+    return result[0] if result else None

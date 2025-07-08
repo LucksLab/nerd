@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS tempgrad_groups (
     PRIMARY KEY(id AUTOINCREMENT),
     FOREIGN KEY(rg_id) REFERENCES reaction_groups(id),
     UNIQUE(tg_id, rg_id)                         -- Ensure unique temperature gradient group IDs
+);
 """
 
 
@@ -303,23 +304,46 @@ CREATE TABLE IF NOT EXISTS arrhenius_fits (
     data_source TEXT NOT NULL,                   -- "nmr", "probe_global", "probe_free"
     substrate TEXT NOT NULL,                     -- Substrate for which the fit is calculated (e.g. "ATP", "GTP", "none" for degradation)
     buffer_id INTEGER NOT NULL,                  -- Foreign key to buffers table
-    rg_id INTEGER,                               -- Foreign key to reaction_groups table
+    tg_id INTEGER,                               -- Foreign key to tempgrad_groups table
+    nt_id INTEGER,                               -- Foreign key to nucleotides table (optional, if extracted individually)
+    construct_family TEXT,                       -- Family of the construct (e.g. "Salm_4U_thermometer", "HIV-1_TAR")
     slope REAL NOT NULL,                         -- Slope of the Arrhenius fit (activation energy)
     slope_err REAL NOT NULL,                     -- Standard error of the slope
     intercept REAL NOT NULL,                     -- Intercept of the Arrhenius fit (log pre-exponential factor)
     intercept_err REAL NOT NULL,                 -- Standard error of the intercept
     r2 REAL NOT NULL,                            -- R-squared value of the fit
-    model_file TEXT,                             -- optional path to serialized fit object
+    model_file TEXT,                             -- Optional path to serialized fit object
     PRIMARY KEY(id AUTOINCREMENT),
     FOREIGN KEY(buffer_id) REFERENCES buffers(id),
-    UNIQUE(reaction_type, data_source, substrate) -- Ensure unique fits per reaction type and data source
+    FOREIGN KEY(tg_id) REFERENCES tempgrad_groups(tg_id)
 );
+"""
+
+# === Partial Unique Indexes for arrhenius_fits ===
+
+CREATE_INDEX_ARRHENIUS_NO_GROUP = """
+CREATE UNIQUE INDEX IF NOT EXISTS unique_arrhenius_no_group
+ON arrhenius_fits (reaction_type, data_source, substrate, buffer_id)
+WHERE tg_id IS NULL AND nt_id IS NULL;
+"""
+
+CREATE_INDEX_ARRHENIUS_TG_ONLY = """
+CREATE UNIQUE INDEX IF NOT EXISTS unique_arrhenius_tg_only
+ON arrhenius_fits (reaction_type, data_source, substrate, buffer_id, tg_id)
+WHERE tg_id IS NOT NULL AND nt_id IS NULL;
+"""
+
+CREATE_INDEX_ARRHENIUS_TG_NT = """
+CREATE UNIQUE INDEX IF NOT EXISTS unique_arrhenius_tg_nt
+ON arrhenius_fits (reaction_type, data_source, substrate, buffer_id, tg_id, nt_id)
+WHERE tg_id IS NOT NULL AND nt_id IS NOT NULL;
 """
 
 # === Aggregate all table creation statements ===
 ALL_TABLES = [
     CREATE_PROBING_REACTIONS,
     CREATE_REACTION_GROUPS,
+    CREATE_TEMPGRAD_GROUPS,
     CREATE_CONSTRUCTS,
     CREATE_BUFFERS,
     CREATE_NUCLEOTIDES,
@@ -334,4 +358,10 @@ ALL_TABLES = [
     CREATE_ARRHENIUS_FITS,
     CREATE_PROBING_MELT_FITS,
     CREATE_PROBING_KINETIC_RATES
+]
+
+ALL_INDEXES = [
+    CREATE_INDEX_ARRHENIUS_NO_GROUP,
+    CREATE_INDEX_ARRHENIUS_TG_ONLY,
+    CREATE_INDEX_ARRHENIUS_TG_NT
 ]
