@@ -116,7 +116,6 @@ def fit_ODE_probe(dms_perc, peak_perc, ntp_conc):
 
     return out.params, r_squared, chi_sq
 
-
 # === Time-course HDX model (free) ===
 # def get_kdeg(temp, slope, intercept):
 #     return np.exp(slope / (temp + 273.15) + intercept)
@@ -268,7 +267,7 @@ def global_fit_timecourse(time_data_array, fmod_data_array, kappa_array, kdeg_ar
     return out.params['log_kdeg_1'].value, out.params['log_kdeg_1'].stderr, out.chisqr, r2
 
 
-# === Time-course HDX model (global) ===
+# === Tempgrad 2-state melting fit ===
 def melt_fit(x, a, b, c, d, f, g):
     # a: slope of the unfolded state
     # b: y-intercept of the unfolded state
@@ -281,16 +280,63 @@ def melt_fit(x, a, b, c, d, f, g):
 
     R = 0.001987
     R = 0.0083145
-    k_add = np.exp((f/R)*(1/(g+273.15) - 1/(temp)))
-    Q1 = 1 + k_add
+    K1 = np.exp((f/R)*(1/(g+273.15) - 1/(temp)))
+    Q1 = 1 + K1
     fracu = 1 / Q1
-    fracf = k_add / Q1
+    fracf = K1 / Q1
     basef = a * x + b
     baseu = c * x + d
 
     final = np.log(fracu) * baseu + np.log(fracf) * basef
     final = fracu * baseu + fracf * basef
     return final
+
+def fit_meltcurve(x, y, kadd_params = None):
+    
+    # Make sure x is sorted
+
+    # Guess top baseline
+    model = LinearModel()
+    params = model.guess(y[:3], x = x[:3])
+    top_fit = model.fit(y[:3], params, x = x[:3])
+    init_m_top = top_fit.params['slope'].value
+    init_b_top = top_fit.params['intercept'].value
+
+    # Guess bottom baseline
+    params = model.guess(y[-3:], x = x[-3:])
+    bot_fit = model.fit(y[-3:], params, x = x[-3:])
+    init_m_bot = bot_fit.params['slope'].value
+    init_b_bot = bot_fit.params['intercept'].value
+    
+    init_m = (init_m_top + init_m_bot) / 2
+
+    # Actual fit
+    melt_model = Model(melt_fit)
+    melt_params = melt_model.make_params(a = init_m_bot, b = init_b_bot, c = init_m_top, d = init_b_top, f = -500, g = 40)
+    melt_params['g'].vary = True
+    # bottom intercept needs to be lower than upper intercept
+    melt_params['b'].max = init_b_top
+
+    if kadd_params is not None:
+        # lock to kadd_params
+        kadd_slope, kadd_intercept = kadd_params
+        melt_params['c'].value = kadd_slope
+        melt_params['d'].value = kadd_intercept
+        melt_params['c'].vary = False
+        melt_params['d'].vary = False
+    
+
+    melt_result = melt_model.fit(y, melt_params, x = x, method = 'least_squares', verbose = True)
+
+    return melt_result
+
+# calculate smoothed best-fit values based on melt_result
+def calc_smoothed_best_fit(melt_result):
+    x = melt_result.userkws['x']
+    x_data = np.linspace(min(x), max(x), 1000)
+    y_data = melt_result.eval(x = x_data)
+    return x_data, y_data
+
 
 # === 4. Generic fit wrapper ===
 def run_fit(model, params, x, y):

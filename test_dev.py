@@ -1,6 +1,6 @@
 from nerd.importers import fmod_calc, probing_sample, nmr
 from nerd.kinetics import degradation, adduction, arrhenius, timecourse
-#from nerd.energy import meltfit, calc_K
+from nerd.energy import meltfit, calcK
 from nerd.db import io, fetch, update
 from nerd.utils import plotting
 
@@ -138,10 +138,13 @@ def test_all():
             db_path='test_output/nerd_dev.sqlite3'
         )
 
+        arrhenius.run_probing(
+                reaction_type="melted_agg_obs_by_fam",
+                species=f"rna_A",
+                db_path='test_output/nerd_dev.sqlite3'
+            )
+
+
 if __name__ == "__main__":
     #test_all()
-    arrhenius.run_probing(
-            reaction_type="melted_agg_obs_by_fam",
-            species=f"rna_A",
-            db_path='test_output/nerd_dev.sqlite3'
-        )
+    meltfit.run(db_path='test_output/nerd_dev.sqlite3')

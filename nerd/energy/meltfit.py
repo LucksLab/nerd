@@ -2,60 +2,70 @@
 
 import numpy as np
 import pandas as pd
-from lmfit import Model
 from rich.console import Console
-
+from nerd.db.fetch import fetch_all_tempgrad_groups, fetch_all_kobs
+from nerd.utils.fit_models import fit_meltcurve
 console = Console()
+from collections import defaultdict
 
-R = 1.987e-3  # kcal/mol·K
-
-def two_state_K(T, dH, dS):
-    """
-    Compute equilibrium constant K(T) from ΔH and ΔS via van't Hoff.
-    """
-    return 1 / (1 + np.exp((dH - T * dS) / (R * T)))
-
-
-def fit_two_state_melt(df: pd.DataFrame):
-    """
-    Fit K(T) to a 2-state van’t Hoff model using lmfit.
-    Assumes df has columns: 'temperature' (C or K), 'k_obs'
-    """
-    if "temperature" not in df.columns or "k_obs" not in df.columns:
-        raise ValueError("Input DataFrame must contain 'temperature' and 'k_obs' columns.")
-
-    # Convert temp to Kelvin if needed
-    if df["temperature"].max() < 150:
-        df["T"] = df["temperature"] + 273.15
-    else:
-        df["T"] = df["temperature"]
-
-    # Normalize k_obs to estimate relative K
-    kobs_norm = df["k_obs"] / df["k_obs"].max()
-
-    model = Model(two_state_K)
-    params = model.make_params(dH=10.0, dS=0.03)
-    result = model.fit(kobs_norm, params, T=df["T"])
-
-    return result
-
-
-def run(csv_path: str):
+def run(db_path: str):
     """
     CLI entrypoint: fit 2-state melt curve from CSV of k_obs vs. temperature.
     """
     try:
-        df = pd.read_csv(csv_path)
-        result = fit_two_state_melt(df)
+        tg_ids = fetch_all_tempgrad_groups(db_path = db_path)
+        if not tg_ids:
+            console.print("[red]No temperature gradient groups found in the database.[/red]")
+            return
+        console.print(f"[green]Found {len(tg_ids)} temperature gradient groups to process.[/green]")
 
-        dH = result.params["dH"].value
-        dS = result.params["dS"].value
-        dH_err = result.params["dH"].stderr
-        dS_err = result.params["dS"].stderr
+        # Step 1: Collect all kobs data across temperature gradient groups
+        all_kobs_data = []
 
-        console.print(f"[green]✓ Melt fit complete[/green]")
-        console.print(f"  ΔH = {dH:.2f} ± {dH_err:.2f} kcal/mol")
-        console.print(f"  ΔS = {dS:.4f} ± {dS_err:.4f} kcal/mol·K")
+        for tg_entry in tg_ids:
+            tg_id = tg_entry[0]
+            temp = tg_entry[1]
+            buffer_id = tg_entry[2]
+            construct_id = tg_entry[3]
+
+            console.print(f"[blue]Processing temperature gradient group ID: {tg_id}[/blue]")
+            console.print(f"Temperature: {temp}, Buffer ID: {buffer_id}, Construct ID: {construct_id}")
+
+            # Fetch k_obs data for this temperature group
+            kobs_data = fetch_all_kobs(db_path, tg_id)
+            if not kobs_data:
+                console.print(f"[red]No k_obs data found for TG ID: {tg_id}[/red]")
+                continue
+
+            all_kobs_data.extend(kobs_data)
+
+        console.print(f"[green]Fetched total {len(all_kobs_data)} k_obs records across all TGs[/green]")
+
+        # Step 2: Group by unique nucleotide (e.g., by nt_id or (nt_id, site))
+        grouped_by_nt = defaultdict(list)
+        for row in all_kobs_data:
+            # Unpack: (kobs_val, kobs_err, chisq, r2, nt_id, base, site, temperature)
+            kobs_val, kobs_err, chisq, r2, nt_id, base, site, temperature = row
+            grouped_by_nt[(nt_id, site)].append((kobs_val, kobs_err, temperature))
+
+        # Step 3: Fit kobs vs 1/T for each nucleotide
+        for (nt_id, site), records in grouped_by_nt.items():
+            console.print(f"\nProcessing nt_id={nt_id} (site={site}) with {len(records)} records...")
+            if len(records) < 3:
+                console.print(f"[yellow]Skipping nt_id={nt_id} (site={site}): only {len(records)} temperatures[/yellow]")
+                continue
+
+            # Extract values
+            temps = np.array([rec[2] for rec in records])        # temperature
+            kobs_vals = np.array([rec[0] for rec in records])    # k_obs
+            kobs_errs = np.array([rec[1] for rec in records])    # error in k_obs
+
+            # Convert temperature to 1/T in Kelvin
+            inv_T = 1 / (temps + 273.15)
+
+            result = fit_meltcurve(inv_T, kobs_vals)
+            console.print(f"[green]Fitting result for nt_id={nt_id} (site={site}):[/green]")
+            console.print(f" {result.fit_report()}")
 
         # Optionally store result to DB or file
 

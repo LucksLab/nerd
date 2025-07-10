@@ -642,3 +642,80 @@ def fetch_construct_disp_name(db_path: str, construct_id: int) -> Optional[str]:
     conn.close()
     
     return result[0] if result else None
+
+
+def fetch_all_tempgrads(db_path: str) -> list:
+    """
+    Fetch all temperature gradient groups from the database.
+    
+    Args:
+        db_path (str): Path to the database file.
+    
+    Returns:
+        list: List of tuples containing temperature gradient group data.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT tg.tg_id, tg.temperature, tg.buffer_id, tg.construct_id
+        FROM tempgrad_groups tg
+    """)
+    
+    results = cursor.fetchall()
+    conn.close()
+    
+    return results
+
+def fetch_all_tempgrad_groups(db_path: str) -> list:
+    """
+    Fetch all temperature gradient groups from the database.
+
+    Args:
+        db_path (str): Path to the database file.
+
+    Returns:
+        list: List of tuples containing temperature gradient group data.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT tg.tg_id, tg.temperature, tg.buffer_id, tg.construct_id
+        FROM tempgrad_groups tg
+    """)
+
+    results = cursor.fetchall()
+    conn.close()
+
+    return results
+
+def fetch_all_kobs(db_path: str, tg_id: int) -> list:
+    """
+    Fetch all kobs (observed rate constants) from the database.
+
+    Args:
+        db_path (str): Path to the database file.
+        tg_id (int): ID of the temperature gradient group.
+
+    Returns:
+        list: List of tuples containing kobs data.
+    """
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT cf.kobs_val, cf.kobs_err, cf.chisq, cf.r2, n.id, n.base, n.site,
+                   tg.temperature
+        FROM constrained_tc_fits cf
+        JOIN tempgrad_groups tg ON cf.rg_id = tg.rg_id
+        JOIN nucleotides n ON cf.nt_id = n.id
+        WHERE cf.kobs_err > 0           
+        AND tg.tg_id = ?
+    """, (tg_id,))
+
+    results = cursor.fetchall()
+    conn.close()
+
+    return results
