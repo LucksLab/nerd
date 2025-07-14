@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from rich.console import Console
 from nerd.db.fetch import fetch_all_tempgrad_groups, fetch_all_kobs
+from nerd.db.io import insert_melt_fit
 from nerd.utils.fit_models import fit_meltcurve
 console = Console()
 from collections import defaultdict
@@ -48,6 +49,8 @@ def run(db_path: str):
             kobs_val, kobs_err, chisq, r2, nt_id, base, site, temperature = row
             grouped_by_nt[(nt_id, site)].append((kobs_val, kobs_err, temperature))
 
+
+        count = 0
         # Step 3: Fit kobs vs 1/T for each nucleotide
         for (nt_id, site), records in grouped_by_nt.items():
             console.print(f"\nProcessing nt_id={nt_id} (site={site}) with {len(records)} records...")
@@ -63,11 +66,36 @@ def run(db_path: str):
             # Convert temperature to 1/T in Kelvin
             inv_T = 1 / (temps + 273.15)
 
-            result = fit_meltcurve(inv_T, kobs_vals)
+            try:
+                result = fit_meltcurve(inv_T, kobs_vals)
+                fit_data = {
+                    'tg_id': tg_id,
+                    'nt_id': nt_id,
+                    'a': result.params['a'].value,
+                    'a_err': result.params['a'].stderr,
+                    'b': result.params['b'].value,
+                    'b_err': result.params['b'].stderr,
+                    'c': result.params['c'].value,
+                    'c_err': result.params['c'].stderr,
+                    'd': result.params['d'].value,
+                    'd_err': result.params['d'].stderr,
+                    'f': result.params['f'].value,
+                    'f_err': result.params['f'].stderr,
+                    'g': result.params['g'].value,
+                    'g_err': result.params['g'].stderr,
+                    'r2': result.rsquared if hasattr(result, 'rsquared') else compute_r2(result),  # fallback if not stored
+                    'chisq': result.chisqr
+                }
+                insert_success = insert_melt_fit(db_path, fit_data)
+                count += insert_success
+
+            except Exception as e:
+                console.print(f"[red]Error fitting melt curve for nt_id={nt_id} (site={site}): {e}[/red]")
+                continue
             console.print(f"[green]Fitting result for nt_id={nt_id} (site={site}):[/green]")
             console.print(f" {result.fit_report()}")
 
         # Optionally store result to DB or file
-
+        console.print(f"[green]Successfully inserted {count} melt fit records into the database.[/green]")
     except Exception as e:
         console.print(f"[red]Fit failed:[/red] {e}")

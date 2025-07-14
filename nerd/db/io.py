@@ -493,6 +493,41 @@ def group_fam_tg_ids(db_path: str) -> dict[int, dict]:
     print(fam_tg_dict)
     return fam_tg_dict
 
+
+def insert_melt_fit(db_path, fit_data: dict):
+    """
+    Insert a melt curve fit result into the probing_melt_fits table.
+
+    Args:
+        conn (sqlite3.Connection): SQLite database connection.
+        fit_data (dict): Dictionary containing the melt fit data.
+            Expected keys: 'tg_id', 'nt_id',
+                           'a', 'a_err', 'b', 'b_err',
+                           'c', 'c_err', 'd', 'd_err',
+                           'f', 'f_err', 'g', 'g_err',
+                           'r2', 'chisq'.
+    """
+    conn = connect_db(db_path)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO probing_melt_fits (
+            tg_id, nt_id,
+            a, a_err, b, b_err,
+            c, c_err, d, d_err,
+            f, f_err, g, g_err,
+            r2, chisq
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        fit_data['tg_id'], fit_data['nt_id'],
+        fit_data['a'], fit_data['a_err'], fit_data['b'], fit_data['b_err'],
+        fit_data['c'], fit_data['c_err'], fit_data['d'], fit_data['d_err'],
+        fit_data['f'], fit_data['f_err'], fit_data['g'], fit_data['g_err'],
+        fit_data['r2'], fit_data['chisq']
+    ))
+    conn.commit()
+
+    return cursor.rowcount > 0
+
 # def append_csv_to_sqlite(csv_file, table_name, db_file):
 #     """Appends a CSV file to a given SQLite table with matching column names."""
     

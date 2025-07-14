@@ -213,18 +213,24 @@ CREATE TABLE IF NOT EXISTS constrained_tc_fits (
 CREATE_PROBING_MELT_FITS = """
 CREATE TABLE IF NOT EXISTS probing_melt_fits (
     id INTEGER NOT NULL UNIQUE,                      -- Primary key for this table
-    rg_id INTEGER NOT NULL,                          -- Foreign key to reaction_groups table
+    tg_id INTEGER NOT NULL,                          -- Foreign key to tempgrad_groups table
     nt_id INTEGER NOT NULL,                          -- Foreign key to nucleotides table
     a REAL NOT NULL,                                 -- Slope of the unfolded state
+    a_err REAL NOT NULL,                            -- Standard error of the slope of the unfolded state
     b REAL NOT NULL,                                 -- Y-intercept of the unfolded state
+    b_err REAL NOT NULL,                             -- Standard error of the Y-intercept of the unfolded state
     c REAL NOT NULL,                                 -- Slope of the folded state
+    c_err REAL NOT NULL,                             -- Standard error of the slope of the folded state
     d REAL NOT NULL,                                 -- Y-intercept of the folded state
+    d_err REAL NOT NULL,                             -- Standard error of the Y-intercept of the folded state
     f REAL NOT NULL,                                 -- Energy of the transition state
+    f_err REAL NOT NULL,                             -- Standard error of the energy of the transition state
     g REAL NOT NULL,                                 -- Temperature of the transition state
+    g_err REAL NOT NULL,                             -- Standard error of the temperature of the transition state
     r2 REAL NOT NULL,                                -- R-squared value of the fit
     chisq REAL NOT NULL,                             -- Chi-squared value of the fit
     PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(rg_id) REFERENCES reaction_groups(rg_id),
+    FOREIGN KEY(tg_id) REFERENCES tempgrad_groups(tg_id),
     FOREIGN KEY(nt_id) REFERENCES nucleotides(id)
 );
 """
