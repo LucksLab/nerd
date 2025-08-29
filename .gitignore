@@ -72,4 +72,5 @@ coverage.xml
 
 # Egg metadata in repo (keep ignored even if already present)
 /nerd.egg-info/
-/nerd/nerd.egg-info/
+/nerd/nerd.egg-info/git rm -r --cached .
+
