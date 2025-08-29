@@ -1,0 +1,75 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# VS Code / Editors
+.vscode/
+.history/
+.idea/
+*.code-workspace
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python packaging
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+wheelhouse/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+.env
+.env.*
+.python-version
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+.cache/
+htmlcov/
+coverage.xml
+
+# Type checkers / linters
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Sphinx docs
+/docs/_build/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
+
+# Project-specific ignores
+# Generated SQLite DBs and plots from local runs
+/test_output/**/*.sqlite*
+/test_output/plots/
+
+# Egg metadata in repo (keep ignored even if already present)
+/nerd.egg-info/
+/nerd/nerd.egg-info/
