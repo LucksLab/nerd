@@ -1,33 +1,51 @@
-nerd/                            # Your main Python package
+nerd/
 ├── __init__.py
-├── cli.py                       # CLI entrypoint (called by `nerd` command)
-├── main.py                      # Dispatch logic for CLI subcommands
+├── cli.py
+├── folder_structure.txt
+├── main.py
+├── __pycache__/
+├── config/
+│   └── defaults.toml
 ├── db/
 │   ├── __init__.py
-│   ├── schema.py                # Schema definitions
-│   └── io.py                    # SQLite I/O helpers
-├── importers/
-│   ├── __init__.py
-│   ├── sample.py                # Sample sheet import
-│   ├── shapemapper.py           # SHAPEMapper folder import
-│   └── nmr.py                   # NMR sample import
-├── kinetics/
-│   ├── __init__.py
-│   ├── degradation.py
-│   ├── adduction.py
-│   ├── timecourse.py
-│   └── arrhenius.py
+│   ├── fetch.py
+│   ├── io.py
+│   ├── schema.py
+│   ├── update.py
+│   └── __pycache__/
+├── docs/
+│   └── conf.py
 ├── energy/
 │   ├── __init__.py
+│   ├── calcK.py
 │   ├── meltfit.py
-│   └── calc_K.py
-├── utils/
+│   └── __pycache__/
+├── importers/
 │   ├── __init__.py
-│   ├── fit_wrappers.py          # lmfit models
-│   ├── plotting.py              # matplotlib or Rich visualization
-│   └── logging.py               # optional: centralized Rich logging
-├── config/
-│   └── defaults.toml            # optional: default settings
-tests/                           # Optional: unit tests
-pyproject.toml                   # Build system + metadata
-README.md                        # Project description
+│   ├── fmod_calc.py
+│   ├── nmr.py
+│   ├── probing_sample.py
+│   └── __pycache__/
+├── kinetics/
+│   ├── __init__.py
+│   ├── adduction.py
+│   ├── arrhenius.py
+│   ├── degradation.py
+│   ├── timecourse.py
+│   └── __pycache__/
+├── nerd.egg-info/
+│   ├── PKG-INFO
+│   ├── SOURCES.txt
+│   ├── dependency_links.txt
+│   ├── entry_points.txt
+│   ├── requires.txt
+│   └── top_level.txt
+└── utils/
+	├── __init__.py
+	├── config.py
+	├── fit_models.py
+	├── logging.py
+	├── param_aggregation.py
+	├── plotting.py
+	├── run_fmod_calc.py
+	└── __pycache__/

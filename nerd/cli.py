@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
 
 import argparse
-from rich.console import Console
+import logging
+from pathlib import Path
 from nerd.main import run_command
-
-console = Console()
-
+from nerd.utils.logging import setup_logging, get_logger
+log = get_logger(__name__)
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="nerd",
         description="Nucleotide energetics from reactivity data"
+    )
+
+    # Global logging flags
+    parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Enable verbose (DEBUG) logging"
+    )
+    parser.add_argument(
+        "--log-file", type=str, default=None,
+        help="Path to log file (enables file logging when provided)"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -52,8 +62,14 @@ def build_parser():
 def main():
     parser = build_parser()
     args = parser.parse_args()
+    # Initialize global logging once
+    level = logging.DEBUG if getattr(args, "verbose", False) else logging.INFO
+    if getattr(args, "log_file", None):
+        setup_logging(level=level, log_to_file=True, log_file=Path(args.log_file))
+    else:
+        setup_logging(level=level, log_to_file=False)
     try:
         run_command(args)
     except Exception as e:
-        console.print(f"[bold red]Fatal error:[/bold red] {e}")
+        log.exception("Fatal error: %s", e)
         raise

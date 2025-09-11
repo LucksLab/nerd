@@ -2,11 +2,11 @@
 
 import numpy as np
 import pandas as pd
-from rich.console import Console
+from nerd.utils.logging import get_logger
 from nerd.db.fetch import fetch_all_tempgrad_groups, fetch_all_kobs
 from nerd.db.io import insert_melt_fit
 from nerd.utils.fit_models import fit_meltcurve
-console = Console()
+log = get_logger(__name__)
 from collections import defaultdict
 
 def run(db_path: str):
@@ -16,9 +16,9 @@ def run(db_path: str):
     try:
         tg_ids = fetch_all_tempgrad_groups(db_path = db_path)
         if not tg_ids:
-            console.print("[red]No temperature gradient groups found in the database.[/red]")
+            log.error("No temperature gradient groups found in the database.")
             return
-        console.print(f"[green]Found {len(tg_ids)} temperature gradient groups to process.[/green]")
+        log.info("Found %d temperature gradient groups to process.", len(tg_ids))
 
         # Step 1: Collect all kobs data across temperature gradient groups
         all_kobs_data = []
@@ -29,18 +29,18 @@ def run(db_path: str):
             buffer_id = tg_entry[2]
             construct_id = tg_entry[3]
 
-            console.print(f"[blue]Processing temperature gradient group ID: {tg_id}[/blue]")
-            console.print(f"Temperature: {temp}, Buffer ID: {buffer_id}, Construct ID: {construct_id}")
+            log.info("Processing temperature gradient group ID: %s", tg_id)
+            log.debug("Temperature: %s, Buffer ID: %s, Construct ID: %s", temp, buffer_id, construct_id)
 
             # Fetch k_obs data for this temperature group
             kobs_data = fetch_all_kobs(db_path, tg_id)
             if not kobs_data:
-                console.print(f"[red]No k_obs data found for TG ID: {tg_id}[/red]")
+                log.error("No k_obs data found for TG ID: %s", tg_id)
                 continue
 
             all_kobs_data.extend(kobs_data)
 
-        console.print(f"[green]Fetched total {len(all_kobs_data)} k_obs records across all TGs[/green]")
+        log.info("Fetched total %d k_obs records across all TGs", len(all_kobs_data))
 
         # Step 2: Group by unique nucleotide (e.g., by nt_id or (nt_id, site))
         grouped_by_nt = defaultdict(list)
@@ -53,9 +53,9 @@ def run(db_path: str):
         count = 0
         # Step 3: Fit kobs vs 1/T for each nucleotide
         for (nt_id, site), records in grouped_by_nt.items():
-            console.print(f"\nProcessing nt_id={nt_id} (site={site}) with {len(records)} records...")
+            log.info("Processing nt_id=%s (site=%s) with %d records...", nt_id, site, len(records))
             if len(records) < 3:
-                console.print(f"[yellow]Skipping nt_id={nt_id} (site={site}): only {len(records)} temperatures[/yellow]")
+                log.warning("Skipping nt_id=%s (site=%s): only %d temperatures", nt_id, site, len(records))
                 continue
 
             # Extract values
@@ -83,19 +83,24 @@ def run(db_path: str):
                     'f_err': result.params['f'].stderr,
                     'g': result.params['g'].value,
                     'g_err': result.params['g'].stderr,
-                    'r2': result.rsquared if hasattr(result, 'rsquared') else compute_r2(result),  # fallback if not stored
+                    # Compute R² if not provided on result
+                    'r2': getattr(result, 'rsquared', None) if hasattr(result, 'rsquared') else None,
                     'chisq': result.chisqr
                 }
+                # If rsquared missing, compute from best fit vs observed
+                if fit_data['r2'] is None:
+                    y_pred = result.best_fit
+                    ss_res = np.sum((kobs_vals - y_pred) ** 2)
+                    ss_tot = np.sum((kobs_vals - np.mean(kobs_vals)) ** 2)
+                    fit_data['r2'] = 1 - ss_res / ss_tot if ss_tot != 0 else 0.0
                 insert_success = insert_melt_fit(db_path, fit_data)
                 count += insert_success
-
             except Exception as e:
-                console.print(f"[red]Error fitting melt curve for nt_id={nt_id} (site={site}): {e}[/red]")
+                log.exception("Error fitting melt curve for nt_id=%s (site=%s): %s", nt_id, site, e)
                 continue
-            console.print(f"[green]Fitting result for nt_id={nt_id} (site={site}):[/green]")
-            console.print(f" {result.fit_report()}")
+            log.debug("Fitting report for nt_id=%s (site=%s):\n%s", nt_id, site, result.fit_report())
 
         # Optionally store result to DB or file
-        console.print(f"[green]Successfully inserted {count} melt fit records into the database.[/green]")
+        log.info("Successfully inserted %d melt fit records into the database.", count)
     except Exception as e:
-        console.print(f"[red]Fit failed:[/red] {e}")
+        log.exception("Fit failed: %s", e)

@@ -2,13 +2,13 @@
 
 import pandas as pd
 from pathlib import Path
-from rich.console import Console
 from nerd.db.io import connect_db, insert_fitted_kinetic_rate, check_db, insert_melted_probing_rates
 from nerd.utils.param_aggregation import process_aggregation
 from nerd.utils.fit_models import fit_ODE_probe
 from nerd.db.fetch import fetch_melted_probing_data
+from nerd.utils.logging import get_logger
 
-console = Console()
+log = get_logger(__name__)
 
 # List of required columns for NMR reaction metadata import.
 REQUIRED_COLUMNS = [
@@ -56,26 +56,25 @@ def process_melted_param_aggregation(db_path: str = 'test_output/nerd_dev.sqlite
             )
         if result is not None:
             records, description = result
-            process_aggregation(records, description, db_path=db_path, console=console)
+            process_aggregation(records, description, db_path=db_path)
         else:
-            console.print("[red]Error:[/red] No data returned from fetch_melted_probing_data")
+            log.error("No data returned from fetch_melted_probing_data")
     except Exception as e:
-        console.print(f"[red]Error fetching data:[/red] {e}")
+        log.exception("Error fetching data: %s", e)
 
 
 def process_melted_ind_params(db_path: str = 'test_output/nerd_dev.sqlite3'):
-
     try:
         # Fetch all melted probing data
         result = fetch_melted_probing_data(db_path=db_path, temp_thres=60)
 
         if result:
-            success_inserts = insert_melted_probing_rates(result, db_path=db_path, console=console)
-            console.print(f"[green]✓ Inserted melted probing rates for {success_inserts} records[/green]")
+            success_inserts = insert_melted_probing_rates(result, db_path=db_path)
+            log.info("Inserted melted probing rates for %d records", success_inserts)
         else:
-            console.print("[red]Error:[/red] No data returned from fetch_melted_probing_data")
+            log.error("No data returned from fetch_melted_probing_data")
     except Exception as e:
-        console.print(f"[red]Error extracting melted individual parameters:[/red] {e}") 
+        log.exception("Error extracting melted individual parameters: %s", e)
 
 def run(all_samples: list, select_id: list = [], db_path: str = ''):
     """
@@ -105,25 +104,25 @@ def run(all_samples: list, select_id: list = [], db_path: str = ''):
         dms_perc_csv = Path(f'test_data/{csv_paths[1]}')
 
         if not peak_perc_csv.exists() or not dms_perc_csv.exists():
-            console.print(f"[red]Error:[/red] One or both CSV files not found: {csv_paths}")
+            log.error("One or both CSV files not found: %s", csv_paths)
             continue
 
-        console.print(f"[blue]Processing:[/blue] {peak_perc_csv.name} + {dms_perc_csv.name}")
-        
+        log.info("Processing: %s + %s", peak_perc_csv.name, dms_perc_csv.name)
+
         try:
             conn = connect_db(db_path)
 
             # Check if the database is initialized and has the required columns
             if not check_db(conn, "nmr_kinetic_rates", REQUIRED_COLUMNS):
-                console.print(f"[red]Error:[/red] Database initialization failed or missing required columns.")
+                log.error("Database initialization failed or missing required columns.")
                 conn.close()
                 return
             else:
-                console.print(f"[green]✓ Database check passed and ready for NMR import[/green]")
+                log.info("Database check passed and ready for NMR import")
 
             # Fit the kinetic trace
             k, k_err, rsq, chisq = fit_kinetic_trace(str(peak_perc_csv), str(dms_perc_csv), ntp_conc)
-            console.print(f"[green]✓ Fit complete[/green]: k = {k:.4f} ± {k_err:.4f}, R² = {rsq:.4f}, χ² = {chisq:.4f}")
+            log.info("Fit complete: k = %.4f ± %.4f, R² = %.4f, χ² = %.4f", k, (k_err or 0.0), rsq, chisq)
 
             # Prepare reaction metadata
             reaction_metadata = {
@@ -142,6 +141,5 @@ def run(all_samples: list, select_id: list = [], db_path: str = ''):
             conn.close()
 
         except Exception as e:
-            console.print(f"[red]Fit failed:[/red] {e}")
-
-    console.print(f"[green]✓ Imported kinetic fits for {count} NMR adduction samples[/green]")
+            log.exception("Fit failed: %s", e)
+    log.info("Imported kinetic fits for %d NMR adduction samples", count)

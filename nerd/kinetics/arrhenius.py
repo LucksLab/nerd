@@ -3,14 +3,14 @@
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from rich.console import Console
+from nerd.utils.logging import get_logger
 
 from nerd.db.io import connect_db, fetch_kinetic_rates, check_db, insert_arrhenius_fit, group_fam_tg_ids
 from nerd.db.fetch import fetch_construct_disp_name, fetch_probing_kinetic_rates
 from nerd.utils.fit_models import fit_linear
 from nerd.db.fetch import fetch_buffer_id
 
-console = Console()
+log = get_logger(__name__)
 
 REQUIRED_COLUMNS = [
     "reaction_type",  # Type of reaction (e.g. "deg")
@@ -41,26 +41,35 @@ def run(reaction_type="deg", data_source="nmr", species = "dms",
     if data_source == "nmr":
         conn = connect_db(db_path)  # row_factory set inside
         buffer_id = fetch_buffer_id(buffer, db_path)
+        if buffer_id is None:
+            log.error("Buffer '%s' not found in database.", buffer)
+            conn.close()
+            return
 
         data, description = fetch_kinetic_rates(conn, buffer_id, species, reaction_type)
         conn.close()
 
         if not data:
-            console.print(f"[red]No kinetic rates found for reaction type '{reaction_type}' with species '{species}' and buffer '{buffer}'[/red]")
+            log.error("No kinetic rates found for reaction type '%s' with species '%s' and buffer '%s'", reaction_type, species, buffer)
             return
 
         data = rows_to_dicts(data, description)
         x_vals = np.array([1 / r["temperature"] for r in data])
         y_vals = np.array([np.log(r["k_value"]) for r in data])
-        y_errs = np.array([r["k_error"] / r["k_value"] for r in data]) if "k_error" in description else None
-        weights = 1 / y_errs**2 if y_errs is not None else None
+        # Determine if k_error column exists in the DB cursor description
+        col_names = [desc[0] for desc in description]
+        y_errs = np.array([r.get("k_error", np.nan) / r["k_value"] for r in data]) if "k_error" in col_names else None
+        if y_errs is not None and np.all(np.isfinite(y_errs)):
+            weights = 1 / (y_errs ** 2)
+        else:
+            weights = None
 
     else:
-        console.print(f"[red]Unsupported data source: {data_source}[/red]")
+        log.error("Unsupported data source: %s", data_source)
         return
 
     try:
-        result = fit_linear(x_vals, y_vals, weights = weights)
+        result = fit_linear(x_vals, y_vals, weights=weights)
 
         slope = result.params["slope"].value
         slope_err = result.params["slope"].stderr
@@ -73,36 +82,42 @@ def run(reaction_type="deg", data_source="nmr", species = "dms",
             "data_source": data_source,
             "substrate": species,
             "buffer_id": buffer_id,
-            "rg_id": None, # only for probing data
+            "rg_id": None,  # only for probing data
             "slope": slope,
             "slope_err": slope_err,
             "intercept": intercept,
             "intercept_err": intercept_err,
             "r2": r2,
-            "model_file": None  # Optional, can be set to a file path if needed
+            "model_file": None,  # Optional, can be set to a file path if needed
         }
 
-        console.print(f"[green]✓ Arrhenius fit complete[/green]: slope = {slope:.4f} ± {slope_err:.4f}, intercept = {intercept:.4f} ± {intercept_err:.4f}, r² = {r2:.4f}")
+        log.info(
+            "Arrhenius fit complete: slope = %.4f ± %.4f, intercept = %.4f ± %.4f, r² = %.4f",
+            slope,
+            slope_err or 0.0,
+            intercept,
+            intercept_err or 0.0,
+            r2,
+        )
 
         conn = connect_db(db_path)
 
         # Check if the database is initialized and has the required columns
         if not check_db(conn, "arrhenius_fits", REQUIRED_COLUMNS):
-            console.print(f"[red]Error:[/red] Database initialization failed or missing required columns.")
+            log.error("Database initialization failed or missing required columns.")
             conn.close()
             return
         else:
-            console.print(f"[green]✓ Database check passed and ready for Arrhenius fit import[/green]")
-
+            log.info("Database check passed and ready for Arrhenius fit import")
 
         insert_success = insert_arrhenius_fit(conn, fit_result)
         count += insert_success
         conn.close()
 
     except Exception as e:
-        console.print(f"[red]Fit failed:[/red] {e}")
+        log.exception("Fit failed: %s", e)
 
-    console.print(f"[green]Imported Arrhenius fits for {count} samples[/green]")
+    log.info("Imported Arrhenius fits for %d samples", count)
 
 
 
@@ -154,8 +169,8 @@ def run_probing(reaction_type="global_deg", species = "dms", db_path: str = ''):
                 construct_name = fetch_construct_disp_name(db_path, construct_id)
                 nt_id = nt_filtered_results[0]['nt_id']
 
-                console.print(f"[blue]Processing tg_id: {tg_id}, nt_id: {nt_id} for reaction type '{reaction_type}' and species '{species}'[/blue]")
-                console.print(f"[blue]Buffer ID: {buffer_id}, Construct: {construct_name}[/blue]")
+                log.info("Processing tg_id=%s, nt_id=%s for reaction type '%s' and species '%s'", tg_id, nt_id, reaction_type, species)
+                log.debug("Buffer ID: %s, Construct: %s", buffer_id, construct_name)
                 try:
                     result = fit_linear(x_vals, y_vals, weights = weights)
 
@@ -180,25 +195,23 @@ def run_probing(reaction_type="global_deg", species = "dms", db_path: str = ''):
                         "model_file": None  # Optional, can be set to a file path if needed
                     }
 
-                    console.print(f"[green]✓ Arrhenius fit complete[/green]: slope = {slope:.4f} ± {slope_err:.4f}, intercept = {intercept:.4f} ± {intercept_err:.4f}, r² = {r2:.4f}")
+                    log.info("Arrhenius fit complete: slope = %.4f ± %.4f, intercept = %.4f ± %.4f, r² = %.4f", slope, slope_err or 0.0, intercept, intercept_err or 0.0, r2)
 
                     conn = connect_db(db_path)
 
                     # Check if the database is initialized and has the required columns
                     if not check_db(conn, "arrhenius_fits", REQUIRED_COLUMNS):
-                        console.print(f"[red]Error:[/red] Database initialization failed or missing required columns.")
+                        log.error("Database initialization failed or missing required columns.")
                         conn.close()
                         return
                     else:
-                        console.print(f"[green]✓ Database check passed and ready for Arrhenius fit import[/green]")
+                        log.info("Database check passed and ready for Arrhenius fit import")
 
                     insert_success = insert_arrhenius_fit(conn, fit_result)
                     count += insert_success
                     conn.close()
                 except Exception as e:
-                    console.print(f"[red]Fit failed:[/red] {e}")
-
-        console.print(f"[green]Imported Arrhenius fits for {count} samples[/green]")
+                    log.exception("Fit failed: %s", e)
     
     elif "agg_obs_by_fam" in reaction_type:
         # group unique tg_ids by construct_family
@@ -209,12 +222,12 @@ def run_probing(reaction_type="global_deg", species = "dms", db_path: str = ''):
             family_name = group["family"]
             tg_ids = group["tg_ids"]
             
-            console.print(f"[cyan]Group {fam_tg_id} — Family: {family_name}, tg_ids: {tg_ids}[/cyan]")
+            log.info("Group %s — Family: %s, tg_ids: %s", fam_tg_id, family_name, tg_ids)
 
             filtered_results = [row for row in data if row['tg_id'] in tg_ids]
 
             if len(filtered_results) < 3:
-                console.print(f"[red]Not enough data for family '{family_name}' with tg_ids {tg_ids}[/red]")
+                log.error("Not enough data for family '%s' with tg_ids %s", family_name, tg_ids)
                 continue
             x_vals = np.array([1 / row['temperature'] for row in filtered_results])
             y_vals = np.array([row['k_value'] for row in filtered_results])
@@ -225,8 +238,8 @@ def run_probing(reaction_type="global_deg", species = "dms", db_path: str = ''):
             construct_id = filtered_results[0]['construct_id']
             construct_name = fetch_construct_disp_name(db_path, construct_id)
 
-            console.print(f"[blue]Processing reaction type '{reaction_type}' and species '{species}'[/blue]")
-            console.print(f"[blue]Buffer ID: {buffer_id}, Construct: {construct_name}[/blue]")
+            log.info("Processing reaction type '%s' and species '%s'", reaction_type, species)
+            log.debug("Buffer ID: %s, Construct: %s", buffer_id, construct_name)
             try:
                 result = fit_linear(x_vals, y_vals, weights = weights)
 
@@ -251,27 +264,24 @@ def run_probing(reaction_type="global_deg", species = "dms", db_path: str = ''):
                     "model_file": None  # Optional, can be set to a file path if needed
                 }
 
-                console.print(f"[green]✓ Arrhenius fit complete[/green]: slope = {slope:.4f} ± {slope_err:.4f}, intercept = {intercept:.4f} ± {intercept_err:.4f}, r² = {r2:.4f}")
+                log.info("Arrhenius fit complete: slope = %.4f ± %.4f, intercept = %.4f ± %.4f, r² = %.4f", slope, slope_err or 0.0, intercept, intercept_err or 0.0, r2)
 
                 conn = connect_db(db_path)
 
                 # Check if the database is initialized and has the required columns
                 if not check_db(conn, "arrhenius_fits", REQUIRED_COLUMNS):
-                    console.print(f"[red]Error:[/red] Database initialization failed or missing required columns.")
+                    log.error("Database initialization failed or missing required columns.")
                     conn.close()
                     return
                 else:
-                    console.print(f"[green]✓ Database check passed and ready for Arrhenius fit import[/green]")
+                    log.info("Database check passed and ready for Arrhenius fit import")
 
                 insert_success = insert_arrhenius_fit(conn, fit_result)
                 count += insert_success
                 conn.close()
 
             except Exception as e:
-                console.print(f"[red]Fit failed:[/red] {e}")
-
-        console.print(f"[green]Imported Arrhenius fits for {count} samples[/green]")
-
+                log.exception("Fit failed: %s", e)
 
     elif 'agg' in reaction_type:
         for tg_id in unique_tg_ids:
@@ -291,8 +301,8 @@ def run_probing(reaction_type="global_deg", species = "dms", db_path: str = ''):
             construct_id = filtered_results[0]['construct_id']
             construct_name = fetch_construct_disp_name(db_path, construct_id)
 
-            console.print(f"[blue]Processing tg_id: {tg_id} for reaction type '{reaction_type}' and species '{species}'[/blue]")
-            console.print(f"[blue]Buffer ID: {buffer_id}, Construct: {construct_name}[/blue]")
+            log.info("Processing tg_id: %s for reaction type '%s' and species '%s'", tg_id, reaction_type, species)
+            log.debug("Buffer ID: %s, Construct: %s", buffer_id, construct_name)
             try:
                 result = fit_linear(x_vals, y_vals, weights = weights)
 
@@ -316,24 +326,28 @@ def run_probing(reaction_type="global_deg", species = "dms", db_path: str = ''):
                     "model_file": None  # Optional, can be set to a file path if needed
                 }
 
-                console.print(f"[green]✓ Arrhenius fit complete[/green]: slope = {slope:.4f} ± {slope_err:.4f}, intercept = {intercept:.4f} ± {intercept_err:.4f}, r² = {r2:.4f}")
+                log.info("Arrhenius fit complete: slope = %.4f ± %.4f, intercept = %.4f ± %.4f, r² = %.4f", slope, slope_err or 0.0, intercept, intercept_err or 0.0, r2)
 
                 conn = connect_db(db_path)
 
                 # Check if the database is initialized and has the required columns
                 if not check_db(conn, "arrhenius_fits", REQUIRED_COLUMNS):
-                    console.print(f"[red]Error:[/red] Database initialization failed or missing required columns.")
+                    log.error("Database initialization failed or missing required columns.")
                     conn.close()
                     return
                 else:
-                    console.print(f"[green]✓ Database check passed and ready for Arrhenius fit import[/green]")
+                    log.info("Database check passed and ready for Arrhenius fit import")
 
                 insert_success = insert_arrhenius_fit(conn, fit_result)
                 count += insert_success
                 conn.close()
 
             except Exception as e:
-                console.print(f"[red]Fit failed:[/red] {e}")
+                log.exception("Fit failed: %s", e)
 
-        console.print(f"[green]Imported Arrhenius fits for {count} samples[/green]")
+    else:
+        log.error("Unsupported probing reaction_type: %s", reaction_type)
+        return
+
+    log.info("Imported Arrhenius fits for %d samples", count)
 

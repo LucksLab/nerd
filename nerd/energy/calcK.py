@@ -1,8 +1,8 @@
 # nerd/energy/calc_K.py
 
-from rich.console import Console
+from nerd.utils.logging import get_logger
 
-console = Console()
+log = get_logger(__name__)
 
 def calculate_K(k_obs, k_add, k_deg=0.0, k_obs_err=None, k_add_err=None, k_deg_err=None):
     """
@@ -15,9 +15,9 @@ def calculate_K(k_obs, k_add, k_deg=0.0, k_obs_err=None, k_add_err=None, k_deg_e
 
     K = numerator / k_add
 
-    if all(x is not None for x in [k_obs_err, k_add_err, k_deg_err]):
+    if (k_obs_err is not None) and (k_add_err is not None) and (k_deg_err is not None):
         # Error propagation: ΔK = K * sqrt((Δnumerator/numerator)^2 + (Δkadd/kadd)^2)
-        delta_num = (k_obs_err**2 + k_deg_err**2)**0.5
+        delta_num = (k_obs_err ** 2 + k_deg_err ** 2) ** 0.5
         rel_err_K = ((delta_num / numerator) ** 2 + (k_add_err / k_add) ** 2) ** 0.5
         K_err = abs(K) * rel_err_K
     else:
@@ -32,7 +32,7 @@ def run(input_args: list[str]):
     """
     try:
         if len(input_args) < 2:
-            console.print("[yellow]Usage:[/yellow] nerd calc_energy --mode singleK <k_obs> <k_add> [k_deg]")
+            log.warning("Usage: nerd calc_energy --mode singleK <k_obs> <k_add> [k_deg]")
             return
 
         k_obs = float(input_args[0])
@@ -41,10 +41,10 @@ def run(input_args: list[str]):
 
         K, K_err = calculate_K(k_obs, k_add, k_deg)
 
-        if K_err:
-            console.print(f"[green]✓ K = {K:.4f} ± {K_err:.4f}[/green]")
+        if K_err is not None:
+            log.info("K = %.4f ± %.4f", K, K_err)
         else:
-            console.print(f"[green]✓ K = {K:.4f}[/green]")
+            log.info("K = %.4f", K)
 
     except Exception as e:
-        console.print(f"[red]Error:[/red] {e}")
+        log.exception("Error: %s", e)

@@ -2,12 +2,12 @@
 
 import pandas as pd
 from pathlib import Path
-from rich.console import Console
+from nerd.utils.logging import get_logger
 from nerd.db.io import connect_db, insert_fitted_kinetic_rate, check_db
 from nerd.utils.fit_models import fit_exp_decay
 from nerd.db.fetch import fetch_arrhenius_closest_pH
 
-console = Console()
+log = get_logger(__name__)
 
 # List of required columns for NMR reaction metadata import.
 REQUIRED_COLUMNS = [
@@ -47,7 +47,7 @@ def global_fit_probing(rg_id: int, db_path: str):
     Fit degradation kinetics for a reaction group (rg_id) and store results in the database.
     This function is a placeholder for future global fitting logic.
     """
-    console.print(f"[yellow]Warning:[/yellow] Global fitting for rg_id {rg_id} is not implemented yet.")
+    log.warning("Global fitting for rg_id %s is not implemented yet.", rg_id)
 
 
     return None
@@ -72,25 +72,25 @@ def run(all_samples: list, select_id: list = [], db_path: str  = '.'):
         csv_file = Path(f'test_data/{kinetic_trace_dir}')
 
         if not csv_file.exists():
-            console.print(f"[red]Error:[/red] File not found: {kinetic_trace_dir}")
+            log.error("File not found: %s", kinetic_trace_dir)
             continue
 
-        console.print(f"[blue]Processing:[/blue] {csv_file.name}")
+        log.info("Processing: %s", csv_file.name)
         
         try:
             conn = connect_db(db_path)
 
             # Check if the database is initialized and has the required columns
             if not check_db(conn, "nmr_kinetic_rates", REQUIRED_COLUMNS):
-                console.print(f"[red]Error:[/red] Database initialization failed or missing required columns.")
+                log.error("Database initialization failed or missing required columns.")
                 conn.close()
                 return
             else:
-                console.print(f"[green]✓ Database check passed and ready for NMR import[/green]")
+                log.info("Database check passed and ready for NMR import")
 
             # Fit the kinetic trace
             k, k_err, rsq, chisq = fit_kinetic_trace(f'test_data/{kinetic_trace_dir}')
-            console.print(f"[green]✓ Fit complete[/green]: k = {k:.4f} ± {k_err:.4f}, R² = {rsq:.4f}, χ² = {chisq:.4f}")
+            log.info("Fit complete: k = %.4f ± %.4f, R² = %.4f, χ² = %.4f", k, k_err or 0.0, rsq, chisq)
 
             # Prepare reaction metadata
             reaction_metadata = {
@@ -109,9 +109,9 @@ def run(all_samples: list, select_id: list = [], db_path: str  = '.'):
             conn.close()
 
         except Exception as e:
-            console.print(f"[red]Fit failed:[/red] {e}")
+            log.exception("Fit failed: %s", e)
 
-    console.print(f"[green]✓ Imported kinetic fits for {count} NMR degradation samples[/green]")
+    log.info("Imported kinetic fits for %d NMR degradation samples", count)
 
 from numpy import exp
 
@@ -128,7 +128,7 @@ def calc_kdeg(temp, pH, db_path):
         pH=pH
     )
     if not arrhenius_params:
-        console.print(f"[red]Error:[/red] No Arrhenius parameters found for pH {pH}")
+        log.error("No Arrhenius parameters found for pH %s", pH)
         return None
     
     slope, slope_err, intercept, intercept_err, pH_value = arrhenius_params[0]

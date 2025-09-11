@@ -3,9 +3,9 @@
 from nerd.importers import fmod_calc, probing_sample, nmr
 from nerd.kinetics import degradation, adduction, arrhenius, timecourse
 from nerd.energy import meltfit, calc_K
-from rich.console import Console
+from nerd.utils.logging import get_logger
 
-console = Console()
+log = get_logger(__name__)
 
 # test change
 def run_command(args):
@@ -59,9 +59,9 @@ def run_command(args):
                 k_deg = float(args.input[2]) if len(args.input) > 2 else 0.0
                 calc_K.run([str(k_obs), str(k_add), str(k_deg)])
             except Exception as e:
-                console.print(f"[red]Error parsing K calculation input:[/red] {e}")
+                log.exception("Error parsing K calculation input: %s", e)
         else:
-            console.print(f"[red]Unknown mode:[/red] {args.mode}")
+            log.error("Unknown mode: %s", args.mode)
 
     else:
-        console.print(f"[red]Unknown command:[/red] {args.command}")
+        log.error("Unknown command: %s", args.command)

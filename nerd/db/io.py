@@ -3,8 +3,10 @@
 import sqlite3
 from pathlib import Path
 from nerd.db.schema import ALL_TABLES, ALL_INDEXES
+from nerd.utils.logging import get_logger
+from rich.table import Table
 from rich.console import Console
-console = Console()
+log = get_logger(__name__)
 DEFAULT_DB_PATH = Path("nerd.sqlite3")  # fallback if not specified
 
 # ==== Connection + Database Initialization ===================================
@@ -33,7 +35,7 @@ def check_db(conn: sqlite3.Connection, TABLE: str, REQUIRED_COLUMNS: list):
     # Check if the table exists
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (TABLE,))
     if not cursor.fetchone():
-        console.print(f"[red]Error:[/red] Table '{TABLE}' does not exist.")
+        log.error("Table '%s' does not exist.", TABLE)
         return False
 
     # Check for required columns
@@ -41,7 +43,7 @@ def check_db(conn: sqlite3.Connection, TABLE: str, REQUIRED_COLUMNS: list):
     columns = [row[1] for row in cursor.fetchall()]
     missing = [col for col in REQUIRED_COLUMNS if col not in columns]
     if missing:
-        console.print(f"[red]Error:[/red] Missing columns in {TABLE}: {missing}")
+        log.error("Missing columns in %s: %s", TABLE, missing)
         return False
     return True
 
@@ -99,7 +101,7 @@ def insert_fitted_kinetic_rate(conn, fit_result: dict):
 
 def insert_arrhenius_fit(conn, fit_result: dict):
     cursor = conn.cursor()
-    print(f"INSERT INTO arrhenius_fits: {fit_result}")
+    log.debug("INSERT INTO arrhenius_fits: %s", fit_result)
     # Base columns and values
     columns = ["reaction_type", "data_source", "substrate", "buffer_id", 
                "slope", "slope_err", "intercept", "intercept_err", "r2", "model_file"]
@@ -136,9 +138,9 @@ def insert_arrhenius_fit(conn, fit_result: dict):
             {placeholders}
         )
     """
-    print(query, values)
+    log.debug("%s %s", query, values)
     cursor.execute(query, values)
-    print(f"Inserted {cursor.rowcount} rows into arrhenius_fits")
+    log.info("Inserted %d rows into arrhenius_fits", cursor.rowcount)
     conn.commit()
     return cursor.rowcount > 0
 
@@ -318,9 +320,6 @@ def fetch_kinetic_rates(conn, buffer_id: int, species: str, reaction_type: str):
 
 # === Display table ===
 
-from rich.table import Table
-from rich.console import Console
-
 def display_table(results, column_descriptions, title="Query Results"):
     """
     Prints a formatted Rich table from a SQLite query result.
@@ -347,7 +346,7 @@ def display_table(results, column_descriptions, title="Query Results"):
     console.print(table)
 
 
-def insert_melted_probing_rates(fetched_result: tuple, db_path: str, console: Console):
+def insert_melted_probing_rates(fetched_result: tuple, db_path: str):
     """
     Insert aggregated probing rates into the database.
 
@@ -385,7 +384,10 @@ def insert_melted_probing_rates(fetched_result: tuple, db_path: str, console: Co
         
     conn.close()
 
-    console.print(f"[green]✓ Inserted {count} probing kinetic rates ({count / len(records) * 100:.1f}%)[/green]")
+    if records:
+        log.info("Inserted %d probing kinetic rates (%.1f%%)", count, (count / len(records) * 100.0))
+    else:
+        log.info("Inserted %d probing kinetic rates", count)
 
     return count
 

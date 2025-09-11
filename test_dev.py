@@ -146,5 +146,5 @@ def test_all():
 
 
 if __name__ == "__main__":
-    #test_all()
-    meltfit.run(db_path='test_output/nerd_dev.sqlite3')
+    test_all()
+    #meltfit.run(db_path='test_output/nerd_dev.sqlite3')

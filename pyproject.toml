@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-nerd = "nerd.cli:app"
+nerd = "nerd.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

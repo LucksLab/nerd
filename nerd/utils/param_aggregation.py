@@ -3,7 +3,9 @@
 
 import pandas as pd
 import numpy as np
-from rich.console import Console
+from nerd.utils.logging import get_logger
+
+log = get_logger(__name__)
 
 def compute_weighted_mean(kobs_vals: pd.Series, kobs_errs: pd.Series) -> float:
     """
@@ -66,7 +68,7 @@ def aggregate_probing_data(records, description):
 
     return agg_df
 
-def insert_aggregated_probing_rates(agg_df: pd.DataFrame, db_path: str, console: Console):
+def insert_aggregated_probing_rates(agg_df: pd.DataFrame, db_path: str):
     """
     Insert aggregated probing rates into the database.
 
@@ -92,15 +94,15 @@ def insert_aggregated_probing_rates(agg_df: pd.DataFrame, db_path: str, console:
         }
 
         insert_success = insert_fitted_probing_kinetic_rate(conn, fit_result)
-        
+
         if insert_success:
-            console.print(f"[green]✓ Inserted agg_add rate for rg_id {fit_result['rg_id']} ({fit_result['species']})[/green]")
+            log.info("Inserted agg_add rate for rg_id %s (%s)", fit_result['rg_id'], fit_result['species'])
         else:
-            console.print(f"[red]✗ Failed to insert agg_add rate for rg_id {fit_result['rg_id']} ({fit_result['species']})[/red]")
+            log.error("Failed to insert agg_add rate for rg_id %s (%s)", fit_result['rg_id'], fit_result['species'])
 
     conn.close()
 
-def process_aggregation(records, description, db_path: str, console: Console):
+def process_aggregation(records, description, db_path: str):
     """
     Process aggregation of probing data and insert into the database.
 
@@ -112,4 +114,4 @@ def process_aggregation(records, description, db_path: str, console: Console):
     """
     
     agg_df = aggregate_probing_data(records, description)
-    insert_aggregated_probing_rates(agg_df, db_path, console)
+    insert_aggregated_probing_rates(agg_df, db_path)
