@@ -1,0 +1,2 @@
+[console_scripts]
+nerd = nerd.cli:app

@@ -1,0 +1,7 @@
+pyproject.toml
+nerd.egg-info/PKG-INFO
+nerd.egg-info/SOURCES.txt
+nerd.egg-info/dependency_links.txt
+nerd.egg-info/entry_points.txt
+nerd.egg-info/requires.txt
+nerd.egg-info/top_level.txt

@@ -1,0 +1,61 @@
+# Step 1: create metadata + sample entries
+nerd run --step create configs/01_create.yaml
+# OR (if you have a spreadsheet from the core)
+nerd run --step create configs/01_create_from_sheet.yaml
+
+# Step 2: mutation counts
+nerd run --step mut_count configs/02_mut.yaml
+
+# Step 3: time-course fits
+nerd run --step tc_free        configs/03_tc_free.yaml
+nerd run --step tc_global      configs/04_tc_global.yaml
+nerd run --step tc_constrained configs/05_tc_constrained.yaml
+
+# Convenience
+nerd ls            # show status of tasks & latest results for this label
+nerd open mut      # open artifacts/latest/mut/ (per_nt.tsv, report.html)
+nerd show --what tc_constrained --latest   # inspect most recent constrained fit
+
+
+HIV-1_TAR_v1_37C_rep1/
+├─ configs/
+│  ├─ 01_create.yaml             # inline sample definitions
+│  ├─ 01_create_from_sheet.yaml  # alternative: point to CSV
+│  ├─ 02_mut.yaml
+│  ├─ 03_tc_free.yaml
+│  ├─ 04_tc_global.yaml
+│  └─ 05_tc_constrained.yaml
+│
+├─ sample_sheets/                # only needed if using manifest
+│  └─ Novaseq_240901.csv
+│
+├─ runs/                         # one subdir per task execution
+│  ├─ 2025-09-11T10-23_create__cfg-8fd1a2/
+│  ├─ 2025-09-11T11-02_mut_count__shapemapper@2.4.1__cfg-1c0b7e/
+│  ├─ 2025-09-11T12-40_tc_free__lmfit@1.3__cfg-b91f6d/
+│  ├─ 2025-09-11T12-52_tc_global__lmfit@1.3__cfg-98a2f9/
+│  └─ 2025-09-11T13-05_tc_constrained__lmfit@1.3__cfg-2b7b14/
+│
+├─ artifacts/                    # user-friendly exports
+│  ├─ latest -> 2025-09-11T13-05_tc_constrained__lmfit@1.3__cfg-2b7b14
+│  ├─ 2025-09-11T11-02_mut_count__shapemapper@2.4.1__cfg-1c0b7e/
+│  │  └─ mut/ per_nt.tsv  report.html
+│  └─ 2025-09-11T13-05_tc_constrained__lmfit@1.3__cfg-2b7b14/
+│     └─ tc/ free.tsv  global.tsv  constrained.tsv
+│
+└─ nerd.sqlite                   # shared DB with science tables + tasks/attempts
+
+
+	•	configs/: small YAMLs, numbered for clarity.
+	•	sample_sheets/: CSVs from core (only if you use 01_create_from_sheet.yaml).
+	•	runs/: immutable, timestamped directories → contain logs, scratch files.
+	•	Folder names include tool@version and cfg-<hash> for reproducibility.
+	•	artifacts/: human-browseable exports (TSVs, plots, HTML).
+	•	latest symlink points to the newest successful run.
+	•	nerd.sqlite: database with all results, provenance, and task bookkeeping.
+
+Key points
+    •	User can choose inline YAML (01_create.yaml) or manifest-driven (01_create_from_sheet.yaml) depending on experiment size.
+	•	Each task is a separate YAML (02_mut.yaml, 03_tc_free.yaml, etc.) → simple mental model.
+	•	Multiple runs (different tool versions or params) produce multiple timestamped subfolders; latest symlinks keep it easy.
+	•	The DB (nerd.sqlite) is always the source of truth for querying and cross-run analysis.

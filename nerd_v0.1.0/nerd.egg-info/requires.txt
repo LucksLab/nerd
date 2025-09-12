@@ -1,0 +1,7 @@
+typer[all]>=0.7
+rich
+pandas
+numpy
+matplotlib
+lmfit
+sqlalchemy

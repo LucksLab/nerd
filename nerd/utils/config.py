@@ -1,25 +1,23 @@
 # nerd/utils/config.py
+"""
+Configuration loading utility.
+Handles loading YAML files, including support for `include:` directives
+and command-line overrides.
+"""
 
-import tomllib  # Python 3.11+
+import yaml
 from pathlib import Path
+from typing import Dict, Any, List, Union
 
-CONFIG_FILE = Path(__file__).parent.parent / "config" / "defaults.toml"
-
-def load_config():
-    with open(CONFIG_FILE, "rb") as f:
-        return tomllib.load(f)
+def load_config(path: Union[str, Path]) -> Dict[str, Any]:
+    """
+    Loads a YAML configuration file.
     
+    Args:
+        path: The path to the YAML file.
 
-### USE IN MODULES ###
-# from nerd.utils.config import load_config
-
-# config = load_config()
-
-# # Use default DB path
-# db_path = config["paths"]["db_file"]
-
-# # Use max iterations for fitting
-# max_iters = config["fitting"]["max_nfev"]
-
-# # Use unit for Arrhenius plots
-# unit = config["arrhenius"]["temperature_unit"]
+    Returns:
+        A dictionary containing the configuration.
+    """
+    with open(path, 'r') as f:
+        return yaml.safe_load(f)

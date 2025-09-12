@@ -1,0 +1,77 @@
+nerd/
+├─ pyproject.toml                  # or setup.cfg; define deps (typer, lmfit, numpy, pydantic, sqlite)
+├─ README.md
+├─ Makefile                        # lint/format/test targets (optional)
+├─ .gitignore
+│
+├─ nerd/                           # package
+│  ├─ __init__.py
+│  ├─ cli.py                       # Typer entrypoint: `nerd run`, `nerd ls`, `nerd open`, `nerd show`
+│  │
+│  ├─ db/
+│  │  ├─ __init__.py
+│  │  ├─ schema.py                 # your science tables + (tasks, task_attempts, artifacts)
+│  │  ├─ api.py                    # tiny DB helper: begin_task/attempt/finish, inserts/queries
+│  │  └─ views.sql                 # optional: v_*_latest and convenience views
+│  │
+│  ├─ pipeline/
+│  │  ├─ __init__.py
+│  │  ├─ tasks/                    # each CLI step → one Task class
+│  │  │  ├─ __init__.py
+│  │  │  ├─ base.py                # Task & TaskContext interfaces
+│  │  │  ├─ create.py              # CreateTask (inline-or-sheet ingestion)
+│  │  │  ├─ mut_count.py           # MutCountTask (calls plugin, imports fmod tables)
+│  │  │  ├─ tc_free.py             # TimecourseFreeTask
+│  │  │  ├─ tc_global.py           # TimecourseGlobalTask
+│  │  │  └─ tc_constrained.py      # TimecourseConstrainedTask
+│  │  │
+│  │  ├─ runners/
+│  │  │  ├─ __init__.py
+│  │  │  ├─ base.py                # Runner interface
+│  │  │  ├─ local.py               # LocalRunner (subprocess)
+│  │  │  └─ slurm.py               # SlurmRunner (sbatch template; add later)
+│  │  │
+│  │  └─ plugins/
+│  │     ├─ __init__.py
+│  │     └─ mutcount/
+│  │        ├─ __init__.py
+│  │        ├─ base.py             # MutCountPlugin interface
+│  │        └─ shapemapper.py      # initial plugin implementation
+│  │
+│  ├─ utils/
+│  │  ├─ __init__.py
+│  │  ├─ config.py                 # load YAML, support `include:` + `--set` overrides
+│  │  ├─ hashing.py                # cache_key(config+inputs+code), config_hash
+│  │  ├─ paths.py                  # construct run/artifact dirs, latest symlinks
+│  │  ├─ io.py                     # TSV/FASTA helpers, SafeCSV, file checks
+│  │  └─ fitting_models.py         # registry of models/engines (lmfit, scipy); FitResult
+│  │
+│  └─ reporting/                   # optional nice-to-haves
+│     ├─ __init__.py
+│     └─ html.py                   # generate small HTML summaries for artifacts
+│
+├─ tests/                          # pytest layout
+│  ├─ __init__.py
+│  ├─ test_db_api.py
+│  ├─ test_tasks_create.py
+│  ├─ test_tasks_mut.py
+│  ├─ test_tasks_tc_free.py
+│  ├─ test_fitting_models.py
+│  └─ data/                        # tiny synthetic fixtures
+│
+└─ examples/                       # sample project/label to develop against
+   ├─ HIV-1_TAR_v1_37C_rep1/
+   │  ├─ configs/
+   │  │  ├─ 01_create.yaml
+   │  │  ├─ 01_create_from_sheet.yaml
+   │  │  ├─ 02_mut.yaml
+   │  │  ├─ 03_tc_free.yaml
+   │  │  ├─ 04_tc_global.yaml
+   │  │  └─ 05_tc_constrained.yaml
+   │  ├─ sample_sheets/
+   │  │  └─ Novaseq_240901.csv
+   │  ├─ runs/                     # created by CLI
+   │  └─ artifacts/                # created by CLI (exports + latest symlink)
+   │
+   └─ refs/
+      └─ HIV-1_TAR_v1.fa

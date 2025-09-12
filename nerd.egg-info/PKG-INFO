@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: nerd
+Version: 0.1.1
+Summary: Analysis tools for RNA energetics and dynamics
+Author-email: Edric Choi <edr.choi@gmail.com>
+License: MIT
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: typer[all]>=0.7
+Requires-Dist: rich
+Requires-Dist: pandas
+Requires-Dist: numpy
+Requires-Dist: matplotlib
+Requires-Dist: lmfit
+Requires-Dist: sqlalchemy
