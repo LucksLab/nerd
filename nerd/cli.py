@@ -3,30 +3,6 @@
 Command-line interface for the nerd application, powered by Typer.
 """
 
-<<<<<<< HEAD
-import argparse
-import logging
-from pathlib import Path
-from nerd.main import run_command
-from nerd.utils.logging import setup_logging, get_logger
-log = get_logger(__name__)
-def build_parser():
-    parser = argparse.ArgumentParser(
-        prog="nerd",
-        description="Nucleotide energetics from reactivity data"
-    )
-
-    # Global logging flags
-    parser.add_argument(
-        "-v", "--verbose", action="store_true",
-        help="Enable verbose (DEBUG) logging"
-    )
-    parser.add_argument(
-        "--log-file", type=str, default=None,
-        help="Path to log file (enables file logging when provided)"
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-=======
 import typer
 from pathlib import Path
 from typing import Optional
@@ -43,7 +19,6 @@ app = typer.Typer(
     help="NERD: A data analysis pipeline for RNA engineering.",
     context_settings={"help_option_names": ["-h", "--help"]},
 )
->>>>>>> main
 
 # A shared dictionary to store global state from the callback
 state = {}
@@ -54,6 +29,7 @@ class RunStep(str, enum.Enum):
     mut_count = "mut_count"
     tc_free = "tc_free"
 
+
 @app.callback()
 def main_callback(
     ctx: typer.Context,
@@ -61,7 +37,7 @@ def main_callback(
         False, "--verbose", "-v", help="Enable verbose (DEBUG) logging."
     ),
     db: Path = typer.Option(
-        "examples/nerd_dev.sqlite3",
+        "test_output/nerd_dev.sqlite3",
         "--db",
         help="Path to the SQLite database file.",
         writable=True,
@@ -104,20 +80,6 @@ def run(
     log = get_logger(__name__)
     log.info("Executing 'run' command for step: '%s'", step.value)
 
-<<<<<<< HEAD
-    return parser
-
-def main():
-    parser = build_parser()
-    args = parser.parse_args()
-    # Initialize global logging once
-    level = logging.DEBUG if getattr(args, "verbose", False) else logging.INFO
-    if getattr(args, "log_file", None):
-        setup_logging(level=level, log_to_file=True, log_file=Path(args.log_file))
-    else:
-        setup_logging(level=level, log_to_file=False)
-=======
->>>>>>> main
     try:
         cfg = load_config(config_path)
         
@@ -141,10 +103,6 @@ def main():
         task.exec(conn, cfg, verbose=state["verbose"])
 
     except Exception as e:
-<<<<<<< HEAD
-        log.exception("Fatal error: %s", e)
-        raise
-=======
         log.exception("Failed to execute task '%s': %s", step.value, e)
         raise typer.Exit(code=1)
     finally:
@@ -173,4 +131,3 @@ def ls(
 
 if __name__ == "__main__":
     app()
->>>>>>> main

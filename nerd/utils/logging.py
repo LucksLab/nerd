@@ -8,27 +8,6 @@ from pathlib import Path
 from typing import Optional
 from rich.logging import RichHandler
 
-<<<<<<< HEAD
-DEFAULT_LOG_LEVEL = logging.INFO
-DEFAULT_LOG_FILE = Path("logs/nerd.log")
-
-# Keep one global logger reference
-_LOGGER = None
-
-
-def setup_logging(level: int = DEFAULT_LOG_LEVEL, log_to_file: bool = False, log_file: Path = DEFAULT_LOG_FILE):
-    """
-    Configure root logger once with Rich console and optional file logging.
-    Call this ONCE (e.g. at CLI startup).
-    """
-    global _LOGGER
-    if _LOGGER is not None:
-        return _LOGGER
-
-    logger = logging.getLogger("nerd")
-    logger.setLevel(level)
-    logger.propagate = False  # don't duplicate messages to root
-=======
 def setup_logger(logfile: Optional[Path] = None, verbose: bool = False) -> logging.Logger:
     """
     Configures the root logger for the 'nerd' application and returns it.
@@ -52,7 +31,6 @@ def setup_logger(logfile: Optional[Path] = None, verbose: bool = False) -> loggi
 
     # Prevent propagation to the default root logger
     log.propagate = False
->>>>>>> main
 
     # Clear any existing handlers to avoid duplicate logs
     if log.hasHandlers():
@@ -66,35 +44,6 @@ def setup_logger(logfile: Optional[Path] = None, verbose: bool = False) -> loggi
         log_time_format="[%X]"
     )
     console_handler.setLevel(level)
-<<<<<<< HEAD
-    console_handler.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(console_handler)
-
-    # File handler (DEBUG detail)
-    if log_to_file:
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file, mode="a")
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(
-            logging.Formatter(
-                "[%(asctime)s] [%(levelname)s] %(name)s: %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S"
-            )
-        )
-        logger.addHandler(file_handler)
-
-    _LOGGER = logger
-    return logger
-
-
-def get_logger(name: str = None):
-    """
-    Get a child logger (after setup_logging has been called).
-    Usage: log = get_logger(__name__)
-    """
-    parent = logging.getLogger("nerd")
-    return parent.getChild(name) if name else parent
-=======
     log.addHandler(console_handler)
 
     # --- File Handler ---
@@ -135,4 +84,3 @@ def get_logger(name: str) -> logging.Logger:
         A configured logging.Logger instance.
     """
     return logging.getLogger(name)
->>>>>>> main
