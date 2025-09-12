@@ -1,0 +1,1 @@
+# registry of models/engines (lmfit, scipy); FitResult

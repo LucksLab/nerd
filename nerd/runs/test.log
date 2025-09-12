@@ -1,0 +1,5 @@
+2025-09-11 18:16:25,416 - nerd - DEBUG - File logging enabled at: runs/test.log
+2025-09-11 18:16:25,419 - nerd - DEBUG - Logger configured with level=DEBUG
+2025-09-11 18:17:41,082 - nerd - DEBUG - File logging enabled at: runs/test.log
+2025-09-11 18:17:41,085 - nerd - DEBUG - Logger configured with level=DEBUG
+2025-09-11 18:17:43,282 - nerd - INFO - hello world

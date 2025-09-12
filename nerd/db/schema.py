@@ -1,3 +1,5 @@
+# your science tables + (tasks, task_attempts, artifacts)
+
 # nerd/db/schema.py
 """
 This module defines the SQLite schema used by the nerd CLI tool.
@@ -339,10 +341,80 @@ ON arrhenius_fits (reaction_type, data_source, substrate, buffer_id, tg_id)
 WHERE tg_id IS NOT NULL AND nt_id IS NULL;
 """
 
+
 CREATE_INDEX_ARRHENIUS_TG_NT = """
 CREATE UNIQUE INDEX IF NOT EXISTS unique_arrhenius_tg_nt
 ON arrhenius_fits (reaction_type, data_source, substrate, buffer_id, tg_id, nt_id)
 WHERE tg_id IS NOT NULL AND nt_id IS NOT NULL;
+"""
+
+# === Table: tasks ===
+CREATE_TASKS = """
+CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,        -- task id
+    task_name TEXT NOT NULL,                     -- e.g., create, mut_count, tc_free
+    scope_kind TEXT NOT NULL,                    -- 'sample' | 'rg' | 'tg' | 'nmr' | 'project'
+    scope_id INTEGER,                            -- nullable; depends on scope_kind
+    output_dir TEXT NOT NULL,                    -- directory where outputs are written
+    label TEXT NOT NULL,                         -- human-friendly label, e.g., HIV-1_TAR_v1_37C_rep1
+    backend TEXT NOT NULL DEFAULT 'local',       -- local | slurm | other
+    cache_key TEXT,                              -- hash(inputs + params + code)
+    tool TEXT,                                   -- e.g., shapemapper, lmfit
+    tool_version TEXT,                           -- e.g., 2.4.1, 1.3
+    config_hash TEXT,                            -- short hash of effective config
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at   TEXT,                             -- when finished
+    state TEXT NOT NULL DEFAULT 'pending',       -- pending|running|completed|failed|cached|skipped
+    message TEXT                                 -- short status / error summary
+);
+"""
+
+# === Table: task_attempts ===
+CREATE_TASK_ATTEMPTS = """
+CREATE TABLE IF NOT EXISTS task_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,        -- attempt id
+    task_id INTEGER NOT NULL,                    -- FK → tasks.id
+    try_index INTEGER NOT NULL,                  -- 1,2,3,... per task
+    command TEXT,                                -- shell command (if any)
+    resources_json TEXT,                         -- serialized resources (threads, mem, time, env)
+    exit_code INTEGER,                           -- return code from runner
+    log_path TEXT,                               -- path to command log
+    stderr_tail TEXT,                            -- optional short tail for quick diagnostics
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    UNIQUE(task_id, try_index)
+);
+"""
+
+# === Table: artifacts ===
+CREATE_ARTIFACTS = """
+CREATE TABLE IF NOT EXISTS artifacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,        -- artifact id
+    task_id INTEGER NOT NULL,                    -- FK → tasks.id
+    kind TEXT NOT NULL,                          -- e.g., 'mut_tsv', 'html_report', 'tc_free_tsv'
+    key TEXT,                                    -- semantic key within task (e.g., 'per_nt', 'free', 'global')
+    path TEXT NOT NULL,                          -- absolute or project-relative file path
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    UNIQUE(task_id, kind, key)
+);
+"""
+
+# === Indexes for tasks/task_attempts/artifacts ===
+CREATE_INDEX_TASKS_LABEL = """
+CREATE INDEX IF NOT EXISTS idx_tasks_label ON tasks (label);
+"""
+
+CREATE_INDEX_TASKS_SCOPE = """
+CREATE INDEX IF NOT EXISTS idx_tasks_scope ON tasks (scope_kind, scope_id);
+"""
+
+CREATE_INDEX_ATTEMPTS_TASK = """
+CREATE INDEX IF NOT EXISTS idx_task_attempts_task ON task_attempts (task_id, try_index);
+"""
+
+CREATE_INDEX_ARTIFACTS_TASK = """
+CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts (task_id, kind);
 """
 
 # === Aggregate all table creation statements ===
@@ -363,11 +435,18 @@ ALL_TABLES = [
     CREATE_NMR_REACTIONS,
     CREATE_ARRHENIUS_FITS,
     CREATE_PROBING_MELT_FITS,
-    CREATE_PROBING_KINETIC_RATES
+    CREATE_PROBING_KINETIC_RATES,
+    CREATE_TASKS,
+    CREATE_TASK_ATTEMPTS,
+    CREATE_ARTIFACTS
 ]
 
 ALL_INDEXES = [
     CREATE_INDEX_ARRHENIUS_NO_GROUP,
     CREATE_INDEX_ARRHENIUS_TG_ONLY,
-    CREATE_INDEX_ARRHENIUS_TG_NT
+    CREATE_INDEX_ARRHENIUS_TG_NT,
+    CREATE_INDEX_TASKS_LABEL,
+    CREATE_INDEX_TASKS_SCOPE,
+    CREATE_INDEX_ATTEMPTS_TASK,
+    CREATE_INDEX_ARTIFACTS_TASK
 ]

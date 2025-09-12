@@ -1,6 +1,6 @@
 [project]
 name = "nerd"
-version = "0.1.0"
+version = "0.1.1"
 description = "Analysis tools for RNA energetics and dynamics"
 authors = [
     { name = "Edric Choi", email = "edr.choi@gmail.com" }
