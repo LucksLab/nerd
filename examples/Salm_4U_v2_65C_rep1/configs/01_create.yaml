@@ -1,0 +1,60 @@
+run:
+  output_dir: examples
+  label: Salm_4U_v2_65C_rep1
+  backend: local
+  threads: 4
+  mem_gb: 8
+  time: "00:10:00"
+
+create:
+  construct:
+    family: Salm_4U_thermometer
+    name: WT
+    version: 2
+    sequence: ggtgtaagggtgaagtgtaAGGTTGAACTTTTGAATAGTGATTCAGGAGGTTAATGGAAgtaaaggtaatgaaggtgaag
+    disp_name: 4U_wt
+    nt_info: nt_info/fourU_WT.csv # relative to configs folder, optional for setting nt numbering if not handle default
+
+  buffer:
+    name: Schwalbe_bistris
+    pH: 6.5
+    composition: "150 mM bis-tris, 15 mM Kx(HPO4)y, 25 mM KCl"
+    disp_name: pH6.5_A
+
+  sequencing_run:
+    run_name: 230607_M05164_0144_000000000-L3FLD
+    date: 20250607
+    sequencer: Illumina_MiSeq
+    run_manager: EKC
+
+  samples:
+    - sample_name: fourU_WT_65c_rep1_tp1
+      fq_dir: ../fastq_files     # dummy path, doesn’t need to exist yet
+      r1_file: 001-EKC-WT-60c-a-1-p_S1_L001_R1_001.fastq.gz
+      r2_file: 001-EKC-WT-60c-a-1-p_S1_L001_R2_001.fastq.gz
+      reaction_group: 65_1
+      temperature: 65
+      replicate: 1
+      reaction_time: 20
+      probe: dms
+      probe_concentration: 0.015852692
+      RT: MRT
+      treated: 1
+      buffer: schwalbe_buffer
+      construct: fourU_WT
+      done_by: EKC
+    - sample_name: fourU_WT_65c_rep1_tp2
+      fq_dir: ../fastq_files
+      r1_file: 002-EKC-WT-60c-a-2-p_S2_L001_R1_001.fastq.gz
+      r2_file: 002-EKC-WT-60c-a-2-p_S2_L001_R2_001.fastq.gz
+      reaction_group: 65_1
+      temperature: 65
+      replicate: 1
+      reaction_time: 45
+      probe: dms
+      probe_concentration: 0.015852692
+      RT: MRT
+      treated: 1
+      buffer: schwalbe_buffer
+      construct: fourU_WT
+      done_by: EKC

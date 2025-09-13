@@ -37,7 +37,7 @@ def main_callback(
         False, "--verbose", "-v", help="Enable verbose (DEBUG) logging."
     ),
     db: Path = typer.Option(
-        "test_output/nerd_dev.sqlite3",
+        "examples/nerd_dev.sqlite3",
         "--db",
         help="Path to the SQLite database file.",
         writable=True,
