@@ -90,6 +90,7 @@ class CreateTask(Task):
             buffer_data = inputs.get("buffer")
             sequencing_run_data = inputs.get("sequencing_run")
             samples_data = inputs.get("samples", [])
+            derived_data = inputs.get("derived_samples", [])
 
             with ctx.db: # Use the connection as a context manager for transactions
                 if construct_data:
@@ -127,6 +128,35 @@ class CreateTask(Task):
                     inserted = db_api.bulk_upsert_samples(ctx.db, seqrun_id, samples_data)
                     log.debug("Upserted %d samples for seqrun_id=%s", inserted, seqrun_id)
 
+                # --- Optional: upsert derived_samples metadata (no FASTQs stored) ---
+                if derived_data:
+                    log.info("Inserting %d derived sample definitions.", len(derived_data))
+                    for d in derived_data:
+                        child_name = d.get("child_name")
+                        parent_sample = d.get("parent_sample")
+                        kind = d.get("kind")
+                        tool = d.get("tool")
+                        cmd_template = d.get("cmd_template")
+                        params = d.get("params", {})
+
+                        if not all([child_name, parent_sample, kind, tool, cmd_template]):
+                            raise ValueError("derived_samples entries must include child_name, parent_sample, kind, tool, cmd_template")
+
+                        # Resolve parent sample id; prefer current seqrun if provided, else global by name
+                        parent_id = None
+                        if 'seqrun_id' in locals():
+                            parent_id = db_api.get_sample_id(ctx.db, seqrun_id, parent_sample)
+                        if parent_id is None:
+                            parent_id = db_api.get_sample_id_by_name(ctx.db, parent_sample)
+                        if parent_id is None:
+                            raise ValueError(f"Could not resolve parent sample '{parent_sample}' in sequencing_run for derived sample '{child_name}'")
+
+                        ds_id = db_api.upsert_derived_sample(
+                            ctx.db, parent_id, child_name, kind, tool, cmd_template, params
+                        )
+                        log.debug("Upserted derived_sample id=%s for child '%s' (parent s_id=%s)", ds_id, child_name, parent_id)
+                # Only link probing_reactions when actual parent samples are provided
+                if samples_data:
                     if construct_data is None or buffer_data is None:
                         raise ValueError("'samples' requires 'construct' and 'buffer' blocks to link probing_reactions.")
 

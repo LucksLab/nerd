@@ -130,6 +130,23 @@ CREATE TABLE IF NOT EXISTS sequencing_samples (
 );
 """
 
+# === Table: derived_samples ===
+CREATE_DERIVED_SAMPLES = """
+CREATE TABLE IF NOT EXISTS derived_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_sample_id INTEGER NOT NULL,           -- FK → sequencing_samples.id (the full/raw sample)
+    child_name TEXT NOT NULL,                    -- human-friendly derived sample name
+    kind TEXT NOT NULL,                          -- subsample | filter | trim | other
+    tool TEXT NOT NULL,                          -- e.g., seqtk, custom
+    cmd_template TEXT NOT NULL,                  -- templated command to materialize R1/R2
+    params_json TEXT,                            -- JSON of structured params (e.g., {count: 1000000, seed: 42})
+    cache_key TEXT,                              -- hash(parent + tool + params + template)
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(parent_sample_id) REFERENCES sequencing_samples(id) ON DELETE CASCADE,
+    UNIQUE(parent_sample_id, child_name)
+);
+"""
+
 # === Table: fmod_calc_runs ===
 CREATE_FMOD_CALC_RUNS = """ 
 CREATE TABLE IF NOT EXISTS fmod_calc_runs (
@@ -427,6 +444,15 @@ ON tasks (task_name, label, output_dir, cache_key)
 WHERE state <> 'cached';
 """
 
+# Indexes for derived_samples convenience lookups
+CREATE_INDEX_DERIVED_CHILD = """
+CREATE INDEX IF NOT EXISTS idx_derived_samples_child ON derived_samples (child_name);
+"""
+
+CREATE_INDEX_DERIVED_PARENT = """
+CREATE INDEX IF NOT EXISTS idx_derived_samples_parent ON derived_samples (parent_sample_id);
+"""
+
 # === Aggregate all table creation statements ===
 ALL_TABLES = [
     CREATE_PROBING_REACTIONS,
@@ -437,6 +463,7 @@ ALL_TABLES = [
     CREATE_NUCLEOTIDES,
     CREATE_SEQUENCING_RUNS,
     CREATE_SEQUENCING_SAMPLES,
+    CREATE_DERIVED_SAMPLES,
     CREATE_FMOD_CALC_RUNS,
     CREATE_FMOD_VALS,
     CREATE_FREE_TC_FITS,
@@ -460,5 +487,7 @@ ALL_INDEXES = [
     CREATE_INDEX_ATTEMPTS_TASK,
     CREATE_INDEX_ARTIFACTS_TASK,
     CREATE_INDEX_RG_LABEL,
-    CREATE_INDEX_TASKS_UNIQUE_SIG_ACTIVE
+    CREATE_INDEX_TASKS_UNIQUE_SIG_ACTIVE,
+    CREATE_INDEX_DERIVED_CHILD,
+    CREATE_INDEX_DERIVED_PARENT
 ]

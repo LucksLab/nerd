@@ -13,6 +13,7 @@ import csv
 from pathlib import Path
 
 from nerd.db.schema import ALL_TABLES, ALL_INDEXES
+from nerd.utils.hashing import config_hash
 from nerd.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -732,6 +733,27 @@ def get_sample_id(conn: sqlite3.Connection, seqrun_id: int, sample_name: str, fq
         return None
 
 
+def get_sample_id_by_name(conn: sqlite3.Connection, sample_name: str) -> Optional[int]:
+    """
+    Fetch a sequencing sample id by its name across all sequencing runs.
+    If multiple rows match, returns None to avoid ambiguity.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT id FROM sequencing_samples WHERE sample_name = ?",
+            (sample_name,),
+        ).fetchall()
+        if not rows:
+            return None
+        if len(rows) > 1:
+            log.error("Sample name '%s' is ambiguous across sequencing runs (found %d). Provide seqrun context.", sample_name, len(rows))
+            return None
+        return int(rows[0][0])
+    except sqlite3.Error as e:
+        log.exception("Failed to fetch sample id by name '%s': %s", sample_name, e)
+        return None
+
+
 def get_max_reaction_group_id(conn: sqlite3.Connection) -> int:
     """Return the current max rg_id from reaction_groups, or 0 if none."""
     try:
@@ -811,3 +833,76 @@ def upsert_reaction_group(conn: sqlite3.Connection, rg_id: int, rg_label: Option
     except sqlite3.Error as e:
         log.exception("Failed to upsert reaction_group rg_id=%s label=%s: %s", rg_id, rg_label, e)
         return None
+
+
+# --- Derived samples helpers ---
+def upsert_derived_sample(conn: sqlite3.Connection, parent_sample_id: int, child_name: str,
+                          kind: str, tool: str, cmd_template: str,
+                          params: Optional[Dict[str, Any]] = None,
+                          cache_key: Optional[str] = None) -> Optional[int]:
+    """
+    Insert or update a derived sample definition. On conflict of
+    (parent_sample_id, child_name), updates fields.
+    Returns the row id.
+    """
+    if params is None:
+        params = {}
+    params_json = json.dumps(params, sort_keys=True)
+    if cache_key is None:
+        # Use a robust 64-char cache key over defining attributes
+        cache_key = config_hash({
+            "parent_sample_id": parent_sample_id,
+            "child_name": child_name,
+            "kind": kind,
+            "tool": tool,
+            "cmd_template": cmd_template,
+            "params": params,
+        }, length=64)
+
+    sql = """
+        INSERT INTO derived_samples (
+            parent_sample_id, child_name, kind, tool, cmd_template, params_json, cache_key
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(parent_sample_id, child_name) DO UPDATE SET
+            kind = excluded.kind,
+            tool = excluded.tool,
+            cmd_template = excluded.cmd_template,
+            params_json = excluded.params_json,
+            cache_key = excluded.cache_key
+    """
+    try:
+        with conn:
+            conn.execute(sql, (parent_sample_id, child_name, kind, tool, cmd_template, params_json, cache_key))
+        # Fetch id
+        row = conn.execute(
+            "SELECT id FROM derived_samples WHERE parent_sample_id = ? AND child_name = ?",
+            (parent_sample_id, child_name),
+        ).fetchone()
+        return int(row[0]) if row else None
+    except sqlite3.Error as e:
+        log.exception("Failed to upsert derived_sample '%s' for parent %s: %s", child_name, parent_sample_id, e)
+        return None
+
+
+def get_derived_by_child_name(conn: sqlite3.Connection, child_name: str) -> Optional[sqlite3.Row]:
+    try:
+        row = conn.execute(
+            "SELECT * FROM derived_samples WHERE child_name = ?",
+            (child_name,),
+        ).fetchone()
+        return row
+    except sqlite3.Error as e:
+        log.exception("Failed to fetch derived sample by child_name '%s': %s", child_name, e)
+        return None
+
+
+def get_derived_for_parent(conn: sqlite3.Connection, parent_sample_id: int) -> list:
+    try:
+        rows = conn.execute(
+            "SELECT * FROM derived_samples WHERE parent_sample_id = ?",
+            (parent_sample_id,),
+        ).fetchall()
+        return rows or []
+    except sqlite3.Error as e:
+        log.exception("Failed to fetch derived samples for parent %s: %s", parent_sample_id, e)
+        return []
