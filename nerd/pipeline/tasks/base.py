@@ -106,10 +106,56 @@ class Task(abc.ABC):
         # 6. Run the command using the appropriate runner.
         if cmd:
             log.debug("Executing command: %s", cmd)
-            # In a more complex app, we would select the runner based on ctx.backend
-            runner = LocalRunner()
-            rc = runner.run(cmd, run_dir)
-            
+            # Select runner based on backend
+            if str(ctx.backend).lower() == "slurm":
+                try:
+                    from nerd.pipeline.runners.slurm import SlurmRunner
+                    runner = SlurmRunner()
+                except Exception:
+                    log.exception("Failed to load SlurmRunner; falling back to LocalRunner.")
+                    runner = LocalRunner()
+            else:
+                runner = LocalRunner()
+
+            # Build optional environment for runner
+            run_cfg = cfg.get("run", {})
+            env = dict(run_cfg.get("env", {}) or {})
+            if str(ctx.backend).lower() == "slurm":
+                slurm_cfg = (run_cfg.get("slurm") or {})
+                # SSH settings
+                ssh_cfg = slurm_cfg.get("ssh") or {}
+                if ssh_cfg.get("host"):
+                    env["SLURM_REMOTE_HOST"] = str(ssh_cfg.get("host"))
+                if ssh_cfg.get("user"):
+                    env["SLURM_REMOTE_USER"] = str(ssh_cfg.get("user"))
+                if ssh_cfg.get("port"):
+                    env["SLURM_SSH_PORT"] = str(ssh_cfg.get("port"))
+                if ssh_cfg.get("options"):
+                    env["SLURM_SSH_OPTIONS"] = str(ssh_cfg.get("options"))
+                # Remote base dir for staging
+                if slurm_cfg.get("remote_base_dir"):
+                    env["SLURM_REMOTE_BASE_DIR"] = str(slurm_cfg.get("remote_base_dir"))
+                # sbatch resources
+                if slurm_cfg.get("partition"):
+                    env["SLURM_PARTITION"] = str(slurm_cfg.get("partition"))
+                if slurm_cfg.get("account"):
+                    env["SLURM_ACCOUNT"] = str(slurm_cfg.get("account"))
+                # Prefer task ctx time if not overridden
+                env["SLURM_TIME"] = str(slurm_cfg.get("time") or ctx.time)
+                # Optional preamble and stage-out patterns
+                preamble = slurm_cfg.get("preamble")
+                if isinstance(preamble, list):
+                    env["SLURM_PREAMBLE"] = "\n".join(str(x) for x in preamble)
+                elif isinstance(preamble, str):
+                    env["SLURM_PREAMBLE"] = preamble
+                patterns = slurm_cfg.get("stage_out")
+                if isinstance(patterns, list):
+                    env["SLURM_STAGE_OUT"] = ",".join(str(x) for x in patterns)
+                elif isinstance(patterns, str):
+                    env["SLURM_STAGE_OUT"] = patterns
+
+            rc = runner.run(cmd, run_dir, env=env or None)
+
             # Record the attempt.
             db_api.attempt(ctx.db, task_id, 1, cmd, {}, get_command_log_path(run_dir))
         

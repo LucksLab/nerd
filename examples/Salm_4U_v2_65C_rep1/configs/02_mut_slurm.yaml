@@ -1,0 +1,32 @@
+run:
+  output_dir: examples
+  label: Salm_4U_v2_65C_rep1
+  backend: slurm
+  threads: 8
+  mem_gb: 16
+  time: "00:05:00"
+  slurm:
+    ssh:
+      host: login.quest.northwestern.edu   # your login node
+      user: ekc5108                        # your username
+    remote_base_dir: /scratch/ekc5108/nerd/runner_test
+    partition: buyin
+    account: b1044
+    # time: "00:05:00"                    # override run.time if needed
+    preamble:
+      - 'echo "Activating environment on remote..."'
+      # - 'module load shapemapper/2.4.1'  # example
+      # - 'source ~/.bashrc; conda activate rna'
+    stage_out:
+      - samples/*/*.txt
+
+mut_count:
+  plugin: shapemapper
+  tool:
+    # bin: /opt/shapemapper/bin/shapemapper  # not used in echo test
+    version: "echo-test"
+  samples:
+    - fourU_WT_65c_rep1_tp1
+  params:
+    n_proc: 1
+

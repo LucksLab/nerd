@@ -91,6 +91,8 @@ class CreateTask(Task):
             sequencing_run_data = inputs.get("sequencing_run")
             samples_data = inputs.get("samples", [])
             derived_data = inputs.get("derived_samples", [])
+            # Ensure seqrun_id is defined for type-checkers; may remain None
+            seqrun_id: Optional[int] = None
 
             with ctx.db: # Use the connection as a context manager for transactions
                 if construct_data:
@@ -122,6 +124,8 @@ class CreateTask(Task):
                     log.info("Inserting %d samples.", len(samples_data))
                     if not sequencing_run_data:
                         raise ValueError("'samples' provided without 'sequencing_run' block to associate seqrun_id.")
+                    if seqrun_id is None:
+                        raise ValueError("'samples' provided but sequencing_run was not successfully created.")
                     if 'seqrun_id' in samples_data[0]:
                         # Support pre-populated seqrun_id, but prefer the resolved one above
                         pass
@@ -144,7 +148,7 @@ class CreateTask(Task):
 
                         # Resolve parent sample id; prefer current seqrun if provided, else global by name
                         parent_id = None
-                        if 'seqrun_id' in locals():
+                        if 'seqrun_id' in locals() and seqrun_id is not None:
                             parent_id = db_api.get_sample_id(ctx.db, seqrun_id, parent_sample)
                         if parent_id is None:
                             parent_id = db_api.get_sample_id_by_name(ctx.db, parent_sample)
@@ -157,6 +161,9 @@ class CreateTask(Task):
                         log.debug("Upserted derived_sample id=%s for child '%s' (parent s_id=%s)", ds_id, child_name, parent_id)
                 # Only link probing_reactions when actual parent samples are provided
                 if samples_data:
+                    # Ensure seqrun_id is available (created above)
+                    if seqrun_id is None:
+                        raise ValueError("'samples' provided but sequencing_run is missing or invalid.")
                     if construct_data is None or buffer_data is None:
                         raise ValueError("'samples' requires 'construct' and 'buffer' blocks to link probing_reactions.")
 
@@ -191,6 +198,8 @@ class CreateTask(Task):
                     for s in samples_data:
                         sample_name = s.get("sample_name")
                         fq_dir = s.get("fq_dir")
+                        # seqrun_id is guaranteed non-None from the guard above
+                        assert seqrun_id is not None
                         s_id = db_api.get_sample_id(ctx.db, seqrun_id, sample_name, fq_dir)
                         if s_id is None:
                             raise ValueError(f"Could not resolve sequencing sample id for name='{sample_name}', fq_dir='{fq_dir}'")
