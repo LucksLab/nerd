@@ -51,8 +51,26 @@ class Task(abc.ABC):
         
         label_path = Path(output_dir) / label  # Updated to use output_dir from config
 
+        # 0. Compute hashes used for caching and paths
+        cfg_hash_short = config_hash(cfg, length=7)
+        cache_key_full = config_hash(cfg, length=64)
+
+        # 0.5. Check for an existing completed task with same signature and skip if found
+        existing = db_api.find_task_by_signature(db_conn, label, output_dir, cache_key_full)
+
+        if existing is not None and str(existing["state"]).lower() == "completed":
+            # Record a cached task to make the skip visible in DB, then return
+            msg = f"Identical config (cfg={cfg_hash_short}) previously completed as task_id={existing['id']} — skipping."
+            scope_val = self.scope_id(None)
+            db_api.record_cached_task(
+                db_conn, self.name, self.scope_kind, scope_val, cfg.get("run", {}).get("backend", "local"),
+                output_dir, label, cache_key_full, msg
+            )
+            log.info("%s", msg)
+            return
+
         # 1. Create a unique directory for this run.
-        run_dir = make_run_dir(label_path, self.name, suffix=f"__cfg-{config_hash(cfg)}")
+        run_dir = make_run_dir(label_path, self.name, suffix=f"__cfg-{cfg_hash_short}")
 
         # The logger is already configured by the CLI, but we could add a file handler here.
         log.info("Executing task '%s' in run directory: %s", self.name, run_dir)
@@ -75,7 +93,7 @@ class Task(abc.ABC):
         # 4. Record the start of the task in the database.
         task_id = db_api.begin_task(
             ctx.db, self.name, self.scope_kind, self.scope_id(inputs),
-            ctx.backend, ctx.output_dir, ctx.label, cache_key=config_hash(cfg)
+            ctx.backend, ctx.output_dir, ctx.label, cache_key=cache_key_full
         )
         if task_id is None:
             log.error("Failed to begin task in database. Aborting.")

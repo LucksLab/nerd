@@ -70,14 +70,35 @@ def begin_task(conn: sqlite3.Connection, name: str, scope_kind: str, scope_id: O
         The ID of the newly created task, or None on failure.
     """
     sql = """
-        INSERT INTO tasks (task_name, scope_kind, scope_id, backend, output_dir, label, cache_key, started_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO tasks (
+            task_name, scope_kind, scope_id, backend, output_dir, label,
+            cache_key, config_hash, started_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     try:
         with conn:
-            cursor = conn.execute(sql, (name, scope_kind, scope_id, backend, output_dir, label, cache_key, datetime.now().isoformat()))
+            # Use a short, human-friendly config hash alongside full cache_key
+            cfg_short = (cache_key or "")[:7]
+            cursor = conn.execute(
+                sql,
+                (
+                    name,
+                    scope_kind,
+                    scope_id,
+                    backend,
+                    output_dir,
+                    label,
+                    cache_key,
+                    cfg_short,  # store short 7-char config hash
+                    datetime.now().isoformat(),
+                ),
+            )
             task_id = cursor.lastrowid
-            log.info("Began task '%s' (ID: %s) for %s:%s", name, task_id, scope_kind, scope_id)
+            log.info(
+                "Began task '%s' (ID: %s) for %s:%s (cfg=%s)",
+                name, task_id, scope_kind, scope_id, cache_key
+            )
             return task_id
     except sqlite3.IntegrityError as e:
         log.error("Failed to begin task '%s' due to integrity error: %s", name, e)
@@ -112,19 +133,85 @@ def finish_task(conn: sqlite3.Connection, task_id: int, state: str, message: Opt
                 cache_key: Optional[str] = None):
     """
     Updates a task's final state (e.g., 'completed', 'failed').
-    """
-    sql = """
-        UPDATE tasks
-        SET state = ?, message = ?, cache_key = ?, ended_at = ?
-        WHERE id = ?
+    If cache_key is provided, updates it; otherwise preserves the existing value.
     """
     try:
         with conn:
-            conn.execute(sql, (state, message, cache_key, datetime.now().isoformat(), task_id))
+            if cache_key is None:
+                conn.execute(
+                    """
+                    UPDATE tasks
+                    SET state = ?, message = ?, ended_at = ?
+                    WHERE id = ?
+                    """,
+                    (state, message, datetime.now().isoformat(), task_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE tasks
+                    SET state = ?, message = ?, cache_key = ?, ended_at = ?
+                    WHERE id = ?
+                    """,
+                    (state, message, cache_key, datetime.now().isoformat(), task_id),
+                )
         log.info("Finished task ID %d with state '%s'", task_id, state)
     except sqlite3.Error as e:
         log.exception("Failed to finish task %d: %s", task_id, e)
 
+
+def find_task_by_signature(conn: sqlite3.Connection, label: str, output_dir: str,
+                           cache_key: Optional[str]) -> Optional[sqlite3.Row]:
+    """
+    Returns the most recent task row matching the same logical signature
+    (label, output_dir, cache_key), or None if not found.
+    Ignores task_name to account for implementations where it may include timestamps.
+    """
+    sql = (
+        """
+        SELECT id, task_name, label, output_dir, cache_key, state, started_at, ended_at
+        FROM tasks
+        WHERE label = ? AND output_dir = ? AND ((? IS NULL AND cache_key IS NULL) OR cache_key = ?)
+        ORDER BY started_at DESC
+        LIMIT 1
+        """
+    )
+    try:
+        row = conn.execute(sql, (label, output_dir, cache_key, cache_key)).fetchone()
+        return row
+    except sqlite3.Error as e:
+        log.exception("Failed to query existing task by signature: %s", e)
+        return None
+
+
+def record_cached_task(conn: sqlite3.Connection, name: str, scope_kind: str, scope_id: Optional[int],
+                       backend: str, output_dir: str, label: str, cache_key: Optional[str],
+                       message: Optional[str] = None) -> Optional[int]:
+    """
+    Inserts a task row with state='cached' to record a skipped run due to identical config.
+
+    Uses a single INSERT to avoid unique-index conflicts on active states.
+    Sets both started_at and ended_at to now.
+    """
+    sql = """
+        INSERT INTO tasks (
+            task_name, scope_kind, scope_id, backend, output_dir, label,
+            cache_key, config_hash, started_at, ended_at, state, message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'cached', ?)
+    """
+    try:
+        with conn:
+            cfg_short = (cache_key or "")[:7]
+            cur = conn.execute(sql, (name, scope_kind, scope_id, backend, output_dir, label, cache_key, cfg_short, message))
+            task_id = cur.lastrowid
+            log.info("Recorded cached task '%s' (ID: %s) for label '%s'", name, task_id, label)
+            return task_id
+    except sqlite3.IntegrityError as e:
+        log.error("Failed to record cached task due to integrity error: %s", e)
+        return None
+    except sqlite3.Error as e:
+        log.exception("Failed to record cached task: %s", e)
+        return None
 
 # --- Domain-specific write operations ---
 
@@ -620,3 +707,107 @@ def bulk_upsert_samples(conn: sqlite3.Connection, seqrun_id: int, samples: List[
     except sqlite3.Error as e:
         log.exception("Bulk upsert samples failed: %s", e)
         return 0
+
+
+# --- Additional helpers for probing reactions and reaction groups ---
+def get_sample_id(conn: sqlite3.Connection, seqrun_id: int, sample_name: str, fq_dir: Optional[str] = None) -> Optional[int]:
+    """
+    Fetch the id of a sequencing sample by seqrun_id and sample_name.
+    If fq_dir is provided, include it in the filter for disambiguation.
+    """
+    try:
+        if fq_dir is None:
+            row = conn.execute(
+                "SELECT id FROM sequencing_samples WHERE seqrun_id = ? AND sample_name = ?",
+                (seqrun_id, sample_name),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT id FROM sequencing_samples WHERE seqrun_id = ? AND sample_name = ? AND fq_dir = ?",
+                (seqrun_id, sample_name, fq_dir),
+            ).fetchone()
+        return int(row[0]) if row else None
+    except sqlite3.Error as e:
+        log.exception("Failed to fetch sample id for '%s' (seqrun_id=%s): %s", sample_name, seqrun_id, e)
+        return None
+
+
+def get_max_reaction_group_id(conn: sqlite3.Connection) -> int:
+    """Return the current max rg_id from reaction_groups, or 0 if none."""
+    try:
+        row = conn.execute("SELECT COALESCE(MAX(rg_id), 0) FROM reaction_groups").fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+    except sqlite3.Error as e:
+        log.exception("Failed to fetch max rg_id: %s", e)
+        return 0
+
+
+def insert_probing_reaction(conn: sqlite3.Connection, reaction: Dict[str, Any]) -> Optional[int]:
+    """
+    Insert a probing_reaction and return its id.
+    Expected keys in reaction dict:
+      temperature, replicate, reaction_time, probe_concentration, probe,
+      RT, done_by, treated, buffer_id, construct_id, rg_id, s_id
+    """
+    sql = (
+        """
+        INSERT INTO probing_reactions (
+            temperature, replicate, reaction_time, probe_concentration, probe,
+            RT, done_by, treated, buffer_id, construct_id, rg_id, s_id
+        ) VALUES (
+            :temperature, :replicate, :reaction_time, :probe_concentration, :probe,
+            :RT, :done_by, :treated, :buffer_id, :construct_id, :rg_id, :s_id
+        )
+        """
+    )
+    try:
+        with conn:
+            cur = conn.execute(sql, reaction)
+            rxn_id = cur.lastrowid
+            log.debug("Inserted probing_reaction id=%s for sample_id=%s (rg_id=%s)", rxn_id, reaction.get("s_id"), reaction.get("rg_id"))
+            return rxn_id
+    except sqlite3.Error as e:
+        log.exception("Failed to insert probing_reaction: %s", e)
+        return None
+
+
+# Deprecated: insert_reaction_group_pair was used when reaction_groups stored per-reaction mappings.
+# The schema now normalizes reaction_groups as a catalog (rg_id, rg_label), so this is removed.
+
+
+def find_rg_id_by_label(conn: sqlite3.Connection, rg_label: str) -> Optional[int]:
+    """Return an existing rg_id for a given label, or None if not found."""
+    try:
+        row = conn.execute(
+            "SELECT rg_id FROM reaction_groups WHERE rg_label = ? LIMIT 1",
+            (rg_label,),
+        ).fetchone()
+        return int(row[0]) if row else None
+    except sqlite3.Error as e:
+        log.exception("Failed to lookup rg_id by label '%s': %s", rg_label, e)
+        return None
+
+
+def upsert_reaction_group(conn: sqlite3.Connection, rg_id: int, rg_label: Optional[str]) -> Optional[int]:
+    """
+    Ensure a reaction_groups row exists and sets the label exactly to the provided value.
+    If the row exists, updates rg_label to match the YAML.
+    Returns the rg_id on success, None on failure.
+    """
+    try:
+        if rg_label is None:
+            sql = "INSERT INTO reaction_groups (rg_id) VALUES (?) ON CONFLICT(rg_id) DO NOTHING"
+            params = (rg_id,)
+        else:
+            sql = (
+                "INSERT INTO reaction_groups (rg_id, rg_label) VALUES (?, ?) "
+                "ON CONFLICT(rg_id) DO UPDATE SET rg_label=excluded.rg_label"
+            )
+            params = (rg_id, str(rg_label))
+
+        with conn:
+            conn.execute(sql, params)
+        return rg_id
+    except sqlite3.Error as e:
+        log.exception("Failed to upsert reaction_group rg_id=%s label=%s: %s", rg_id, rg_label, e)
+        return None

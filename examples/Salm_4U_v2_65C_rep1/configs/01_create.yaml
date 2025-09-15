@@ -29,10 +29,10 @@ create:
 
   samples:
     - sample_name: fourU_WT_65c_rep1_tp1
-      fq_dir: ../fastq_files     # dummy path, doesn’t need to exist yet
+      fq_dir: ../fastq_files
       r1_file: 001-EKC-WT-60c-a-1-p_S1_L001_R1_001.fastq.gz
       r2_file: 001-EKC-WT-60c-a-1-p_S1_L001_R2_001.fastq.gz
-      reaction_group: 65_1
+      reaction_group: "65_1"
       temperature: 65
       replicate: 1
       reaction_time: 20
@@ -47,7 +47,7 @@ create:
       fq_dir: ../fastq_files
       r1_file: 002-EKC-WT-60c-a-2-p_S2_L001_R1_001.fastq.gz
       r2_file: 002-EKC-WT-60c-a-2-p_S2_L001_R2_001.fastq.gz
-      reaction_group: 65_1
+      reaction_group: "65_1"
       temperature: 65
       replicate: 1
       reaction_time: 45

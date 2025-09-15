@@ -10,8 +10,10 @@ import enum
 
 from nerd.utils.logging import setup_logger, get_logger
 from nerd.utils.config import load_config
+from nerd.utils.hashing import config_hash
 from nerd.db import api as db_api
 from nerd.pipeline.tasks import create, mut_count, tc_free
+from datetime import datetime
 
 # Create the main Typer application
 app = typer.Typer(
@@ -36,14 +38,16 @@ def main_callback(
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Enable verbose (DEBUG) logging."
     ),
-    db: Path = typer.Option(
-        "examples/nerd_dev.sqlite3",
+    db: Optional[Path] = typer.Option(
+        None,
         "--db",
-        help="Path to the SQLite database file.",
+        help="Path to the SQLite database file. Defaults to run.output_dir from config.",
         writable=True,
     ),
     log_file: Optional[Path] = typer.Option(
-        None, "--log-file", help="Path to a file for logging."
+        None,
+        "--log-file",
+        help="Path to a file for logging. Defaults to run.output_dir/run_logs/<date_time>__cfg-<hash>.log",
     ),
 ):
     """
@@ -54,7 +58,7 @@ def main_callback(
     state["db"] = db
     state["log_file"] = log_file
 
-    # Configure the logger
+    # Configure the logger (console only for now; file handler will be set after config is loaded)
     setup_logger(logfile=log_file, verbose=verbose)
     log = get_logger(__name__)
     log.debug("CLI context initialized. verbose=%s, db=%s", verbose, db)
@@ -82,9 +86,27 @@ def run(
 
     try:
         cfg = load_config(config_path)
-        
+
+        # Derive defaults from config if not provided at CLI
+        output_dir = Path(cfg.get("run", {}).get("output_dir", ".")).resolve()
+        # Default DB: <run.output_dir>/nerd.sqlite
+        if state.get("db") is None:
+            default_db = output_dir / "nerd.sqlite"
+            state["db"] = default_db
+
+        # Default log file: <run.output_dir>/run_logs/<date_time>__cfg-<hash>.log
+        if state.get("log_file") is None:
+            dt_str = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+            cfg_hash = config_hash(cfg)
+            log_dir = output_dir / "run_logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            default_log = log_dir / f"{dt_str}__cfg-{cfg_hash}.log"
+            state["log_file"] = default_log
+            # Reconfigure logger to add file handler now that we have a path
+            setup_logger(logfile=default_log, verbose=state.get("verbose", False))
+
         # Establish database connection
-        conn = db_api.connect(state["db"])
+        conn = db_api.connect(Path(state["db"]))
         db_api.init_schema(conn)
 
         # Map step name to task class

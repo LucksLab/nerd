@@ -33,12 +33,8 @@ CREATE TABLE IF NOT EXISTS probing_reactions (
 # === Table: reaction_groups ===
 CREATE_REACTION_GROUPS = """ 
 CREATE TABLE IF NOT EXISTS reaction_groups (
-    id INTEGER NOT NULL UNIQUE,                  -- Primary key for this table
-    rg_id INTEGER NOT NULL,                      -- Reaction group identifier
-    rxn_id INTEGER NOT NULL,                     -- Foreign key to probing_reactions table
-    PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(rxn_id) REFERENCES probing_reactions(rxn_id),
-    UNIQUE(rg_id, rxn_id)                               -- Ensure unique reaction group IDs
+    rg_id INTEGER PRIMARY KEY,                   -- Stable reaction group identifier (referenced by other tables)
+    rg_label TEXT UNIQUE                         -- Human-provided label for this reaction group (from YAML)
 );
 """
 
@@ -49,7 +45,7 @@ CREATE_TEMPGRAD_GROUPS = """
 CREATE TABLE IF NOT EXISTS tempgrad_groups (
     id INTEGER NOT NULL UNIQUE,                  -- Primary key for this table
     tg_id INTEGER NOT NULL,                      -- Temperature gradient group identifier
-    rg_id INTEGER NOT NULL,                      -- Foreign key to reaction_groups table
+    rg_id INTEGER NOT NULL,                      -- Foreign key to reaction_groups (rg_id)
     buffer_id INTEGER NOT NULL,                  -- Foreign key to buffers table
     construct_id INTEGER NOT NULL,               -- Foreign key to constructs table
     RT TEXT NOT NULL,                            -- Reverse transcription enzyme or protocol ("MRT", "SSIII", etc.)
@@ -58,7 +54,7 @@ CREATE TABLE IF NOT EXISTS tempgrad_groups (
     temperature REAL NOT NULL,                   -- Temperature of the reaction (Celsius)
     replicate INTEGER NOT NULL,                  -- Replicate number
     PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(rg_id) REFERENCES reaction_groups(id),
+    FOREIGN KEY(rg_id) REFERENCES reaction_groups(rg_id),
     UNIQUE(tg_id, rg_id)                         -- Ensure unique temperature gradient group IDs
 );
 """
@@ -298,7 +294,7 @@ CREATE TABLE IF NOT EXISTS probing_kinetic_rates (
     nt_id INTEGER,                               -- Foreign key to nucleotides table (optional, if extracted individually)
     rxn_id INTEGER,                              -- Foreign key to probing_reactions table (optional, if extracted individually)
     PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(rg_id) REFERENCES reaction_groups(id),
+    FOREIGN KEY(rg_id) REFERENCES reaction_groups(rg_id),
     FOREIGN KEY(nt_id) REFERENCES nucleotides(id),
     FOREIGN KEY(rxn_id) REFERENCES probing_reactions(id),
     UNIQUE(rg_id, model, species, nt_id, rxn_id)        -- Ensure unique rates per reaction group and species
@@ -419,6 +415,18 @@ CREATE_INDEX_ARTIFACTS_TASK = """
 CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts (task_id, kind);
 """
 
+# Additional index to speed up lookups by rg_label
+CREATE_INDEX_RG_LABEL = """
+CREATE INDEX IF NOT EXISTS idx_reaction_groups_label ON reaction_groups (rg_label);
+"""
+
+# Uniqueness for active tasks per signature; allow duplicates only for cached skips
+CREATE_INDEX_TASKS_UNIQUE_SIG_ACTIVE = """
+CREATE UNIQUE INDEX IF NOT EXISTS unique_tasks_signature_active
+ON tasks (task_name, label, output_dir, cache_key)
+WHERE state <> 'cached';
+"""
+
 # === Aggregate all table creation statements ===
 ALL_TABLES = [
     CREATE_PROBING_REACTIONS,
@@ -450,5 +458,7 @@ ALL_INDEXES = [
     CREATE_INDEX_TASKS_LABEL,
     CREATE_INDEX_TASKS_SCOPE,
     CREATE_INDEX_ATTEMPTS_TASK,
-    CREATE_INDEX_ARTIFACTS_TASK
+    CREATE_INDEX_ARTIFACTS_TASK,
+    CREATE_INDEX_RG_LABEL,
+    CREATE_INDEX_TASKS_UNIQUE_SIG_ACTIVE
 ]

@@ -126,6 +126,65 @@ class CreateTask(Task):
                         pass
                     inserted = db_api.bulk_upsert_samples(ctx.db, seqrun_id, samples_data)
                     log.debug("Upserted %d samples for seqrun_id=%s", inserted, seqrun_id)
+
+                    if construct_data is None or buffer_data is None:
+                        raise ValueError("'samples' requires 'construct' and 'buffer' blocks to link probing_reactions.")
+
+                    # Map user reaction_group labels to numeric rg_ids for this import
+                    rg_labels = [s.get("reaction_group") for s in samples_data]
+                    if any(lbl is None for lbl in rg_labels):
+                        raise ValueError("Each sample must have a 'reaction_group' label in the YAML.")
+                    unique_labels = []
+                    seen = set()
+                    for lbl in rg_labels:
+                        if lbl not in seen:
+                            unique_labels.append(lbl)
+                            seen.add(lbl)
+
+                    # Resolve each label to an rg_id, reusing existing ids if present
+                    max_rg = db_api.get_max_reaction_group_id(ctx.db)
+                    next_rg = max_rg
+                    label_to_rgid = {}
+                    for lbl in unique_labels:
+                        existing = db_api.find_rg_id_by_label(ctx.db, lbl)
+                        if existing is not None:
+                            label_to_rgid[lbl] = existing
+                        else:
+                            next_rg += 1
+                            label_to_rgid[lbl] = next_rg
+
+                    # Ensure a reaction_groups row exists for each rg_id/label
+                    for lbl, rgid in label_to_rgid.items():
+                        db_api.upsert_reaction_group(ctx.db, rgid, lbl)
+
+                    # For each sample, insert probing_reaction and pair in reaction_groups
+                    for s in samples_data:
+                        sample_name = s.get("sample_name")
+                        fq_dir = s.get("fq_dir")
+                        s_id = db_api.get_sample_id(ctx.db, seqrun_id, sample_name, fq_dir)
+                        if s_id is None:
+                            raise ValueError(f"Could not resolve sequencing sample id for name='{sample_name}', fq_dir='{fq_dir}'")
+
+                        reaction = {
+                            "temperature": int(s.get("temperature")),
+                            "replicate": int(s.get("replicate")),
+                            "reaction_time": int(s.get("reaction_time")),
+                            "probe_concentration": float(s.get("probe_concentration")),
+                            "probe": str(s.get("probe")),
+                            "RT": str(s.get("RT")),
+                            "done_by": str(s.get("done_by", "NO_DONEBY")),
+                            "treated": int(s.get("treated", 1)),
+                            "buffer_id": int(buffer_id) if buffer_id is not None else None,
+                            "construct_id": int(construct_id) if construct_id is not None else None,
+                            "rg_id": int(label_to_rgid[s.get("reaction_group")]),
+                            "s_id": int(s_id),
+                        }
+
+                        rxn_id = db_api.insert_probing_reaction(ctx.db, reaction)
+                        if rxn_id is None:
+                            raise RuntimeError(f"Failed to insert probing_reaction for sample '{sample_name}'")
+
+                        log.debug("Inserted reaction id=%s into group rg_id=%s (label=%s)", rxn_id, reaction["rg_id"], s.get("reaction_group"))
             
             log.info("'create' task consumption completed successfully.")
 
