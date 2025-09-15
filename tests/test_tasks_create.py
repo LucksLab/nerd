@@ -1,6 +1,8 @@
 import sqlite3
 from pathlib import Path
 
+import json
+import pytest
 from nerd.db import api as db_api
 from nerd.pipeline.tasks.create import CreateTask
 from nerd.pipeline.tasks.base import TaskContext
@@ -124,4 +126,89 @@ def test_reaction_group_label_reuse(tmp_path):
     assert count_rxn >= 2
 
     # Cleanup
+    ctx.db.close()
+
+
+def test_derived_sample_inserts_with_parent(tmp_path):
+    db_file = tmp_path / "test.sqlite"
+    ctx, run_dir = make_ctx(tmp_path, db_file, label="TestLabel", output_dir=tmp_path / "out")
+
+    # Seed a parent sequencing sample into the DB
+    seqrun = {
+        "run_name": "TEST_RUN",
+        "date": "20250101",
+        "sequencer": "Illumina_MiSeq",
+        "run_manager": "EKC",
+    }
+    seqrun_id = db_api.upsert_sequencing_run(ctx.db, seqrun)
+    samples = [
+        {
+            "sample_name": "parent_s1",
+            "fq_dir": ".",
+            "r1_file": "R1.fastq.gz",
+            "r2_file": "R2.fastq.gz",
+        }
+    ]
+    db_api.bulk_upsert_samples(ctx.db, seqrun_id, samples)
+
+    task = CreateTask()
+    inputs = {
+        "derived_samples": [
+            {
+                "child_name": "parent_s1__subsample-n1000-s7",
+                "parent_sample": "parent_s1",
+                "kind": "subsample",
+                "tool": "seqtk",
+                "params": {"count": 1000, "seed": 7},
+                "cmd_template": "seqtk sample -s {seed} {R1} {count} > {OUT_R1} && seqtk sample -s {seed} {R2} {count} > {OUT_R2}",
+            }
+        ]
+    }
+
+    # Execute consume_outputs for derived-only config
+    task.consume_outputs(ctx, inputs, {}, run_dir)
+
+    # Assert one derived_sample row exists and links to the parent
+    cur = ctx.db.cursor()
+    row = cur.execute(
+        "SELECT parent_sample_id, child_name, kind, tool, cmd_template, params_json, cache_key FROM derived_samples"
+    ).fetchone()
+    assert row is not None
+    parent_sample_id = cur.execute(
+        "SELECT id FROM sequencing_samples WHERE sample_name = ?",
+        ("parent_s1",),
+    ).fetchone()[0]
+    assert row[0] == parent_sample_id
+    assert row[1] == "parent_s1__subsample-n1000-s7"
+    assert row[2] == "subsample"
+    assert row[3] == "seqtk"
+    assert "{R1}" in row[4] and "{OUT_R2}" in row[4]
+    params = json.loads(row[5])
+    assert params["count"] == 1000 and params["seed"] == 7
+    assert isinstance(row[6], str) and len(row[6]) >= 40  # cache_key looks like a long hash
+
+    ctx.db.close()
+
+
+def test_derived_sample_without_parent_raises(tmp_path):
+    db_file = tmp_path / "test.sqlite"
+    ctx, run_dir = make_ctx(tmp_path, db_file, label="TestLabel", output_dir=tmp_path / "out")
+
+    task = CreateTask()
+    inputs = {
+        "derived_samples": [
+            {
+                "child_name": "missing_parent__subsample-n10-s1",
+                "parent_sample": "missing_parent",
+                "kind": "subsample",
+                "tool": "seqtk",
+                "params": {"count": 10, "seed": 1},
+                "cmd_template": "seqtk sample -s {seed} {R1} {count} > {OUT_R1} && seqtk sample -s {seed} {R2} {count} > {OUT_R2}",
+            }
+        ]
+    }
+
+    with pytest.raises(ValueError) as exc:
+        task.consume_outputs(ctx, inputs, {}, run_dir)
+    assert "Could not resolve parent sample" in str(exc.value)
     ctx.db.close()
