@@ -72,7 +72,7 @@ class CreateTask(Task):
         log.debug("'create' task prepared with inputs from config.")
         return create_cfg, {}  # Return the 'create' block as inputs
 
-    def command(self, inputs: Dict[str, Any], params: Dict[str, Any]) -> Optional[str]:
+    def command(self, ctx, inputs: Dict[str, Any], params: Dict[str, Any]) -> Optional[str]:
         """
         This is a pure-Python task, so no shell command is executed.
         """

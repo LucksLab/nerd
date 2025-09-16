@@ -1,32 +1,43 @@
 run:
   output_dir: examples
   label: Salm_4U_v2_65C_rep1
-  backend: slurm
-  threads: 8
-  mem_gb: 16
-  time: "00:05:00"
-  slurm:
+  backend: remote_slurm
+  remote:
     ssh:
       host: login.quest.northwestern.edu   # your login node
       user: ekc5108                        # your username
+    slurm_config:
+      partition: buyin
+      account: b1044
+      time: "00:30:00"                    # override run.time if needed
+      memory: "12G"                        # override run.memory if needed
+      cpus: 12                             # override run.cpus if needed
     remote_base_dir: /scratch/ekc5108/nerd/runner_test
-    partition: buyin
-    account: b1044
-    # time: "00:05:00"                    # override run.time if needed
     preamble:
-      - 'echo "Activating environment on remote..."'
+      - 'echo "Activating environment on remote... (just a preamble)"'
       # - 'module load shapemapper/2.4.1'  # example
       # - 'source ~/.bashrc; conda activate rna'
     stage_out:
-      - samples/*/*.txt
+      - samples/*/*_profile.txt
+      - samples/*/*_profile.txtga
+      - samples/*/*_parse.mut
+      - samples/*/*_parse.mutga
 
 mut_count:
   plugin: shapemapper
   tool:
-    # bin: /opt/shapemapper/bin/shapemapper  # not used in echo test
-    version: "echo-test"
+    bin: /projects/b1044/Software/shapemapper2-2.3/shapemapper
+    version: "2.3"
   samples:
     - fourU_WT_65c_rep1_tp1
+    - fourU_WT_65c_rep1_tp2
   params:
     n_proc: 1
-
+  # ShapeMapper options mapping
+  amplicon: true                  # --amplicon
+  dms_mode: true                  # --dms
+  output_N7: true                 # --N7 --bypass_filters
+  per_read_histograms: true         # --per-read-histograms
+  output_parsed_mutations: false   # --output-parsed-mutations
+  # Smoke test only: echo steps instead of running shapemapper
+  dry_run: false

@@ -36,6 +36,7 @@ nerd/utils/io.py
 nerd/utils/logging.py
 nerd/utils/paths.py
 tests/test_db_api.py
+tests/test_dummy_python_ssh.py
 tests/test_fitting_models.py
 tests/test_tasks_create.py
 tests/test_tasks_mut.py

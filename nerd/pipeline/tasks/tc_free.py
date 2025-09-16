@@ -15,7 +15,7 @@ class TimecourseFreeTask(Task):
     def prepare(self, cfg):
         return None, None
 
-    def command(self, inputs, params):
+    def command(self, ctx, inputs, params):
         return None
 
     def consume_outputs(self, ctx, inputs, params, run_dir):

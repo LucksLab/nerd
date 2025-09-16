@@ -61,10 +61,11 @@ class Task(abc.ABC):
         if existing is not None and str(existing["state"]).lower() == "completed":
             # Record a cached task to make the skip visible in DB, then return
             msg = f"Identical config (cfg={cfg_hash_short}) previously completed as task_id={existing['id']} — skipping."
-            scope_val = self.scope_id(None)
+            scope_val = self.scope_id(ctx=None, inputs=None)
             db_api.record_cached_task(
                 db_conn, self.name, self.scope_kind, scope_val, cfg.get("run", {}).get("backend", "local"),
-                output_dir, label, cache_key_full, msg
+                output_dir, label, cache_key_full, msg,
+                tool=self.task_tool(inputs=None), tool_version=self.task_tool_version(inputs=None)
             )
             log.info("%s", msg)
             return
@@ -76,13 +77,35 @@ class Task(abc.ABC):
         log.info("Executing task '%s' in run directory: %s", self.name, run_dir)
 
         # 2. Create the task context.
+        run_cfg = cfg.get("run", {})
+        # Prefer new slurm_config for resource keys (cpus, memory, time) if present
+        remote_block = (run_cfg.get("remote") or {})
+        slurm_config = (remote_block.get("slurm_config") or run_cfg.get("slurm_config") or {})
+
+        def _pick_mem(val_run, val_slurm):
+            v = val_run if val_run not in (None, "") else val_slurm
+            if v in (None, ""):
+                return 32
+            try:
+                return int(v)
+            except Exception:
+                # If string like '32G' was provided, strip suffix safely
+                try:
+                    return int(str(v).rstrip().rstrip('GgMm'))
+                except Exception:
+                    return 32
+
+        threads_val = run_cfg.get("threads")
+        mem_val = run_cfg.get("mem_gb")
+        time_val = run_cfg.get("time")
+
         ctx = TaskContext(
             db=db_conn,
-            backend=cfg.get("run", {}).get("backend", "local"),
+            backend=run_cfg.get("backend", "local"),
             workdir=run_dir,
-            threads=cfg.get("run", {}).get("threads", 8),
-            mem_gb=cfg.get("run", {}).get("mem_gb", 32),
-            time=cfg.get("run", {}).get("time", "02:00:00"),
+            threads=int(threads_val if threads_val not in (None, "") else slurm_config.get("cpus", 8)),
+            mem_gb=_pick_mem(mem_val, slurm_config.get("memory")),
+            time=str(time_val if time_val not in (None, "") else slurm_config.get("time", "02:00:00")),
             label=label,
             output_dir=output_dir  # Added output_dir to context
         )
@@ -92,36 +115,42 @@ class Task(abc.ABC):
         
         # 4. Record the start of the task in the database.
         task_id = db_api.begin_task(
-            ctx.db, self.name, self.scope_kind, self.scope_id(inputs),
-            ctx.backend, ctx.output_dir, ctx.label, cache_key=cache_key_full
+            ctx.db, self.name, self.scope_kind, self.scope_id(ctx, inputs),
+            ctx.backend, ctx.output_dir, ctx.label, cache_key=cache_key_full,
+            tool=self.task_tool(inputs), tool_version=self.task_tool_version(inputs)
         )
         if task_id is None:
             log.error("Failed to begin task in database. Aborting.")
             raise SystemExit(1)
 
         # 5. Build the command to be executed.
-        cmd = self.command(inputs, params)
+        cmd = self.command(ctx, inputs, params)
         rc = 0
 
         # 6. Run the command using the appropriate runner.
         if cmd:
+            backend = str(ctx.backend).lower()
+            log.info("Starting command (backend=%s) in %s", backend or "local", run_dir)
             log.debug("Executing command: %s", cmd)
             # Select runner based on backend
-            if str(ctx.backend).lower() == "slurm":
+            if backend in {"slurm", "remote_slurm", "ssh", "login", "remote_login", "remote"}:
                 try:
-                    from nerd.pipeline.runners.slurm import SlurmRunner
-                    runner = SlurmRunner()
+                    from nerd.pipeline.runners.remote import RemoteRunner
+                    mode = "slurm" if backend in {"slurm", "remote_slurm"} else "ssh"
+                    runner = RemoteRunner(mode=mode)
                 except Exception:
-                    log.exception("Failed to load SlurmRunner; falling back to LocalRunner.")
+                    log.exception("Failed to load RemoteRunner; falling back to LocalRunner.")
                     runner = LocalRunner()
             else:
                 runner = LocalRunner()
 
             # Build optional environment for runner
-            run_cfg = cfg.get("run", {})
             env = dict(run_cfg.get("env", {}) or {})
-            if str(ctx.backend).lower() == "slurm":
-                slurm_cfg = (run_cfg.get("slurm") or {})
+            if backend in {"slurm", "remote_slurm", "ssh", "login", "remote_login", "remote"}:
+                # Allow settings under 'remote' (recommended), fallback to legacy 'slurm' or 'ssh'
+                remote_cfg = (run_cfg.get("remote") or {})
+                slurm_cfg = (run_cfg.get("slurm") or run_cfg.get("ssh") or remote_cfg)
+                slurm_conf = (slurm_cfg.get("slurm_config") or run_cfg.get("slurm_config") or {})
                 # SSH settings
                 ssh_cfg = slurm_cfg.get("ssh") or {}
                 if ssh_cfg.get("host"):
@@ -135,13 +164,26 @@ class Task(abc.ABC):
                 # Remote base dir for staging
                 if slurm_cfg.get("remote_base_dir"):
                     env["SLURM_REMOTE_BASE_DIR"] = str(slurm_cfg.get("remote_base_dir"))
-                # sbatch resources
-                if slurm_cfg.get("partition"):
-                    env["SLURM_PARTITION"] = str(slurm_cfg.get("partition"))
-                if slurm_cfg.get("account"):
-                    env["SLURM_ACCOUNT"] = str(slurm_cfg.get("account"))
-                # Prefer task ctx time if not overridden
-                env["SLURM_TIME"] = str(slurm_cfg.get("time") or ctx.time)
+                if backend in {"slurm", "remote_slurm"}:
+                    # sbatch resources
+                    part = slurm_conf.get("partition") or slurm_cfg.get("partition")
+                    acct = slurm_conf.get("account") or slurm_cfg.get("account")
+                    time_s = slurm_conf.get("time") or slurm_cfg.get("time") or ctx.time
+                    cpus = slurm_conf.get("cpus")
+                    mem = slurm_conf.get("memory")
+                    if part:
+                        env["SLURM_PARTITION"] = str(part)
+                    if acct:
+                        env["SLURM_ACCOUNT"] = str(acct)
+                    env["SLURM_TIME"] = str(time_s)
+                    if cpus not in (None, ""):
+                        env["SLURM_CPUS"] = str(cpus)
+                    if mem not in (None, ""):
+                        m = str(mem)
+                        # If plain number, assume GB and add 'G'
+                        if m.isdigit():
+                            m = f"{m}G"
+                        env["SLURM_MEM"] = m
                 # Optional preamble and stage-out patterns
                 preamble = slurm_cfg.get("preamble")
                 if isinstance(preamble, list):
@@ -153,6 +195,16 @@ class Task(abc.ABC):
                     env["SLURM_STAGE_OUT"] = ",".join(str(x) for x in patterns)
                 elif isinstance(patterns, str):
                     env["SLURM_STAGE_OUT"] = patterns
+
+            # Task-provided stage-in specification (e.g., local files to upload to remote)
+            try:
+                import json as _json
+                if hasattr(self, "stage_in_pairs"):
+                    pairs = self.stage_in_pairs()  # list of dicts {src, dst}
+                    if pairs:
+                        env["SLURM_STAGE_IN"] = _json.dumps(pairs)
+            except Exception:
+                pass
 
             rc = runner.run(cmd, run_dir, env=env or None)
 
@@ -176,8 +228,14 @@ class Task(abc.ABC):
         # 10. Update the 'latest' symlink to point to this run.
         update_latest_symlink(label_path, self.name, run_dir)
 
-    def scope_id(self, inputs: Any) -> Optional[int]:
+    def scope_id(self, ctx: Optional[TaskContext], inputs: Any) -> Optional[int]:
         """Determines the primary ID for the task's scope (e.g., a sample ID)."""
+        return None
+
+    def task_tool(self, inputs: Any) -> Optional[str]:
+        return None
+
+    def task_tool_version(self, inputs: Any) -> Optional[str]:
         return None
 
     @abc.abstractmethod
@@ -191,7 +249,7 @@ class Task(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def command(self, inputs: Any, params: Any) -> Optional[str]:
+    def command(self, ctx: TaskContext, inputs: Any, params: Any) -> Optional[str]:
         """
         Construct the shell command to be executed.
         

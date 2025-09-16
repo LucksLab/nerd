@@ -23,6 +23,10 @@ class MutCountTask(Task):
     name = "mut_count"
     scope_kind = "sample"  # per-sample operations; aggregated under one task
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._stage_in: List[Dict[str, str]] = []  # list of {src, dst} relative to remote workdir
+
     def prepare(self, cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if self.name not in cfg:
             raise ValueError(f"Configuration must contain a '{self.name}' section.")
@@ -42,49 +46,145 @@ class MutCountTask(Task):
         # We cannot access ctx here, so defer fq roots to command() using run_dir; only fetch DB rows now.
         return mc, {}
 
-    def command(self, inputs: Dict[str, Any], params: Dict[str, Any]) -> Optional[str]:
+    def command(self, ctx: TaskContext, inputs: Dict[str, Any], params: Dict[str, Any]) -> Optional[str]:
         """
         Build a composite shell command that iterates over parent samples,
         creates per-sample output dirs, and invokes the tool (or placeholder).
         """
-        plugin_name = inputs.get("plugin")
-        tool_cfg = inputs.get("tool", {})
-        tool_bin = tool_cfg.get("bin")  # optional; rely on PATH if None
+        from nerd.db import api as db_api
+        from nerd.pipeline.plugins.mutcount import load_mutcount_plugin
+
+        plugin_name = str(inputs.get("plugin")).strip().lower()
+        tool_cfg = inputs.get("tool", {}) or {}
         threads = inputs.get("params", {}).get("n_proc") or inputs.get("threads") or 1
+
+        # Plugin and options
+        plugin = load_mutcount_plugin(
+            plugin_name,
+            bin_path=tool_cfg.get("bin"),
+            version=tool_cfg.get("version"),
+        )
+        options = {
+            "amplicon": bool(inputs.get("amplicon", True)),
+            "dms_mode": bool(inputs.get("dms_mode", False)),
+            "output_N7": bool(inputs.get("output_N7", False)),
+            "output_parsed_mutations": bool(inputs.get("output_parsed_mutations", False)),
+            "per_read_histograms": bool(inputs.get("per_read_histograms", False)),
+        }
+        dry_run = bool(inputs.get("dry_run", False))
 
         sample_names: List[str] = inputs.get("samples", [])
         if not sample_names:
             return None
 
-        # Build a shell script string to be executed in run_dir
-        # Resolve sample rows by name at runtime via sqlite3 CLI could be overkill; instead,
-        # we simply generate per-sample commands that assume fq_dir and files are relative to label root.
-        # Here we query DB at runtime is not trivial; instead, we will resolve in consume_outputs for now.
-        # For a working skeleton, create dirs and write placeholders if no tool_bin.
+        label_dir = Path(ctx.output_dir) / ctx.label
+
+        def _nt_rows_for_construct(cid: int) -> List[Dict[str, Any]]:
+            rows = ctx.db.execute(
+                "SELECT site, base, base_region FROM nucleotides WHERE construct_id = ? ORDER BY site",
+                (cid,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+        def _sample_row_by_name(name: str):
+            rows = ctx.db.execute(
+                "SELECT * FROM sequencing_samples WHERE sample_name = ?",
+                (name,),
+            ).fetchall()
+            if not rows:
+                raise ValueError(f"Unknown sample name: {name}")
+            if len(rows) > 1:
+                raise ValueError(f"Sample name '{name}' is ambiguous across sequencing runs.")
+            return rows[0]
+
+        def _construct_id_for_sample_id(sid: int) -> Optional[int]:
+            row = ctx.db.execute(
+                "SELECT construct_id FROM probing_reactions WHERE s_id = ? ORDER BY rowid DESC LIMIT 1",
+                (sid,),
+            ).fetchone()
+            return int(row[0]) if row and row[0] is not None else None
 
         cmds: List[str] = []
+        self._stage_in = []
         for name in sample_names:
-            # Each sample gets its own subdir
-            sample_dir_cmd = f"mkdir -p samples/{name}"
-            if tool_bin:
-                # Without DB access here, we cannot resolve actual FASTQ paths safely.
-                # Emit a placeholder that records intent; real command will be refined with plugin later.
-                cmd = (
-                    f"echo '[mut_count] Would run {plugin_name} for {name} with {threads} threads using {tool_bin}' "
-                    f"> samples/{name}/intent.txt"
-                )
-            else:
-                # Simple echo test that produces an out.txt file for stage-out
-                cmd = (
-                    "bash -lc '"
-                    f"echo Running mut_count echo test for {name} > samples/{name}/out.txt"
-                    "'"
-                )
-            cmds.append(sample_dir_cmd)
-            cmds.append(cmd)
+            srow = _sample_row_by_name(name)
+            sid = int(srow["id"]) if "id" in srow.keys() else int(srow[0])
+            # Resolve R1/R2 paths (absolute if fq_dir is absolute; else relative to label_dir)
+            fq_dir = Path(str(srow["fq_dir"]))
+            if not fq_dir.is_absolute():
+                fq_dir = label_dir / fq_dir
+            r1 = fq_dir / str(srow["r1_file"])
+            r2 = fq_dir / str(srow["r2_file"])
 
-        # Chain with && to stop on first failure
-        return " && ".join(cmds)
+            cid = _construct_id_for_sample_id(sid)
+            if cid is None:
+                raise ValueError(f"Could not resolve construct for sample '{name}' (s_id={sid})")
+            nt_rows = _nt_rows_for_construct(cid)
+
+            # Build FASTA content locally to embed via heredoc on remote
+            def _fasta_text(nt_rows: List[Dict[str, Any]], header: str = "target") -> str:
+                seq_chars: List[str] = []
+                for nt in nt_rows:
+                    base = str(nt.get("base", "")).strip()
+                    region = str(nt.get("base_region", "")).strip()
+                    # Normalize to DNA alphabet for external tools (use T, not U)
+                    b = base.upper()
+                    if b == "U":
+                        b = "T"
+                    if region in {"0", "2"}:
+                        b = b.lower()
+                    seq_chars.append(b)
+                return f">{header}\n{''.join(seq_chars)}\n"
+
+            sample_dir = Path("samples") / name
+            target_fa = sample_dir / "target.fa"
+
+            # 1) ensure sample dir on remote
+            cmds.append(f"mkdir -p {sample_dir}")
+            # 2) write FASTA via heredoc
+            fasta_text = _fasta_text(nt_rows, header=name)
+            # Protect EOF and content; use single-quoted EOF to avoid shell interpolation
+            heredoc = (
+                f"cat > {target_fa} << 'EOF'\n" + fasta_text + "EOF\n"
+            )
+            cmds.append(heredoc)
+            # 3) stage-in R1/R2 to remote sample dir and build shapemapper command using remote paths
+            out_dir = sample_dir  # write outputs under the sample directory
+            remote_r1 = sample_dir / r1.name
+            remote_r2 = sample_dir / r2.name
+            self._stage_in.append({"src": str(r1), "dst": str(remote_r1)})
+            self._stage_in.append({"src": str(r2), "dst": str(remote_r2)})
+
+            shapecmd = plugin.command(
+                sample_name=name,
+                r1_path=Path(str(remote_r1)),
+                r2_path=Path(str(remote_r2)),
+                fasta_path=Path(str(target_fa)),
+                out_dir=Path(str(out_dir)),
+                options=options,
+            )
+            if dry_run:
+                cmds.append(f"echo '[Step 1] Verifying staged FASTQs for {name}'")
+                cmds.append(f"ls -lh {remote_r1} {remote_r2} || true")
+                cmds.append(f"echo '[Step 2] FASTA created for {name} at {target_fa}'")
+                cmds.append(f"head -n 2 {target_fa} || true")
+                run_script = sample_dir / "run_shapemapper.sh"
+                cmds.append(f"echo '[Step 3] Creating shapemapper script for {name}: {run_script}'")
+                mk_script = (
+                    f"cat > {run_script} << 'EOSH'\n#!/usr/bin/env bash\nset -euo pipefail\n{shapecmd}\nEOSH\n"
+                )
+                cmds.append(mk_script)
+                cmds.append(f"chmod +x {run_script}")
+                cmds.append(f"echo '[Step 4] Would run shapemapper via {run_script} (skipped in dry_run)'")
+            else:
+                cmds.append(shapecmd)
+
+        # Use newlines between commands; 'set -e' in the job script ensures abort on failure.
+        return "\n".join(cmds)
+
+    def stage_in_pairs(self) -> List[Dict[str, str]]:
+        """Return stage-in file mappings prepared during command() build."""
+        return list(self._stage_in or [])
 
     def _resolve_fastqs(self, ctx: TaskContext, row) -> Tuple[Path, Path]:
         label_dir = Path(ctx.output_dir) / ctx.label
@@ -95,13 +195,151 @@ class MutCountTask(Task):
         r2 = fq_dir / row["r2_file"]
         return r1, r2
 
+    def scope_id(self, ctx: Optional[TaskContext], inputs: Any) -> Optional[int]:
+        """Return the sequencing_samples.id if exactly one sample is requested; else None."""
+        try:
+            if ctx is None or inputs is None:
+                return None
+            sample_names: List[str] = inputs.get("samples", []) if isinstance(inputs, dict) else []
+            if len(sample_names) != 1:
+                return None
+            name = sample_names[0]
+            row = ctx.db.execute(
+                "SELECT id FROM sequencing_samples WHERE sample_name = ?",
+                (name,),
+            ).fetchall()
+            if len(row) == 1:
+                return int(row[0][0])
+            return None
+        except Exception:
+            return None
+
+    def task_tool(self, inputs: Any) -> Optional[str]:
+        try:
+            if isinstance(inputs, dict):
+                val = inputs.get("plugin")
+                if val is not None:
+                    s = str(val).strip()
+                    return s or None
+        except Exception:
+            pass
+        return None
+
+    def task_tool_version(self, inputs: Any) -> Optional[str]:
+        try:
+            if isinstance(inputs, dict):
+                tool = inputs.get("tool") or {}
+                ver = tool.get("version")
+                if ver not in (None, ""):
+                    return str(ver)
+        except Exception:
+            pass
+        return None
+
     def consume_outputs(self, ctx: TaskContext, inputs: Dict[str, Any], params: Dict[str, Any], run_dir: Path):
         """
         Execute mutation counting for the selected parent samples.
         """
-        # For now, consumption only logs; later, parse outputs from run_dir/samples/<name>
+        from nerd.pipeline.plugins.mutcount import load_mutcount_plugin
+        import shutil
+        import csv
+
+        plugin_name = inputs.get("plugin")
+        tool_cfg = inputs.get("tool", {}) or {}
+        plugin = load_mutcount_plugin(plugin_name, bin_path=tool_cfg.get("bin"), version=tool_cfg.get("version"))
+
         sample_names: List[str] = inputs.get("samples", [])
         if not sample_names:
             log.warning("mut_count.consume_outputs called with no samples.")
             return
-        log.info("mut_count completed for %d samples (command phase). Ready to parse outputs.", len(sample_names))
+
+        artifacts_dir = run_dir / "artifacts"
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+        found = 0
+        for name in sample_names:
+            sdir = run_dir / "samples" / name
+            prof = plugin.find_profile(sdir)
+            if prof and prof.exists():
+                found += 1
+                log.info("Found ShapeMapper profile for %s: %s", name, prof)
+                # Save original profile as an artifact
+                dest = artifacts_dir / f"{name}_profile.txt"
+                try:
+                    shutil.copy2(prof, dest)
+                except Exception as e:
+                    log.warning("Failed to copy profile for %s: %s", name, e)
+
+                # Extract a minimal CSV with the key columns we care about
+                try:
+                    rows = plugin.parse_profile(prof)
+                    out_csv = artifacts_dir / f"{name}_profile_min.csv"
+                    fields = [
+                        "Nucleotide",
+                        "Sequence",
+                        "Modified_effective_depth",
+                        "Modified_rate",
+                    ]
+                    with out_csv.open("w", newline="", encoding="utf-8") as f:
+                        writer = csv.DictWriter(f, fieldnames=fields)
+                        writer.writeheader()
+                        for r in rows:
+                            writer.writerow({k: r.get(k) for k in fields})
+                    log.info("Wrote condensed profile CSV for %s: %s", name, out_csv)
+                except Exception as e:
+                    log.warning("Failed to extract condensed profile for %s: %s", name, e)
+            else:
+                # Fallback: sometimes stage-out placed the profile at run_dir root.
+                fallback_found = False
+                try:
+                    from glob import glob as _glob
+                    pats = [
+                        str(run_dir / f"{name}*_profile.txt"),
+                        str(run_dir / f"{name}*_profile.txtga"),
+                    ]
+                    for p in pats:
+                        m = sorted(_glob(p))
+                        if m:
+                            prof = Path(m[0])
+                            log.info("Fallback found profile for %s at %s", name, prof)
+                            found += 1
+                            fallback_found = True
+                            # copy + condense as above
+                            dest = artifacts_dir / f"{name}_profile.txt"
+                            try:
+                                shutil.copy2(prof, dest)
+                            except Exception as e:
+                                log.warning("Failed to copy profile for %s: %s", name, e)
+                            try:
+                                rows = plugin.parse_profile(prof)
+                                out_csv = artifacts_dir / f"{name}_profile_min.csv"
+                                fields = [
+                                    "Nucleotide",
+                                    "Sequence",
+                                    "Modified_effective_depth",
+                                    "Modified_rate",
+                                ]
+                                with out_csv.open("w", newline="", encoding="utf-8") as f:
+                                    writer = csv.DictWriter(f, fieldnames=fields)
+                                    writer.writeheader()
+                                    for r in rows:
+                                        writer.writerow({k: r.get(k) for k in fields})
+                                log.info("Wrote condensed profile CSV for %s: %s", name, out_csv)
+                            except Exception as e:
+                                log.warning("Failed to extract condensed profile for %s: %s", name, e)
+                            break
+                except Exception:
+                    pass
+                if not fallback_found:
+                    log.warning("No ShapeMapper profile found for %s under %s", name, sdir)
+                    try:
+                        # Help debug by listing available txt files
+                        txts = sorted([str(p.relative_to(run_dir)) for p in sdir.rglob("*.txt")])
+                        if txts:
+                            log.info("Found txt files under %s: %s", sdir, ", ".join(txts[:10]) + (" ..." if len(txts) > 10 else ""))
+                        else:
+                            log.info("No txt files present under %s", sdir)
+                    except Exception:
+                        pass
+
+        log.info("mut_count completed. Profiles found for %d/%d samples.", found, len(sample_names))

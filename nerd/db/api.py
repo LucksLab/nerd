@@ -63,7 +63,8 @@ def init_schema(conn: sqlite3.Connection):
 
 
 def begin_task(conn: sqlite3.Connection, name: str, scope_kind: str, scope_id: Optional[int],
-               backend: str, output_dir: str, label: str, cache_key: Optional[str]) -> Optional[int]:
+               backend: str, output_dir: str, label: str, cache_key: Optional[str],
+               tool: Optional[str] = None, tool_version: Optional[str] = None) -> Optional[int]:
     """
     Records the start of a new task.
 
@@ -73,9 +74,9 @@ def begin_task(conn: sqlite3.Connection, name: str, scope_kind: str, scope_id: O
     sql = """
         INSERT INTO tasks (
             task_name, scope_kind, scope_id, backend, output_dir, label,
-            cache_key, config_hash, started_at
+            cache_key, tool, tool_version, config_hash, started_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     try:
         with conn:
@@ -91,6 +92,8 @@ def begin_task(conn: sqlite3.Connection, name: str, scope_kind: str, scope_id: O
                     output_dir,
                     label,
                     cache_key,
+                    tool,
+                    tool_version,
                     cfg_short,  # store short 7-char config hash
                     datetime.now().isoformat(),
                 ),
@@ -187,7 +190,8 @@ def find_task_by_signature(conn: sqlite3.Connection, label: str, output_dir: str
 
 def record_cached_task(conn: sqlite3.Connection, name: str, scope_kind: str, scope_id: Optional[int],
                        backend: str, output_dir: str, label: str, cache_key: Optional[str],
-                       message: Optional[str] = None) -> Optional[int]:
+                       message: Optional[str] = None,
+                       tool: Optional[str] = None, tool_version: Optional[str] = None) -> Optional[int]:
     """
     Inserts a task row with state='cached' to record a skipped run due to identical config.
 
@@ -197,13 +201,13 @@ def record_cached_task(conn: sqlite3.Connection, name: str, scope_kind: str, sco
     sql = """
         INSERT INTO tasks (
             task_name, scope_kind, scope_id, backend, output_dir, label,
-            cache_key, config_hash, started_at, ended_at, state, message
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'cached', ?)
+            cache_key, tool, tool_version, config_hash, started_at, ended_at, state, message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'cached', ?)
     """
     try:
         with conn:
             cfg_short = (cache_key or "")[:7]
-            cur = conn.execute(sql, (name, scope_kind, scope_id, backend, output_dir, label, cache_key, cfg_short, message))
+            cur = conn.execute(sql, (name, scope_kind, scope_id, backend, output_dir, label, cache_key, tool, tool_version, cfg_short, message))
             task_id = cur.lastrowid
             log.info("Recorded cached task '%s' (ID: %s) for label '%s'", name, task_id, label)
             return task_id
