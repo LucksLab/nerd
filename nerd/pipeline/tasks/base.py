@@ -56,9 +56,9 @@ class Task(abc.ABC):
         cache_key_full = config_hash(cfg, length=64)
 
         # 0.5. Check for an existing completed task with same signature and skip if found
-        existing = db_api.find_task_by_signature(db_conn, label, output_dir, cache_key_full)
-
-        if existing is not None and str(existing["state"]).lower() == "completed":
+        # Robustly detect prior completion even if a newer 'cached' entry exists
+        existing = db_api.find_completed_task_by_signature(db_conn, label, output_dir, cache_key_full)
+        if existing is not None:
             # Record a cached task to make the skip visible in DB, then return
             msg = f"Identical config (cfg={cfg_hash_short}) previously completed as task_id={existing['id']} — skipping."
             scope_val = self.scope_id(ctx=None, inputs=None)

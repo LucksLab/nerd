@@ -106,6 +106,30 @@ def begin_task(conn: sqlite3.Connection, name: str, scope_kind: str, scope_id: O
             return task_id
     except sqlite3.IntegrityError as e:
         log.error("Failed to begin task '%s' due to integrity error: %s", name, e)
+        # Reuse existing non-cached task row for this signature (task_name,label,output_dir,cache_key)
+        try:
+            row = conn.execute(
+                """
+                SELECT id, state FROM tasks
+                WHERE task_name = ? AND label = ? AND output_dir = ?
+                  AND ((? IS NULL AND cache_key IS NULL) OR cache_key = ?)
+                ORDER BY started_at DESC
+                LIMIT 1
+                """,
+                (name, label, output_dir, cache_key, cache_key),
+            ).fetchone()
+            if row:
+                tid = int(row[0])
+                # Reset state to pending and clear message/ended_at for a new attempt
+                with conn:
+                    conn.execute(
+                        "UPDATE tasks SET state='pending', message=NULL, started_at=datetime('now'), ended_at=NULL WHERE id = ?",
+                        (tid,),
+                    )
+                log.info("Reusing existing task row id=%s for signature (task=%s,label=%s)", tid, name, label)
+                return tid
+        except Exception as e2:
+            log.warning("Could not reuse existing task row after integrity error: %s", e2)
         return None
 
 
@@ -121,13 +145,33 @@ def attempt(conn: sqlite3.Connection, task_id: int, try_index: int, command: str
         INSERT INTO task_attempts (task_id, try_index, command, resources_json, log_path)
         VALUES (?, ?, ?, ?, ?)
     """
+    def _next_try_index(c: sqlite3.Connection, tid: int) -> int:
+        row = c.execute(
+            "SELECT COALESCE(MAX(try_index), 0) + 1 FROM task_attempts WHERE task_id = ?",
+            (tid,),
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else 1
+
     try:
         resources_json = json.dumps(resources)
+        idx = int(try_index) if isinstance(try_index, int) and try_index > 0 else _next_try_index(conn, task_id)
         with conn:
-            cursor = conn.execute(sql, (task_id, try_index, command, resources_json, str(log_path)))
+            cursor = conn.execute(sql, (task_id, idx, command, resources_json, str(log_path)))
             attempt_id = cursor.lastrowid
-            log.info("Logged attempt #%d for task ID %d (Attempt ID: %s)", try_index, task_id, attempt_id)
+            log.info("Logged attempt #%d for task ID %d (Attempt ID: %s)", idx, task_id, attempt_id)
             return attempt_id
+    except sqlite3.IntegrityError:
+        # Compute next available try_index and retry once
+        try:
+            idx = _next_try_index(conn, task_id)
+            with conn:
+                cursor = conn.execute(sql, (task_id, idx, command, json.dumps(resources), str(log_path)))
+                attempt_id = cursor.lastrowid
+                log.info("Logged attempt #%d for task ID %d (Attempt ID: %s)", idx, task_id, attempt_id)
+                return attempt_id
+        except sqlite3.Error as e2:
+            log.exception("Failed to record attempt for task %d after retry: %s", task_id, e2)
+            return None
     except sqlite3.Error as e:
         log.exception("Failed to record attempt for task %d: %s", task_id, e)
         return None
@@ -185,6 +229,29 @@ def find_task_by_signature(conn: sqlite3.Connection, label: str, output_dir: str
         return row
     except sqlite3.Error as e:
         log.exception("Failed to query existing task by signature: %s", e)
+        return None
+
+def find_completed_task_by_signature(conn: sqlite3.Connection, label: str, output_dir: str,
+                                     cache_key: Optional[str]) -> Optional[sqlite3.Row]:
+    """
+    Returns the most recent COMPLETED task row matching (label, output_dir, cache_key).
+    Ignores cached rows and other states to reliably detect a prior success even if
+    a newer 'cached' entry exists.
+    """
+    sql = (
+        """
+        SELECT id, task_name, label, output_dir, cache_key, state, started_at, ended_at
+        FROM tasks
+        WHERE label = ? AND output_dir = ? AND ((? IS NULL AND cache_key IS NULL) OR cache_key = ?)
+          AND state = 'completed'
+        ORDER BY started_at DESC
+        LIMIT 1
+        """
+    )
+    try:
+        return conn.execute(sql, (label, output_dir, cache_key, cache_key)).fetchone()
+    except sqlite3.Error as e:
+        log.exception("Failed to query completed task by signature: %s", e)
         return None
 
 

@@ -37,9 +37,13 @@ class MutCountTask(Task):
         if not plugin:
             raise ValueError("mut_count.plugin is required (e.g., 'shapemapper').")
 
-        samples = mc.get("samples", [])
-        if not samples:
-            raise ValueError("mut_count.samples must list parent sample names for this initial implementation.")
+        # Accept either parent sample names under 'samples' or derived child_names under 'derived_samples'
+        samples = list(mc.get("samples", []) or [])
+        derived = list(mc.get("derived_samples", []) or [])
+        if not samples and not derived:
+            raise ValueError("mut_count requires 'samples' and/or 'derived_samples' listing sample names or child_names.")
+        merged = samples + derived
+        mc = {**mc, "samples": merged}
 
         # Resolve parent samples from DB now so command() can run everything; no derived support yet
         from nerd.db import api as db_api  # local import
@@ -92,10 +96,17 @@ class MutCountTask(Task):
                 (name,),
             ).fetchall()
             if not rows:
-                raise ValueError(f"Unknown sample name: {name}")
+                return None
             if len(rows) > 1:
                 raise ValueError(f"Sample name '{name}' is ambiguous across sequencing runs.")
             return rows[0]
+
+        def _derived_by_child(child_name: str):
+            row = ctx.db.execute(
+                "SELECT * FROM derived_samples WHERE child_name = ?",
+                (child_name,),
+            ).fetchone()
+            return row
 
         def _construct_id_for_sample_id(sid: int) -> Optional[int]:
             row = ctx.db.execute(
@@ -107,18 +118,31 @@ class MutCountTask(Task):
         cmds: List[str] = []
         self._stage_in = []
         for name in sample_names:
-            srow = _sample_row_by_name(name)
-            sid = int(srow["id"]) if "id" in srow.keys() else int(srow[0])
-            # Resolve R1/R2 paths (absolute if fq_dir is absolute; else relative to label_dir)
-            fq_dir = Path(str(srow["fq_dir"]))
+            parent_srow = _sample_row_by_name(name)
+            is_derived = False
+            derived_row = None
+            if parent_srow is None:
+                # Try derived by child_name
+                derived_row = _derived_by_child(name)
+                if derived_row is None:
+                    raise ValueError(f"Unknown sample or derived child_name: {name}")
+                is_derived = True
+                parent_id = int(derived_row["parent_sample_id"]) if "parent_sample_id" in derived_row.keys() else int(derived_row[1])
+                parent_srow = ctx.db.execute("SELECT * FROM sequencing_samples WHERE id = ?", (parent_id,)).fetchone()
+                if parent_srow is None:
+                    raise ValueError(f"Derived sample '{name}' refers to missing parent sample id={parent_id}")
+
+            sid = int(parent_srow["id"]) if "id" in parent_srow.keys() else int(parent_srow[0])
+            # Resolve parent R1/R2 local paths
+            fq_dir = Path(str(parent_srow["fq_dir"]))
             if not fq_dir.is_absolute():
                 fq_dir = label_dir / fq_dir
-            r1 = fq_dir / str(srow["r1_file"])
-            r2 = fq_dir / str(srow["r2_file"])
+            r1 = fq_dir / str(parent_srow["r1_file"])
+            r2 = fq_dir / str(parent_srow["r2_file"])
 
             cid = _construct_id_for_sample_id(sid)
             if cid is None:
-                raise ValueError(f"Could not resolve construct for sample '{name}' (s_id={sid})")
+                raise ValueError(f"Could not resolve construct for sample '{name}' (parent s_id={sid})")
             nt_rows = _nt_rows_for_construct(cid)
 
             # Build FASTA content locally to embed via heredoc on remote
@@ -148,17 +172,44 @@ class MutCountTask(Task):
                 f"cat > {target_fa} << 'EOF'\n" + fasta_text + "EOF\n"
             )
             cmds.append(heredoc)
-            # 3) stage-in R1/R2 to remote sample dir and build shapemapper command using remote paths
+            # 3) stage-in parent R1/R2 to remote sample dir
             out_dir = sample_dir  # write outputs under the sample directory
             remote_r1 = sample_dir / r1.name
             remote_r2 = sample_dir / r2.name
             self._stage_in.append({"src": str(r1), "dst": str(remote_r1)})
             self._stage_in.append({"src": str(r2), "dst": str(remote_r2)})
 
+            # If derived, materialize child FASTQs on remote first
+            use_r1 = remote_r1
+            use_r2 = remote_r2
+            if is_derived and derived_row is not None:
+                import json as _json
+                params_json = derived_row["params_json"] if "params_json" in derived_row.keys() else derived_row[6]
+                try:
+                    params = _json.loads(params_json) if params_json else {}
+                except Exception:
+                    params = {}
+                cmd_template = derived_row["cmd_template"] if "cmd_template" in derived_row.keys() else derived_row[5]
+                # seqtk outputs plain FASTQ by default (not gzipped)
+                out_r1 = sample_dir / "derived_R1.fastq"
+                out_r2 = sample_dir / "derived_R2.fastq"
+                mapping = {"R1": str(remote_r1), "R2": str(remote_r2), "OUT_R1": str(out_r1), "OUT_R2": str(out_r2)}
+                # Merge params into mapping
+                for k, v in (params or {}).items():
+                    mapping[k] = v
+                try:
+                    deriv_cmd = str(cmd_template).format(**mapping)
+                except Exception as e:
+                    deriv_cmd = str(cmd_template)
+                    log.warning("Failed to format derived cmd_template for %s: %s", name, e)
+                cmds.append(f"echo 'Deriving child sample {name} on remote' && {deriv_cmd}")
+                use_r1 = out_r1
+                use_r2 = out_r2
+
             shapecmd = plugin.command(
                 sample_name=name,
-                r1_path=Path(str(remote_r1)),
-                r2_path=Path(str(remote_r2)),
+                r1_path=Path(str(use_r1)),
+                r2_path=Path(str(use_r2)),
                 fasta_path=Path(str(target_fa)),
                 out_dir=Path(str(out_dir)),
                 options=options,
@@ -196,7 +247,7 @@ class MutCountTask(Task):
         return r1, r2
 
     def scope_id(self, ctx: Optional[TaskContext], inputs: Any) -> Optional[int]:
-        """Return the sequencing_samples.id if exactly one sample is requested; else None."""
+        """Return parent sequencing_samples.id if exactly one sample/child is requested; else None."""
         try:
             if ctx is None or inputs is None:
                 return None
@@ -210,6 +261,13 @@ class MutCountTask(Task):
             ).fetchall()
             if len(row) == 1:
                 return int(row[0][0])
+            # Try derived child name → parent id
+            d = ctx.db.execute(
+                "SELECT parent_sample_id FROM derived_samples WHERE child_name = ?",
+                (name,),
+            ).fetchone()
+            if d is not None:
+                return int(d[0])
             return None
         except Exception:
             return None

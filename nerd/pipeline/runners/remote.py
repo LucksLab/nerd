@@ -141,9 +141,23 @@ class RemoteRunner(Runner):
         return rc
 
     def _render_script(self, command: str, chdir: str, preamble: Optional[str]) -> str:
-        lines = ["#!/usr/bin/env bash", "set -euo pipefail", f"cd \"{chdir}\""]
+        lines = [
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            f"cd \"{chdir}\"",
+        ]
         # Ensure all output captured in command.log regardless of mode
         lines.append("exec > command.log 2>&1")
+        # Try to initialize environment modules (Lmod or Environment Modules) if available,
+        # so 'module load ...' in preamble works in non-interactive batch shells.
+        lines += [
+            "if ! command -v module >/dev/null 2>&1; then",
+            "  if [ -f /etc/profile.d/lmod.sh ]; then . /etc/profile.d/lmod.sh; fi",
+            "  if [ -f /usr/share/lmod/lmod/init/bash ]; then . /usr/share/lmod/lmod/init/bash; fi",
+            "  if [ -f /etc/profile.d/modules.sh ]; then . /etc/profile.d/modules.sh; fi",
+            "  if [ -f /usr/share/Modules/init/bash ]; then . /usr/share/Modules/init/bash; fi",
+            "fi",
+        ]
         if preamble:
             lines.append(str(preamble))
         lines.append(command)
@@ -188,8 +202,9 @@ class RemoteRunner(Runner):
     def _exec_ssh(self, ssh_base: list, ssh_dest: str, remote_dir: str, timeout: Optional[int]) -> int:
         log = get_logger(__name__)
         try:
+            # Run via a login shell so environment modules and profile.d init scripts are sourced
             cp = subprocess.run(
-                ssh_base + [ssh_dest, f"{remote_dir}/job.sbatch.sh"],
+                ssh_base + [ssh_dest, f"bash -lc '{remote_dir}/job.sbatch.sh'"],
                 check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
             )
         except subprocess.TimeoutExpired:
