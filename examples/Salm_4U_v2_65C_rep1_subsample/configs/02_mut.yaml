@@ -39,4 +39,4 @@ mut_count:
   per_read_histograms: true         # --per-read-histograms
   output_parsed_mutations: true   # --output-parsed-mutations
   # Smoke test only: echo steps instead of running shapemapper
-  dry_run: false
+  dry_run: true

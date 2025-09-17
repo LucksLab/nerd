@@ -1,0 +1,18 @@
+run:
+  output_dir: examples
+  label: Salm_4U_v2_65C_rep1_subsample
+  backend: local
+  threads: 4
+  mem_gb: 8
+  time: "00:10:00"
+
+create:
+  # Minimal derivative-only config: assumes parent samples already exist in the DB
+  derived_samples:
+    - child_name: fourU_WT_65c_rep1_tp1__singlehit
+      parent_sample: fourU_WT_65c_rep1_tp1
+      kind: filter_singlehit
+      tool: seqtk
+      params:
+        max_mutations: 1
+      cmd_template: "IGNORED"

@@ -10,6 +10,11 @@ from typing import Any, Dict, Tuple, Optional, List
 from .base import Task, TaskContext
 from nerd.utils.logging import get_logger
 from nerd.pipeline.runners.local import LocalRunner
+from nerd.pipeline.tasks.derived import (
+    DerivedMaterializer,
+    SubsampleMaterializer,
+    FilterSingleHitMaterializer,
+)
 
 log = get_logger(__name__)
 
@@ -26,6 +31,7 @@ class MutCountTask(Task):
     def __init__(self) -> None:
         super().__init__()
         self._stage_in: List[Dict[str, str]] = []  # list of {src, dst} relative to remote workdir
+        self._stage_out_extra: List[str] = []
 
     def prepare(self, cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if self.name not in cfg:
@@ -189,20 +195,34 @@ class MutCountTask(Task):
                     params = _json.loads(params_json) if params_json else {}
                 except Exception:
                     params = {}
-                cmd_template = derived_row["cmd_template"] if "cmd_template" in derived_row.keys() else derived_row[5]
-                # seqtk outputs plain FASTQ by default (not gzipped)
-                out_r1 = sample_dir / "derived_R1.fastq"
-                out_r2 = sample_dir / "derived_R2.fastq"
-                mapping = {"R1": str(remote_r1), "R2": str(remote_r2), "OUT_R1": str(out_r1), "OUT_R2": str(out_r2)}
-                # Merge params into mapping
-                for k, v in (params or {}).items():
-                    mapping[k] = v
-                try:
-                    deriv_cmd = str(cmd_template).format(**mapping)
-                except Exception as e:
-                    deriv_cmd = str(cmd_template)
-                    log.warning("Failed to format derived cmd_template for %s: %s", name, e)
-                cmds.append(f"echo 'Deriving child sample {name} on remote' && {deriv_cmd}")
+                kind = (derived_row["kind"] if "kind" in derived_row.keys() else derived_row[3]) or "subsample"
+                # Select materializer
+                if str(kind).lower() == "filter_singlehit":
+                    max_mut = int(params.get("max_mutations", 1))
+                    materializer: DerivedMaterializer = FilterSingleHitMaterializer(max_mutations=max_mut)
+                else:
+                    cmd_template = derived_row["cmd_template"] if "cmd_template" in derived_row.keys() else derived_row[5]
+                    materializer = SubsampleMaterializer(cmd_template)
+
+                # Minimal plugin opts propagated
+                plugin_opts = {
+                    "amplicon": bool(inputs.get("amplicon", True)),
+                    "dms_mode": bool(inputs.get("dms_mode", False)),
+                    "output_N7": bool(inputs.get("output_N7", False)),
+                }
+                out_r1, out_r2, prep_cmds, patterns = materializer.prepare(
+                    sample_name=name,
+                    parent_r1_remote=remote_r1,
+                    parent_r2_remote=remote_r2,
+                    sample_dir=sample_dir,
+                    target_fa_remote=target_fa,
+                    plugin=plugin,
+                    plugin_opts=plugin_opts,
+                    params=params,
+                )
+                if patterns:
+                    self._stage_out_extra.extend([str(p) for p in patterns])
+                cmds.extend(prep_cmds)
                 use_r1 = out_r1
                 use_r2 = out_r2
 
@@ -214,6 +234,28 @@ class MutCountTask(Task):
                 out_dir=Path(str(out_dir)),
                 options=options,
             )
+            sep = "################################################################################"
+            if not is_derived:
+                # Add verification steps for non-derived cases (derived already logs these)
+                cmds.append(f"echo '{sep}'")
+                cmds.append("echo '# 3 - Verify staged FASTQ'")
+                cmds.append(f"echo '{sep}'")
+                cmds.append(f"ls -lh {use_r1} {use_r2} || true")
+                cmds.append(f"echo '{sep}'")
+                cmds.append("echo '# 4 - Verify created FASTA'")
+                cmds.append(f"echo '{sep}'")
+                cmds.append(f"head -n 2 {target_fa} || true")
+
+            # Step 5: show/create shapemapper command
+            cmds.append(f"echo '{sep}'")
+            cmds.append("echo '# 5 - Create shapemapper' ")
+            cmds.append(f"echo '{sep}'")
+            cmds.append(f"echo 'Command: {shapecmd}'")
+
+            # Step 6: run shapemapper (or stage in dry-run)
+            cmds.append(f"echo '{sep}'")
+            cmds.append("echo '# 6 - Run shapemapper'")
+            cmds.append(f"echo '{sep}'")
             if dry_run:
                 cmds.append(f"echo '[Step 1] Verifying staged FASTQs for {name}'")
                 cmds.append(f"ls -lh {remote_r1} {remote_r2} || true")
@@ -236,6 +278,9 @@ class MutCountTask(Task):
     def stage_in_pairs(self) -> List[Dict[str, str]]:
         """Return stage-in file mappings prepared during command() build."""
         return list(self._stage_in or [])
+
+    def stage_out_patterns(self) -> Optional[List[str]]:
+        return list(dict.fromkeys(self._stage_out_extra)) if self._stage_out_extra else []
 
     def _resolve_fastqs(self, ctx: TaskContext, row) -> Tuple[Path, Path]:
         label_dir = Path(ctx.output_dir) / ctx.label

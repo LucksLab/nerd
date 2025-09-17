@@ -7,7 +7,7 @@ import abc
 import sqlite3
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Tuple, Dict, Any, Optional
+from typing import Tuple, Dict, Any, Optional, List
 
 from nerd.utils.logging import get_logger
 from nerd.utils.paths import make_run_dir, update_latest_symlink, get_command_log_path
@@ -191,10 +191,16 @@ class Task(abc.ABC):
                 elif isinstance(preamble, str):
                     env["SLURM_PREAMBLE"] = preamble
                 patterns = slurm_cfg.get("stage_out")
+                combined: List[str] = []
                 if isinstance(patterns, list):
-                    env["SLURM_STAGE_OUT"] = ",".join(str(x) for x in patterns)
+                    combined.extend(str(x) for x in patterns)
                 elif isinstance(patterns, str):
-                    env["SLURM_STAGE_OUT"] = patterns
+                    combined.extend([p.strip() for p in patterns.split(',') if p.strip()])
+                extra = self.stage_out_patterns() or []
+                if extra:
+                    combined.extend(extra)
+                if combined:
+                    env["SLURM_STAGE_OUT"] = ",".join(combined)
 
             # Task-provided stage-in specification (e.g., local files to upload to remote)
             try:
@@ -264,3 +270,7 @@ class Task(abc.ABC):
         Process the outputs after the command has successfully run.
         """
         raise NotImplementedError
+
+    def stage_out_patterns(self) -> Optional[List[str]]:
+        """Optional additional stage-out patterns a task wants the runner to fetch."""
+        return None

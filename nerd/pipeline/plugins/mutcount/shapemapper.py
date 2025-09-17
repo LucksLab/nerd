@@ -80,3 +80,17 @@ class ShapeMapperPlugin(MutCountPlugin):
             if matches:
                 return Path(matches[0])
         return None
+
+    def find_parsed_mut(self, out_dir: Path) -> Optional[Path]:
+        # Files end with _parsed.mut or _parsed.mutga depending on N7
+        patterns = [
+            str(out_dir / "*_parsed.mut"),
+            str(out_dir / "*_parsed.mutga"),
+            str(out_dir / "**/*_parsed.mut"),
+            str(out_dir / "**/*_parsed.mutga"),
+        ]
+        for pat in patterns:
+            matches = sorted(glob.glob(pat, recursive=True))
+            if matches:
+                return Path(matches[0])
+        return None
