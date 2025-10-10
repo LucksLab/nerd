@@ -11,7 +11,7 @@ run:
       account: b1044
       time: "00:30:13"                    # override run.time if needed
       memory: "12G"                        # override run.memory if needed
-      cpus: 12                             # override run.cpus if needed
+      cpus: 10                             # override run.cpus if needed
     remote_base_dir: /scratch/ekc5108/nerd/runner_test
     preamble:
       - 'echo "Activating environment on remote..."'
@@ -35,7 +35,7 @@ mut_count:
   # ShapeMapper options mapping
   amplicon: true                  # --amplicon
   dms_mode: true                  # --dms
-  output_N7: false                 # --N7 --bypass_filters
+  output_N7: true                 # --N7 --bypass_filters
   per_read_histograms: true         # --per-read-histograms
   output_parsed_mutations: true   # --output-parsed-mutations
   # Smoke test only: echo steps instead of running shapemapper

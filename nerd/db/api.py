@@ -6,17 +6,85 @@ focusing on task tracking and domain-specific data insertion.
 
 import sqlite3
 import json
+import time
+import csv
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-import csv
-from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from nerd.db.schema import ALL_TABLES, ALL_INDEXES
 from nerd.utils.hashing import config_hash
 from nerd.utils.logging import get_logger
 
 log = get_logger(__name__)
+
+
+_LOCK_RETRY_MESSAGES: tuple[str, ...] = (
+    "database is locked",
+    "database is busy",
+    "database is in use",
+)
+
+
+def _is_lock_error(err: sqlite3.Error) -> bool:
+    """Return True if the sqlite error looks like a lock/busy condition."""
+    msg = str(err).lower()
+    return any(token in msg for token in _LOCK_RETRY_MESSAGES)
+
+
+def _run_with_retry(
+    conn: sqlite3.Connection,
+    operation: Callable[[], Any],
+    description: str,
+    *,
+    retries: int = 5,
+    initial_delay: float = 0.1,
+    backoff: float = 2.0,
+) -> Any:
+    """
+    Execute `operation`, retrying when SQLite reports a lock/busy error.
+
+    Retries are exponential-backoff with jitter-free timing to keep behaviour
+    predictable for batch jobs.
+    """
+    delay = initial_delay
+    last_error: Optional[sqlite3.Error] = None
+    for attempt in range(1, retries + 1):
+        try:
+            return operation()
+        except sqlite3.OperationalError as err:
+            last_error = err
+            if not _is_lock_error(err):
+                raise
+            if attempt == retries:
+                break
+            log.warning(
+                "SQLite busy during %s (attempt %s/%s); retrying in %.2fs",
+                description,
+                attempt,
+                retries,
+                delay,
+            )
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            time.sleep(delay)
+            delay *= backoff
+    if last_error is not None:
+        raise last_error
+
+
+def _iter_chunks(items: Iterable[Dict[str, Any]], size: int) -> Iterable[List[Dict[str, Any]]]:
+    """Yield successive chunks from an iterable."""
+    chunk: List[Dict[str, Any]] = []
+    for item in items:
+        chunk.append(item)
+        if len(chunk) >= size:
+            yield chunk
+            chunk = []
+    if chunk:
+        yield chunk
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -36,6 +104,9 @@ def connect(db_path: Path) -> sqlite3.Connection:
         conn.row_factory = sqlite3.Row
         # Ensure FK constraints (including ON DELETE CASCADE) are enforced
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA busy_timeout = 5000")
         log.debug("Database connection established to %s", db_path)
         return conn
     except sqlite3.Error as e:
@@ -78,9 +149,8 @@ def begin_task(conn: sqlite3.Connection, name: str, scope_kind: str, scope_id: O
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
-    try:
+    def _insert() -> Optional[int]:
         with conn:
-            # Use a short, human-friendly config hash alongside full cache_key
             cfg_short = (cache_key or "")[:7]
             cursor = conn.execute(
                 sql,
@@ -94,38 +164,52 @@ def begin_task(conn: sqlite3.Connection, name: str, scope_kind: str, scope_id: O
                     cache_key,
                     tool,
                     tool_version,
-                    cfg_short,  # store short 7-char config hash
+                    cfg_short,
                     datetime.now().isoformat(),
                 ),
             )
             task_id = cursor.lastrowid
             log.info(
                 "Began task '%s' (ID: %s) for %s:%s (cfg=%s)",
-                name, task_id, scope_kind, scope_id, cache_key
+                name,
+                task_id,
+                scope_kind,
+                scope_id,
+                cache_key,
             )
             return task_id
+
+    try:
+        return _run_with_retry(conn, _insert, "begin_task")
     except sqlite3.IntegrityError as e:
         log.error("Failed to begin task '%s' due to integrity error: %s", name, e)
         # Reuse existing non-cached task row for this signature (task_name,label,output_dir,cache_key)
         try:
-            row = conn.execute(
-                """
-                SELECT id, state FROM tasks
-                WHERE task_name = ? AND label = ? AND output_dir = ?
-                  AND ((? IS NULL AND cache_key IS NULL) OR cache_key = ?)
-                ORDER BY started_at DESC
-                LIMIT 1
-                """,
-                (name, label, output_dir, cache_key, cache_key),
-            ).fetchone()
+            row = _run_with_retry(
+                conn,
+                lambda: conn.execute(
+                    """
+                    SELECT id, state FROM tasks
+                    WHERE task_name = ? AND label = ? AND output_dir = ?
+                      AND ((? IS NULL AND cache_key IS NULL) OR cache_key = ?)
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                    """,
+                    (name, label, output_dir, cache_key, cache_key),
+                ).fetchone(),
+                "begin_task reuse lookup",
+            )
             if row:
                 tid = int(row[0])
                 # Reset state to pending and clear message/ended_at for a new attempt
-                with conn:
-                    conn.execute(
-                        "UPDATE tasks SET state='pending', message=NULL, started_at=datetime('now'), ended_at=NULL WHERE id = ?",
-                        (tid,),
-                    )
+                def _reuse_update():
+                    with conn:
+                        conn.execute(
+                            "UPDATE tasks SET state='pending', message=NULL, started_at=datetime('now'), ended_at=NULL WHERE id = ?",
+                            (tid,),
+                        )
+
+                _run_with_retry(conn, _reuse_update, "begin_task reuse update")
                 log.info("Reusing existing task row id=%s for signature (task=%s,label=%s)", tid, name, label)
                 return tid
         except Exception as e2:
@@ -152,23 +236,28 @@ def attempt(conn: sqlite3.Connection, task_id: int, try_index: int, command: str
         ).fetchone()
         return int(row[0]) if row and row[0] is not None else 1
 
-    try:
-        resources_json = json.dumps(resources)
-        idx = int(try_index) if isinstance(try_index, int) and try_index > 0 else _next_try_index(conn, task_id)
-        with conn:
-            cursor = conn.execute(sql, (task_id, idx, command, resources_json, str(log_path)))
-            attempt_id = cursor.lastrowid
-            log.info("Logged attempt #%d for task ID %d (Attempt ID: %s)", idx, task_id, attempt_id)
-            return attempt_id
-    except sqlite3.IntegrityError:
-        # Compute next available try_index and retry once
-        try:
-            idx = _next_try_index(conn, task_id)
+    def _insert(idx_val: int, payload_json: str) -> Optional[int]:
+        def _op():
             with conn:
-                cursor = conn.execute(sql, (task_id, idx, command, json.dumps(resources), str(log_path)))
-                attempt_id = cursor.lastrowid
-                log.info("Logged attempt #%d for task ID %d (Attempt ID: %s)", idx, task_id, attempt_id)
-                return attempt_id
+                cursor = conn.execute(sql, (task_id, idx_val, command, payload_json, str(log_path)))
+                return cursor.lastrowid
+
+        attempt_id = _run_with_retry(conn, _op, f"attempt insert try_index={idx_val}")
+        log.info("Logged attempt #%d for task ID %d (Attempt ID: %s)", idx_val, task_id, attempt_id)
+        return attempt_id
+
+    resources_json = json.dumps(resources)
+    idx = int(try_index) if isinstance(try_index, int) and try_index > 0 else _run_with_retry(
+        conn,
+        lambda: _next_try_index(conn, task_id),
+        "attempt next_try_index",
+    )
+    try:
+        return _insert(idx, resources_json)
+    except sqlite3.IntegrityError:
+        try:
+            idx = _run_with_retry(conn, lambda: _next_try_index(conn, task_id), "attempt retry next_try_index")
+            return _insert(idx, json.dumps(resources))
         except sqlite3.Error as e2:
             log.exception("Failed to record attempt for task %d after retry: %s", task_id, e2)
             return None
@@ -183,7 +272,7 @@ def finish_task(conn: sqlite3.Connection, task_id: int, state: str, message: Opt
     Updates a task's final state (e.g., 'completed', 'failed').
     If cache_key is provided, updates it; otherwise preserves the existing value.
     """
-    try:
+    def _op():
         with conn:
             if cache_key is None:
                 conn.execute(
@@ -203,6 +292,8 @@ def finish_task(conn: sqlite3.Connection, task_id: int, state: str, message: Opt
                     """,
                     (state, message, cache_key, datetime.now().isoformat(), task_id),
                 )
+    try:
+        _run_with_retry(conn, _op, "finish_task")
         log.info("Finished task ID %d with state '%s'", task_id, state)
     except sqlite3.Error as e:
         log.exception("Failed to finish task %d: %s", task_id, e)
@@ -271,13 +362,17 @@ def record_cached_task(conn: sqlite3.Connection, name: str, scope_kind: str, sco
             cache_key, tool, tool_version, config_hash, started_at, ended_at, state, message
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'cached', ?)
     """
-    try:
+    def _op() -> Optional[int]:
         with conn:
             cfg_short = (cache_key or "")[:7]
             cur = conn.execute(sql, (name, scope_kind, scope_id, backend, output_dir, label, cache_key, tool, tool_version, cfg_short, message))
-            task_id = cur.lastrowid
+            return cur.lastrowid
+
+    try:
+        task_id = _run_with_retry(conn, _op, "record_cached_task")
+        if task_id is not None:
             log.info("Recorded cached task '%s' (ID: %s) for label '%s'", name, task_id, label)
-            return task_id
+        return task_id
     except sqlite3.IntegrityError as e:
         log.error("Failed to record cached task due to integrity error: %s", e)
         return None
@@ -301,12 +396,16 @@ def insert_fmod_calc_run(conn: sqlite3.Connection, run_data: Dict[str, Any]) -> 
         INSERT INTO fmod_calc_runs (software_name, software_version, run_args, run_datetime, output_dir, s_id)
         VALUES (:software_name, :software_version, :run_args, :run_datetime, :output_dir, :s_id)
     """
-    try:
+    def _op() -> Optional[int]:
         with conn:
             cursor = conn.execute(sql, run_data)
-            run_id = cursor.lastrowid
+            return cursor.lastrowid
+
+    try:
+        run_id = _run_with_retry(conn, _op, "insert_fmod_calc_run")
+        if run_id is not None:
             log.info("Inserted fmod_calc_run for sample ID %s (Run ID: %s)", run_data.get('s_id'), run_id)
-            return run_id
+        return run_id
     except sqlite3.IntegrityError as e:
         log.error("fmod_calc_run for sample ID %s already exists. %s", run_data.get('s_id'), e)
         return None
@@ -323,9 +422,19 @@ def bulk_insert_fmod_vals(conn: sqlite3.Connection, fmod_vals: List[Dict[str, An
         INSERT INTO fmod_vals (nt_id, fmod_calc_run_id, fmod_val, valtype, read_depth, rxn_id)
         VALUES (:nt_id, :fmod_calc_run_id, :fmod_val, :valtype, :read_depth, :rxn_id)
     """
+    if not fmod_vals:
+        return
+
+    def _insert_chunk(chunk: List[Dict[str, Any]]):
+        def _op():
+            with conn:
+                conn.executemany(sql, chunk)
+
+        _run_with_retry(conn, _op, f"bulk_insert_fmod_vals chunk(size={len(chunk)})")
+
     try:
-        with conn:
-            conn.executemany(sql, fmod_vals)
+        for chunk in _iter_chunks(fmod_vals, size=500):
+            _insert_chunk(chunk)
         log.info("Bulk inserted %d fmod_vals records.", len(fmod_vals))
     except sqlite3.Error as e:
         log.exception("Bulk insert of fmod_vals failed: %s", e)
@@ -357,9 +466,12 @@ def upsert_free_fit(conn: sqlite3.Connection, fit_data: Dict[str, Any]):
             time_min = excluded.time_min,
             time_max = excluded.time_max
     """
-    try:
+    def _op():
         with conn:
             conn.execute(sql, fit_data)
+
+    try:
+        _run_with_retry(conn, _op, "upsert_free_fit")
         log.debug("Upserted free_tc_fit for rg_id %s, nt_id %s", fit_data.get('rg_id'), fit_data.get('nt_id'))
     except sqlite3.Error as e:
         log.exception("Upsert of free_tc_fit failed: %s", e)
@@ -390,12 +502,9 @@ def upsert_construct(conn: sqlite3.Connection, construct: Dict[str, Any]) -> Opt
         ON CONFLICT(family, name, version, sequence, disp_name) DO NOTHING
         """
     )
-    try:
+    def _resolve_construct_id() -> int:
         with conn:
-            # Attempt insert (noop on conflict)
             conn.execute(insert_sql, construct)
-
-            # Retrieve id whether inserted or pre-existing
             row = conn.execute(
                 """
                 SELECT id FROM constructs
@@ -409,25 +518,26 @@ def upsert_construct(conn: sqlite3.Connection, construct: Dict[str, Any]) -> Opt
                     construct.get("disp_name"),
                 ),
             ).fetchone()
-            cid = int(row[0]) if row else None
-            if cid is None:
-                raise sqlite3.IntegrityError("Failed to resolve construct id after upsert")
+        cid_local = int(row[0]) if row else None
+        if cid_local is None:
+            raise sqlite3.IntegrityError("Failed to resolve construct id after upsert")
+        return cid_local
 
-            # Upsert nucleotides for this construct
-            nt_rows = construct.get("nt_rows")
-            if nt_rows is None:
-                # No user-provided CSV parsed rows; generate defaults from sequence
-                nt_rows = generate_nt_rows_default(construct.get("sequence", ""))
+    try:
+        cid = _run_with_retry(conn, _resolve_construct_id, "upsert_construct insert")
 
-            if not isinstance(nt_rows, list):
-                raise ValueError("nt_rows must be a list of {site, base, base_region} dicts")
+        nt_rows = construct.get("nt_rows")
+        if nt_rows is None:
+            nt_rows = generate_nt_rows_default(construct.get("sequence", ""))
 
-            # Normalize and insert
-            _bulk_upsert_nucleotides(conn, cid, nt_rows)
+        if not isinstance(nt_rows, list):
+            raise ValueError("nt_rows must be a list of {site, base, base_region} dicts")
 
-            log.debug("Upserted construct '%s' -> id=%s (with %d nucleotides)",
-                      construct.get("disp_name"), cid, len(nt_rows))
-            return cid
+        _bulk_upsert_nucleotides(conn, cid, nt_rows)
+
+        log.debug("Upserted construct '%s' -> id=%s (with %d nucleotides)",
+                  construct.get("disp_name"), cid, len(nt_rows))
+        return cid
     except Exception as e:
         log.exception("Upsert construct (with nucleotides) failed: %s", e)
         return None
@@ -464,8 +574,16 @@ def _bulk_upsert_nucleotides(conn: sqlite3.Connection, construct_id: int, nt_row
         ON CONFLICT(site, base, base_region, construct_id) DO NOTHING
         """
     )
-    with conn:
-        conn.executemany(sql, rows)
+
+    def _insert_chunk(chunk: List[Dict[str, Any]]):
+        def _op():
+            with conn:
+                conn.executemany(sql, chunk)
+
+        _run_with_retry(conn, _op, f"_bulk_upsert_nucleotides chunk(size={len(chunk)})")
+
+    for chunk in _iter_chunks(rows, size=500):
+        _insert_chunk(chunk)
     return len(rows)
 
 
@@ -679,22 +797,25 @@ def upsert_buffer(conn: sqlite3.Connection, buffer: Dict[str, Any]) -> Optional[
         ON CONFLICT(name, pH, composition, disp_name) DO NOTHING
         """
     )
-    try:
+    def _resolve_buffer_id() -> Optional[int]:
         with conn:
             conn.execute(sql, buffer)
-        row = conn.execute(
-            """
-            SELECT id FROM buffers
-            WHERE name = ? AND pH = ? AND composition = ? AND disp_name = ?
-            """,
-            (
-                buffer.get("name"),
-                buffer.get("pH"),
-                buffer.get("composition"),
-                buffer.get("disp_name"),
-            ),
-        ).fetchone()
-        bid = int(row[0]) if row else None
+            row = conn.execute(
+                """
+                SELECT id FROM buffers
+                WHERE name = ? AND pH = ? AND composition = ? AND disp_name = ?
+                """,
+                (
+                    buffer.get("name"),
+                    buffer.get("pH"),
+                    buffer.get("composition"),
+                    buffer.get("disp_name"),
+                ),
+            ).fetchone()
+        return int(row[0]) if row else None
+
+    try:
+        bid = _run_with_retry(conn, _resolve_buffer_id, "upsert_buffer")
         log.debug("Upserted buffer '%s' -> id=%s", buffer.get("disp_name"), bid)
         return bid
     except sqlite3.Error as e:
@@ -714,22 +835,25 @@ def upsert_sequencing_run(conn: sqlite3.Connection, run: Dict[str, Any]) -> Opti
         ON CONFLICT(run_name, date, sequencer, run_manager) DO NOTHING
         """
     )
-    try:
+    def _resolve_run_id() -> Optional[int]:
         with conn:
             conn.execute(sql, run)
-        row = conn.execute(
-            """
-            SELECT id FROM sequencing_runs
-            WHERE run_name = ? AND date = ? AND sequencer = ? AND run_manager = ?
-            """,
-            (
-                run.get("run_name"),
-                run.get("date"),
-                run.get("sequencer"),
-                run.get("run_manager"),
-            ),
-        ).fetchone()
-        rid = int(row[0]) if row else None
+            row = conn.execute(
+                """
+                SELECT id FROM sequencing_runs
+                WHERE run_name = ? AND date = ? AND sequencer = ? AND run_manager = ?
+                """,
+                (
+                    run.get("run_name"),
+                    run.get("date"),
+                    run.get("sequencer"),
+                    run.get("run_manager"),
+                ),
+            ).fetchone()
+        return int(row[0]) if row else None
+
+    try:
+        rid = _run_with_retry(conn, _resolve_run_id, "upsert_sequencing_run")
         log.debug("Upserted sequencing_run '%s' -> id=%s", run.get("run_name"), rid)
         return rid
     except sqlite3.Error as e:
@@ -771,11 +895,20 @@ def bulk_upsert_samples(conn: sqlite3.Connection, seqrun_id: int, samples: List[
             to_drop = excluded.to_drop
         """
     )
+    def _insert_chunk(chunk: List[Dict[str, Any]]):
+        def _op():
+            with conn:
+                conn.executemany(sql, chunk)
+
+        _run_with_retry(conn, _op, f"bulk_upsert_samples chunk(size={len(chunk)})")
+
     try:
-        with conn:
-            conn.executemany(sql, rows)
-        log.info("Upserted %d sequencing_samples for seqrun_id=%s", len(rows), seqrun_id)
-        return len(rows)
+        total = 0
+        for chunk in _iter_chunks(rows, size=200):
+            _insert_chunk(chunk)
+            total += len(chunk)
+        log.info("Upserted %d sequencing_samples for seqrun_id=%s", total, seqrun_id)
+        return total
     except sqlite3.Error as e:
         log.exception("Bulk upsert samples failed: %s", e)
         return 0
@@ -825,6 +958,51 @@ def get_sample_id_by_name(conn: sqlite3.Connection, sample_name: str) -> Optiona
         return None
 
 
+def get_construct_id_by_disp_name(conn: sqlite3.Connection, disp_name: str) -> Optional[int]:
+    """
+    Resolve a construct id by its disp_name (case-insensitive).
+    """
+    if disp_name in (None, ""):
+        return None
+    query = "SELECT id FROM constructs WHERE LOWER(disp_name) = LOWER(?) LIMIT 1"
+    try:
+        row = _run_with_retry(
+            conn,
+            lambda: conn.execute(query, (str(disp_name),)).fetchone(),
+            "get_construct_id_by_disp_name",
+        )
+        return int(row[0]) if row else None
+    except sqlite3.Error as e:
+        log.exception("Failed to lookup construct by disp_name '%s': %s", disp_name, e)
+        return None
+
+
+def get_buffer_id_by_name_or_disp(conn: sqlite3.Connection, identifier: str) -> Optional[int]:
+    """
+    Resolve a buffer id by disp_name or name (case-insensitive).
+    """
+    if identifier in (None, ""):
+        return None
+    ident = str(identifier)
+    queries = [
+        "SELECT id FROM buffers WHERE LOWER(disp_name) = LOWER(?) LIMIT 1",
+        "SELECT id FROM buffers WHERE LOWER(name) = LOWER(?) LIMIT 1",
+    ]
+    try:
+        for query in queries:
+            row = _run_with_retry(
+                conn,
+                lambda q=query: conn.execute(q, (ident,)).fetchone(),
+                "get_buffer_id_by_name_or_disp",
+            )
+            if row:
+                return int(row[0])
+        return None
+    except sqlite3.Error as e:
+        log.exception("Failed to lookup buffer '%s': %s", identifier, e)
+        return None
+
+
 def get_max_reaction_group_id(conn: sqlite3.Connection) -> int:
     """Return the current max rg_id from reaction_groups, or 0 if none."""
     try:
@@ -833,6 +1011,27 @@ def get_max_reaction_group_id(conn: sqlite3.Connection) -> int:
     except sqlite3.Error as e:
         log.exception("Failed to fetch max rg_id: %s", e)
         return 0
+
+
+def find_sequencing_run_id_by_name(conn: sqlite3.Connection, run_name: str) -> Optional[int]:
+    """
+    Resolve a sequencing run id by its run_name.
+    """
+    if run_name in (None, ""):
+        return None
+    try:
+        row = _run_with_retry(
+            conn,
+            lambda: conn.execute(
+                "SELECT id FROM sequencing_runs WHERE run_name = ? LIMIT 1",
+                (run_name,),
+            ).fetchone(),
+            "find_sequencing_run_id_by_name",
+        )
+        return int(row[0]) if row else None
+    except sqlite3.Error as e:
+        log.exception("Failed to lookup sequencing run '%s': %s", run_name, e)
+        return None
 
 
 def insert_probing_reaction(conn: sqlite3.Connection, reaction: Dict[str, Any]) -> Optional[int]:

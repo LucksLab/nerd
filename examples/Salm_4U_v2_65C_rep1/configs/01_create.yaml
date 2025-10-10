@@ -29,6 +29,7 @@ create:
 
   samples:
     - sample_name: fourU_WT_65c_rep1_tp1
+      sequencing_run_name: 230607_M05164_0144_000000000-L3FLD
       fq_dir: ../fastq_files
       r1_file: 001-EKC-WT-60c-a-1-p_S1_L001_R1_001.fastq.gz
       r2_file: 001-EKC-WT-60c-a-1-p_S1_L001_R2_001.fastq.gz
@@ -40,10 +41,11 @@ create:
       probe_concentration: 0.015852692
       RT: MRT
       treated: 1
-      buffer: schwalbe_buffer
-      construct: fourU_WT
+      buffer: Schwalbe_bistris
+      construct: 4U_wt
       done_by: EKC
     - sample_name: fourU_WT_65c_rep1_tp2
+      sequencing_run_name: 230607_M05164_0144_000000000-L3FLD
       fq_dir: ../fastq_files
       r1_file: 002-EKC-WT-60c-a-2-p_S2_L001_R1_001.fastq.gz
       r2_file: 002-EKC-WT-60c-a-2-p_S2_L001_R2_001.fastq.gz
@@ -55,6 +57,6 @@ create:
       probe_concentration: 0.015852692
       RT: MRT
       treated: 1
-      buffer: schwalbe_buffer
-      construct: fourU_WT
+      buffer: Schwalbe_bistris
+      construct: 4U_wt
       done_by: EKC

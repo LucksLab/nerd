@@ -1,0 +1,10 @@
+run:
+  output_dir: examples
+  label: Salm_4U_v2_65C_rep1
+  backend: local
+  threads: 4
+  mem_gb: 8
+  time: "00:11:00"
+
+create:
+  samples: sample_sheets/samples.csv

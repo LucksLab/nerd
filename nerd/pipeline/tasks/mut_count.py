@@ -123,6 +123,10 @@ class MutCountTask(Task):
 
         cmds: List[str] = []
         self._stage_in = []
+        self._stage_out_extra = [
+            "artifacts/*/*_profile.txt",
+            "artifacts/*/*_profile.txtga",
+        ]
         for name in sample_names:
             parent_srow = _sample_row_by_name(name)
             is_derived = False
@@ -166,7 +170,7 @@ class MutCountTask(Task):
                     seq_chars.append(b)
                 return f">{header}\n{''.join(seq_chars)}\n"
 
-            sample_dir = Path("samples") / name
+            sample_dir = Path("artifacts") / name
             target_fa = sample_dir / "target.fa"
 
             # 1) ensure sample dir on remote
@@ -344,8 +348,6 @@ class MutCountTask(Task):
         Execute mutation counting for the selected parent samples.
         """
         from nerd.pipeline.plugins.mutcount import load_mutcount_plugin
-        import shutil
-        import csv
 
         plugin_name = inputs.get("plugin")
         tool_cfg = inputs.get("tool", {}) or {}
@@ -361,42 +363,19 @@ class MutCountTask(Task):
 
         found = 0
         for name in sample_names:
-            sdir = run_dir / "samples" / name
+            sdir = artifacts_dir / name
             prof = plugin.find_profile(sdir)
             if prof and prof.exists():
                 found += 1
-                log.info("Found ShapeMapper profile for %s: %s", name, prof)
-                # Save original profile as an artifact
-                dest = artifacts_dir / f"{name}_profile.txt"
-                try:
-                    shutil.copy2(prof, dest)
-                except Exception as e:
-                    log.warning("Failed to copy profile for %s: %s", name, e)
-
-                # Extract a minimal CSV with the key columns we care about
-                try:
-                    rows = plugin.parse_profile(prof)
-                    out_csv = artifacts_dir / f"{name}_profile_min.csv"
-                    fields = [
-                        "Nucleotide",
-                        "Sequence",
-                        "Modified_effective_depth",
-                        "Modified_rate",
-                    ]
-                    with out_csv.open("w", newline="", encoding="utf-8") as f:
-                        writer = csv.DictWriter(f, fieldnames=fields)
-                        writer.writeheader()
-                        for r in rows:
-                            writer.writerow({k: r.get(k) for k in fields})
-                    log.info("Wrote condensed profile CSV for %s: %s", name, out_csv)
-                except Exception as e:
-                    log.warning("Failed to extract condensed profile for %s: %s", name, e)
+                log.info("Found ShapeMapper profile for %s at %s", name, prof)
             else:
                 # Fallback: sometimes stage-out placed the profile at run_dir root.
                 fallback_found = False
                 try:
                     from glob import glob as _glob
                     pats = [
+                        str(artifacts_dir / name / f"{name}*_profile.txt"),
+                        str(artifacts_dir / name / f"{name}*_profile.txtga"),
                         str(run_dir / f"{name}*_profile.txt"),
                         str(run_dir / f"{name}*_profile.txtga"),
                     ]
@@ -407,29 +386,6 @@ class MutCountTask(Task):
                             log.info("Fallback found profile for %s at %s", name, prof)
                             found += 1
                             fallback_found = True
-                            # copy + condense as above
-                            dest = artifacts_dir / f"{name}_profile.txt"
-                            try:
-                                shutil.copy2(prof, dest)
-                            except Exception as e:
-                                log.warning("Failed to copy profile for %s: %s", name, e)
-                            try:
-                                rows = plugin.parse_profile(prof)
-                                out_csv = artifacts_dir / f"{name}_profile_min.csv"
-                                fields = [
-                                    "Nucleotide",
-                                    "Sequence",
-                                    "Modified_effective_depth",
-                                    "Modified_rate",
-                                ]
-                                with out_csv.open("w", newline="", encoding="utf-8") as f:
-                                    writer = csv.DictWriter(f, fieldnames=fields)
-                                    writer.writeheader()
-                                    for r in rows:
-                                        writer.writerow({k: r.get(k) for k in fields})
-                                log.info("Wrote condensed profile CSV for %s: %s", name, out_csv)
-                            except Exception as e:
-                                log.warning("Failed to extract condensed profile for %s: %s", name, e)
                             break
                 except Exception:
                     pass
