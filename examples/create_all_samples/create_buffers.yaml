@@ -1,0 +1,10 @@
+run:
+  output_dir: examples
+  label: create_buffers
+  backend: local
+  threads: 4
+  mem_gb: 8
+  time: "00:11:00"
+
+create:
+  sequencing_runs: buffers.csv
