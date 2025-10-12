@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from .base import Task, TaskContext
 from nerd.utils.logging import get_logger
@@ -348,8 +348,10 @@ class CreateTask(Task):
             construct_entries_raw = inputs.get("construct")
             buffer_entries_raw = inputs.get("buffer")
             sequencing_run_data = inputs.get("sequencing_run")
-            samples_data = inputs.get("samples", []) or []
-            derived_data = inputs.get("derived_samples", []) or []
+            samples_raw = inputs.get("samples", [])
+            derived_raw = inputs.get("derived_samples", [])
+            samples_data = samples_raw or []
+            derived_data = derived_raw or []
             # Ensure seqrun_id is defined for type-checkers; may remain None
             seqrun_id: Optional[int] = None
             default_construct_id: Optional[int] = None
@@ -357,12 +359,36 @@ class CreateTask(Task):
             construct_cache: Dict[str, Optional[int]] = {}
             buffer_cache: Dict[str, Optional[int]] = {}
 
+            def has_payload(block: Any) -> bool:
+                if block is None:
+                    return False
+                if isinstance(block, str):
+                    return block.strip() != ""
+                if isinstance(block, dict):
+                    # Consider the dictionary present if it has any key/value
+                    return any(has_payload(v) for v in block.values()) or bool(block)
+                if isinstance(block, (list, tuple, set)):
+                    return any(has_payload(item) for item in block)
+                return bool(block)
+
+            present_sections: Set[str] = {
+                name
+                for name, block in (
+                    ("construct", construct_entries_raw),
+                    ("buffer", buffer_entries_raw),
+                    ("sequencing_run", sequencing_run_data),
+                    ("samples", samples_raw),
+                )
+                if has_payload(block)
+            }
+
             if isinstance(samples_data, dict):
                 samples_data = [samples_data]
             if isinstance(derived_data, dict):
                 derived_data = [derived_data]
 
             label_dir = Path(ctx.output_dir) / ctx.label
+            processed_sections: Set[str] = set()
 
             with ctx.db: # Use the connection as a context manager for transactions
                 construct_entries: List[Dict[str, Any]] = []
@@ -371,27 +397,29 @@ class CreateTask(Task):
                 elif isinstance(construct_entries_raw, dict) and construct_entries_raw:
                     construct_entries = [construct_entries_raw]
 
-                if construct_entries:
-                    log.info("Inserting %d construct definition(s).", len(construct_entries))
-                    for entry in construct_entries:
-                        payload = dict(entry)
-                        nt_info_rel = payload.get("nt_info")
-                        if nt_info_rel:
-                            configs_dir = label_dir / "configs"
-                            nt_info_path = Path(nt_info_rel)
-                            if not nt_info_path.is_absolute():
-                                nt_info_path = configs_dir / nt_info_path
-                            nt_rows: List[Dict[str, Any]] = db_api.prep_nt_rows(nt_info_path)
-                            payload = {**payload, "nt_rows": nt_rows}
+                if "construct" in present_sections:
+                    if construct_entries:
+                        log.info("Inserting %d construct definition(s).", len(construct_entries))
+                        for entry in construct_entries:
+                            payload = dict(entry)
+                            nt_info_rel = payload.get("nt_info")
+                            if nt_info_rel:
+                                configs_dir = label_dir / "configs"
+                                nt_info_path = Path(nt_info_rel)
+                                if not nt_info_path.is_absolute():
+                                    nt_info_path = configs_dir / nt_info_path
+                                nt_rows: List[Dict[str, Any]] = db_api.prep_nt_rows(nt_info_path)
+                                payload = {**payload, "nt_rows": nt_rows}
 
-                        cid = db_api.upsert_construct(ctx.db, payload)
-                        log.debug("Construct upserted with id=%s", cid)
-                        if cid is not None:
-                            if default_construct_id is None:
-                                default_construct_id = cid
-                            disp = payload.get("disp_name")
-                            if disp not in (None, ""):
-                                construct_cache[str(disp).lower()] = cid
+                            cid = db_api.upsert_construct(ctx.db, payload)
+                            log.debug("Construct upserted with id=%s", cid)
+                            if cid is not None:
+                                if default_construct_id is None:
+                                    default_construct_id = cid
+                                disp = payload.get("disp_name")
+                                if disp not in (None, ""):
+                                    construct_cache[str(disp).lower()] = cid
+                    processed_sections.add("construct")
 
                 buffer_entries: List[Dict[str, Any]] = []
                 if isinstance(buffer_entries_raw, list):
@@ -399,21 +427,23 @@ class CreateTask(Task):
                 elif isinstance(buffer_entries_raw, dict) and buffer_entries_raw:
                     buffer_entries = [buffer_entries_raw]
 
-                if buffer_entries:
-                    log.info("Inserting %d buffer definition(s).", len(buffer_entries))
-                    for entry in buffer_entries:
-                        payload = dict(entry)
-                        bid = db_api.upsert_buffer(ctx.db, payload)
-                        log.debug("Buffer upserted with id=%s", bid)
-                        if bid is not None:
-                            if default_buffer_id is None:
-                                default_buffer_id = bid
-                            buf_name = payload.get("name")
-                            buf_disp = payload.get("disp_name")
-                            if buf_name not in (None, ""):
-                                buffer_cache[str(buf_name).lower()] = bid
-                            if buf_disp not in (None, ""):
-                                buffer_cache[str(buf_disp).lower()] = bid
+                if "buffer" in present_sections:
+                    if buffer_entries:
+                        log.info("Inserting %d buffer definition(s).", len(buffer_entries))
+                        for entry in buffer_entries:
+                            payload = dict(entry)
+                            bid = db_api.upsert_buffer(ctx.db, payload)
+                            log.debug("Buffer upserted with id=%s", bid)
+                            if bid is not None:
+                                if default_buffer_id is None:
+                                    default_buffer_id = bid
+                                buf_name = payload.get("name")
+                                buf_disp = payload.get("disp_name")
+                                if buf_name not in (None, ""):
+                                    buffer_cache[str(buf_name).lower()] = bid
+                                if buf_disp not in (None, ""):
+                                    buffer_cache[str(buf_disp).lower()] = bid
+                    processed_sections.add("buffer")
 
                 seqrun_payload: Optional[Dict[str, Any]] = None
                 if isinstance(sequencing_run_data, list):
@@ -427,12 +457,23 @@ class CreateTask(Task):
                 elif isinstance(sequencing_run_data, dict):
                     seqrun_payload = sequencing_run_data
 
-                if seqrun_payload:
-                    log.info("Inserting sequencing run: %s", seqrun_payload.get('run_name'))
-                    seqrun_id = db_api.upsert_sequencing_run(ctx.db, seqrun_payload)
-                    log.debug("Sequencing run upserted with id=%s", seqrun_id)
+                if "sequencing_run" in present_sections:
+                    if seqrun_payload:
+                        log.info("Inserting sequencing run: %s", seqrun_payload.get('run_name'))
+                        seqrun_id = db_api.upsert_sequencing_run(ctx.db, seqrun_payload)
+                        log.debug("Sequencing run upserted with id=%s", seqrun_id)
+                    processed_sections.add("sequencing_run")
 
                 if samples_data:
+                    if "samples" in present_sections:
+                        dependencies_for_samples = present_sections.intersection({"construct", "buffer", "sequencing_run"})
+                        missing = sorted(dep for dep in dependencies_for_samples if dep not in processed_sections)
+                        if missing:
+                            dep_list = ", ".join(missing)
+                            raise RuntimeError(
+                                "Guardrail triggered: attempted to ingest samples before processing dependent section(s): "
+                                f"{dep_list}. This indicates a regression in ingestion ordering."
+                            )
                     log.info("Inserting %d samples.", len(samples_data))
 
                     run_name_for_samples = (seqrun_payload or {}).get("run_name")
@@ -474,6 +515,7 @@ class CreateTask(Task):
 
                     inserted = db_api.bulk_upsert_samples(ctx.db, seqrun_id, samples_data)
                     log.debug("Upserted %d samples for seqrun_id=%s", inserted, seqrun_id)
+                    processed_sections.add("samples")
 
                 # --- Optional: upsert derived_samples metadata (no FASTQs stored) ---
                 if derived_data:

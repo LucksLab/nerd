@@ -1,0 +1,5 @@
+﻿name,disp_name,pH,composition
+Schwalbe_bistris,pH6.5_A,6.5,"150 mM bis-tris, 15 mM Kx(HPO4)y, 25 mM KCl"
+P4P6_bicine_NoMg,pH8_noMg,8,"200 mM bicine, 100 mM KCl"
+P4P6_bicine_5mMMg,pH8_5mMMg,8,"200 mM bicine, 100 mM KCl, 5 mM MgCl2"
+AlHashimiLab_NMR_NoMg_v2,pH6.5_B,6.4,"150 mM bis-tris, 15 mM Na3PO4, 25 mM NaCl, 0.1 mM EDTA"
