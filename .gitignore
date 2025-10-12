@@ -69,8 +69,8 @@ coverage.xml
 # Generated SQLite DBs and plots from local runs
 /test_output/**/*.sqlite*
 /test_output/plots/
+/examples
 
 # Egg metadata in repo (keep ignored even if already present)
 /nerd.egg-info/
 /nerd/nerd.egg-info/git rm -r --cached .
-

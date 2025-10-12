@@ -1,4 +1,0 @@
-﻿sequencing_run_name,sample_name,fq_dir,r1_file,r2_file,reaction_group,temperature,replicate,reaction_time,probe,probe_concentration,RT,treated,buffer,construct,done_by
-230607_M05164_0144_000000000-L3FLD,fourU_WT_65c_rep1_tp1,../fastq_files,001-EKC-WT-60c-a-1-p_S1_L001_R1_001.fastq.gz,001-EKC-WT-60c-a-1-p_S1_L001_R2_001.fastq.gz,65_1,65,1,20,dms,0.015852692,MRT,1,Schwalbe_bistris,4U_wt,EKC
-230607_M05164_0144_000000000-L3FLD,fourU_WT_65c_rep1_tp2,../fastq_files,002-EKC-WT-60c-a-2-p_S2_L001_R1_001.fastq.gz,002-EKC-WT-60c-a-2-p_S2_L001_R2_001.fastq.gz,65_1,65,1,45,dms,0.015852692,MRT,1,Schwalbe_bistris,4U_wt,EKC
-230607_M05164_0144_000000000-L3FLD,fourU_WT_65c_rep1_tp3,../fastq_files,003-EKC-WT-60c-a-3-p_S3_L001_R1_001.fastq.gz,003-EKC-WT-60c-a-3-p_S3_L001_R2_001.fastq.gz,65_1,65,1,75,dms,0.015852692,MRT,1,Schwalbe_bistris,4U_wt,EKC

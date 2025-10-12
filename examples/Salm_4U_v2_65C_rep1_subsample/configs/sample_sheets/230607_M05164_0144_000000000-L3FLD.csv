@@ -1,7 +1,0 @@
-rxn_group	temperature	replicate	reaction_time	probe_concentration	probe	buffer	construct	RT	done_by	treated	sequencing_run	sample_name	fq_dir
-65_1	65	1	20	0.015852692	dms	6	25	MRT	EKC	1	31	001-fourU-WT-65c-a-1-p_S1_L001_R1_001.fastq.gz	/projects/b1044/Sequencing/SHAPE-Seq/EKC/240405_M05164_0164_000000000-LH62L
-65_1	65	1	45	0.015852692	dms	6	25	MRT	EKC	1	31	002-fourU-WT-65c-a-2-p_S2_L001_R1_001.fastq.gz	/projects/b1044/Sequencing/SHAPE-Seq/EKC/240405_M05164_0164_000000000-LH62L
-65_1	65	1	75	0.015852692	dms	6	25	MRT	EKC	1	31	003-fourU-WT-65c-a-3-p_S3_L001_R1_001.fastq.gz	/projects/b1044/Sequencing/SHAPE-Seq/EKC/240405_M05164_0164_000000000-LH62L
-65_1	65	1	120	0.015852692	dms	6	25	MRT	EKC	1	31	004-fourU-WT-65c-a-4-p_S4_L001_R1_001.fastq.gz	/projects/b1044/Sequencing/SHAPE-Seq/EKC/240405_M05164_0164_000000000-LH62L
-65_1	65	1	210	0.015852692	dms	6	25	MRT	EKC	1	31	005-fourU-WT-65c-a-5-p_S5_L001_R1_001.fastq.gz	/projects/b1044/Sequencing/SHAPE-Seq/EKC/240405_M05164_0164_000000000-LH62L
-65_1	65	1	300	0.015852692	dms	6	25	MRT	EKC	1	31	006-fourU-WT-65c-a-6-p_S6_L001_R1_001.fastq.gz	/projects/b1044/Sequencing/SHAPE-Seq/EKC/240405_M05164_0164_000000000-LH62L
