@@ -1,0 +1,32 @@
+run:
+  output_dir: examples
+  label: test_mutcount
+  backend: local
+  threads: 7
+  mem_gb: 16
+  time: "01:23:00"
+
+mut_count:
+  # Choose plugin/tool
+  plugin: shapemapper
+  tool:
+    bin: /projects/b1044/Software/shapemapper2-2.3/shapemapper   # or omit to rely on PATH/conda env
+    version: "2.3"
+  reaction_group: "18_1"
+  # Inputs: choose one of:
+  # 1) list of sample names (parents or derived child_names)
+  # samples:
+  #  - RRRY_001-EKC-fourUnew-WT-70C-dms-MaP-1
+  # data_type: "default" # or "N7_GA"    
+
+  # Optional plugin-specific args (passed through)
+  params:
+    dms_mode: True
+    amplicon: True
+    n_proc: 8
+    output_N7: True
+    per_read_histograms: True         # --per-read-histograms
+
+  # Optional environment hints (runner may use)
+  #env:
+  #  CONDA_PREFIX: /opt/conda/envs/rna

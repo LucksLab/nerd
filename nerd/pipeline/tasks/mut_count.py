@@ -5,7 +5,11 @@ Parent samples only (no derived materialization yet).
 """
 
 from pathlib import Path
-from typing import Any, Dict, Tuple, Optional, List
+from datetime import datetime
+import math
+import re
+import shutil
+from typing import Any, Dict, Tuple, Optional, List, Set
 
 from .base import Task, TaskContext
 from nerd.utils.logging import get_logger
@@ -46,10 +50,19 @@ class MutCountTask(Task):
         # Accept either parent sample names under 'samples' or derived child_names under 'derived_samples'
         samples = list(mc.get("samples", []) or [])
         derived = list(mc.get("derived_samples", []) or [])
-        if not samples and not derived:
-            raise ValueError("mut_count requires 'samples' and/or 'derived_samples' listing sample names or child_names.")
+        rg_cfg = mc.get("reaction_group")
+        if isinstance(rg_cfg, (list, tuple, set)):
+            reaction_groups = [str(item).strip() for item in rg_cfg if str(item).strip()]
+        elif rg_cfg not in (None, ""):
+            reaction_groups = [str(rg_cfg).strip()]
+        else:
+            reaction_groups = []
+        if not samples and not derived and not reaction_groups:
+            raise ValueError("mut_count requires 'samples', 'derived_samples', and/or 'reaction_group' to list inputs.")
         merged = samples + derived
         mc = {**mc, "samples": merged}
+        if reaction_groups:
+            mc["reaction_group"] = reaction_groups if len(reaction_groups) > 1 else reaction_groups[0]
 
         # Resolve parent samples from DB now so command() can run everything; no derived support yet
         from nerd.db import api as db_api  # local import
@@ -74,16 +87,100 @@ class MutCountTask(Task):
             bin_path=tool_cfg.get("bin"),
             version=tool_cfg.get("version"),
         )
-        options = {
-            "amplicon": bool(inputs.get("amplicon", True)),
-            "dms_mode": bool(inputs.get("dms_mode", False)),
-            "output_N7": bool(inputs.get("output_N7", False)),
-            "output_parsed_mutations": bool(inputs.get("output_parsed_mutations", False)),
-            "per_read_histograms": bool(inputs.get("per_read_histograms", False)),
-        }
-        dry_run = bool(inputs.get("dry_run", False))
+        param_opts = inputs.get("params") or {}
+        if not isinstance(param_opts, dict):
+            param_opts = {}
 
-        sample_names: List[str] = inputs.get("samples", [])
+        def _opt_bool(key: str, default: bool) -> bool:
+            if key in param_opts:
+                return bool(param_opts.get(key))
+            return bool(inputs.get(key, default))
+
+        options = {
+            "amplicon": _opt_bool("amplicon", True),
+            "dms_mode": _opt_bool("dms_mode", False),
+            "output_N7": _opt_bool("output_N7", False),
+            "output_parsed_mutations": _opt_bool("output_parsed_mutations", False),
+            "per_read_histograms": _opt_bool("per_read_histograms", False),
+        }
+        dry_run = bool(param_opts.get("dry_run", inputs.get("dry_run", False)))
+
+        configured_samples: List[str] = []
+        for _s in (inputs.get("samples") or []):
+            if _s is None:
+                continue
+            text_val = str(_s).strip()
+            if not text_val:
+                continue
+            configured_samples.append(text_val)
+        reaction_groups_cfg = inputs.get("reaction_group")
+        reaction_samples: List[str] = []
+
+        def _fetch_reaction_group_samples(rg_value: Any) -> List[str]:
+            label: Optional[str] = None
+            rg_id: Optional[int] = None
+            if isinstance(rg_value, int):
+                rg_id = rg_value
+            else:
+                text = str(rg_value or "").strip()
+                if not text:
+                    return []
+                label = text
+                if text.isdigit():
+                    try:
+                        rg_id = int(text)
+                    except ValueError:
+                        rg_id = None
+            samples: List[str] = []
+            if label:
+                rows = ctx.db.execute(
+                    """
+                    SELECT ss.sample_name
+                    FROM reaction_groups rg
+                    JOIN probing_reactions pr ON pr.rg_id = rg.rg_id
+                    JOIN sequencing_samples ss ON ss.id = pr.s_id
+                    WHERE rg.rg_label = ?
+                    ORDER BY pr.reaction_time, pr.replicate, ss.sample_name
+                    """,
+                    (label,),
+                ).fetchall()
+                samples = [row["sample_name"] if hasattr(row, "keys") else row[0] for row in rows]
+            if not samples and rg_id is not None:
+                rows = ctx.db.execute(
+                    """
+                    SELECT ss.sample_name
+                    FROM reaction_groups rg
+                    JOIN probing_reactions pr ON pr.rg_id = rg.rg_id
+                    JOIN sequencing_samples ss ON ss.id = pr.s_id
+                    WHERE rg.rg_id = ?
+                    ORDER BY pr.reaction_time, pr.replicate, ss.sample_name
+                    """,
+                    (rg_id,),
+                ).fetchall()
+                samples = [row["sample_name"] if hasattr(row, "keys") else row[0] for row in rows]
+            if not samples:
+                raise ValueError(f"Reaction group '{rg_value}' not found in database or has no associated samples.")
+            return samples
+
+        if reaction_groups_cfg:
+            if isinstance(reaction_groups_cfg, (list, tuple, set)):
+                rg_values = list(reaction_groups_cfg)
+            else:
+                rg_values = [reaction_groups_cfg]
+            for rg_value in rg_values:
+                samples = _fetch_reaction_group_samples(rg_value)
+                reaction_samples.extend(samples)
+                log.info("Resolved reaction_group %s to %d sample(s).", rg_value, len(samples))
+
+        combined_samples = configured_samples + reaction_samples
+        seen: set = set()
+        sample_names: List[str] = []
+        for s in combined_samples:
+            if s not in seen:
+                seen.add(s)
+                sample_names.append(s)
+
+        inputs["samples"] = sample_names
         if not sample_names:
             return None
 
@@ -126,6 +223,8 @@ class MutCountTask(Task):
         self._stage_out_extra = [
             "artifacts/*/*_profile.txt",
             "artifacts/*/*_profile.txtga",
+            "artifacts/*/per_read_histogram.txt",
+            "artifacts/*/per_read_histogram.txtga",
         ]
         for name in sample_names:
             parent_srow = _sample_row_by_name(name)
@@ -186,12 +285,17 @@ class MutCountTask(Task):
             out_dir = sample_dir  # write outputs under the sample directory
             remote_r1 = sample_dir / r1.name
             remote_r2 = sample_dir / r2.name
-            self._stage_in.append({"src": str(r1), "dst": str(remote_r1)})
-            self._stage_in.append({"src": str(r2), "dst": str(remote_r2)})
+            backend = str(ctx.backend or "").lower()
+            needs_stage = backend not in {"local"}
+            if needs_stage:
+                self._stage_in.append({"src": str(r1), "dst": str(remote_r1)})
+                self._stage_in.append({"src": str(r2), "dst": str(remote_r2)})
 
             # If derived, materialize child FASTQs on remote first
-            use_r1 = remote_r1
-            use_r2 = remote_r2
+            parent_r1_for_use = remote_r1 if needs_stage else r1
+            parent_r2_for_use = remote_r2 if needs_stage else r2
+            use_r1 = parent_r1_for_use
+            use_r2 = parent_r2_for_use
             if is_derived and derived_row is not None:
                 import json as _json
                 params_json = derived_row["params_json"] if "params_json" in derived_row.keys() else derived_row[6]
@@ -216,8 +320,8 @@ class MutCountTask(Task):
                 }
                 out_r1, out_r2, prep_cmds, patterns = materializer.prepare(
                     sample_name=name,
-                    parent_r1_remote=remote_r1,
-                    parent_r2_remote=remote_r2,
+                    parent_r1_remote=parent_r1_for_use,
+                    parent_r2_remote=parent_r2_for_use,
                     sample_dir=sample_dir,
                     target_fa_remote=target_fa,
                     plugin=plugin,
@@ -241,8 +345,9 @@ class MutCountTask(Task):
             sep = "################################################################################"
             if not is_derived:
                 # Add verification steps for non-derived cases (derived already logs these)
+                verify_label = "Verify staged FASTQ" if needs_stage else "Verify FASTQ inputs"
                 cmds.append(f"echo '{sep}'")
-                cmds.append("echo '# 3 - Verify staged FASTQ'")
+                cmds.append(f"echo '# 3 - {verify_label}'")
                 cmds.append(f"echo '{sep}'")
                 cmds.append(f"ls -lh {use_r1} {use_r2} || true")
                 cmds.append(f"echo '{sep}'")
@@ -261,8 +366,9 @@ class MutCountTask(Task):
             cmds.append("echo '# 6 - Run shapemapper'")
             cmds.append(f"echo '{sep}'")
             if dry_run:
-                cmds.append(f"echo '[Step 1] Verifying staged FASTQs for {name}'")
-                cmds.append(f"ls -lh {remote_r1} {remote_r2} || true")
+                dry_label = "staged FASTQs" if needs_stage else "FASTQ inputs"
+                cmds.append(f"echo '[Step 1] Verifying {dry_label} for {name}'")
+                cmds.append(f"ls -lh {use_r1} {use_r2} || true")
                 cmds.append(f"echo '[Step 2] FASTA created for {name} at {target_fa}'")
                 cmds.append(f"head -n 2 {target_fa} || true")
                 run_script = sample_dir / "run_shapemapper.sh"
@@ -345,13 +451,19 @@ class MutCountTask(Task):
 
     def consume_outputs(self, ctx: TaskContext, inputs: Dict[str, Any], params: Dict[str, Any], run_dir: Path):
         """
-        Execute mutation counting for the selected parent samples.
+        Execute mutation counting for the selected parent samples and ingest the results.
         """
         from nerd.pipeline.plugins.mutcount import load_mutcount_plugin
+        from nerd.db import api as db_api
 
         plugin_name = inputs.get("plugin")
         tool_cfg = inputs.get("tool", {}) or {}
         plugin = load_mutcount_plugin(plugin_name, bin_path=tool_cfg.get("bin"), version=tool_cfg.get("version"))
+
+        param_opts = inputs.get("params") or {}
+        if not isinstance(param_opts, dict):
+            param_opts = {}
+        per_read_hist_enabled = bool(param_opts.get("per_read_histograms", inputs.get("per_read_histograms", False)))
 
         sample_names: List[str] = inputs.get("samples", [])
         if not sample_names:
@@ -361,44 +473,443 @@ class MutCountTask(Task):
         artifacts_dir = run_dir / "artifacts"
         artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-        found = 0
-        for name in sample_names:
-            sdir = artifacts_dir / name
-            prof = plugin.find_profile(sdir)
-            if prof and prof.exists():
-                found += 1
-                log.info("Found ShapeMapper profile for %s at %s", name, prof)
-            else:
-                # Fallback: sometimes stage-out placed the profile at run_dir root.
-                fallback_found = False
+        def _resolve_profile_path(sample_dir: Path, sample_name: str, ga: bool = False) -> Optional[Path]:
+            suffix = "_profile.txtga" if ga else "_profile.txt"
+            for root in (sample_dir, run_dir):
+                if not root.exists():
+                    continue
                 try:
-                    from glob import glob as _glob
-                    pats = [
-                        str(artifacts_dir / name / f"{name}*_profile.txt"),
-                        str(artifacts_dir / name / f"{name}*_profile.txtga"),
-                        str(run_dir / f"{name}*_profile.txt"),
-                        str(run_dir / f"{name}*_profile.txtga"),
-                    ]
-                    for p in pats:
-                        m = sorted(_glob(p))
-                        if m:
-                            prof = Path(m[0])
-                            log.info("Fallback found profile for %s at %s", name, prof)
-                            found += 1
-                            fallback_found = True
-                            break
+                    candidates = sorted(root.rglob(f"*{suffix}"))
+                except Exception:
+                    candidates = []
+                for candidate in candidates:
+                    posix = candidate.as_posix()
+                    if "shapemapper_temp" in posix:
+                        continue
+                    if ga:
+                        if not candidate.name.endswith("_profile.txtga"):
+                            continue
+                    else:
+                        if candidate.name.endswith(".txtga"):
+                            continue
+                    if sample_name not in candidate.name and root is run_dir:
+                        continue
+                    return candidate
+            return None
+
+        found_profiles = 0
+        ingested_runs = 0
+
+        for name in sample_names:
+            sample_dir = artifacts_dir / name
+            profile_path = _resolve_profile_path(sample_dir, name, ga=False)
+            if profile_path:
+                found_profiles += 1
+                log.info("Found ShapeMapper profile for %s at %s", name, profile_path)
+            else:
+                log.warning("No ShapeMapper profile found for %s under %s", name, sample_dir)
+                try:
+                    txts = sorted([str(p.relative_to(run_dir)) for p in sample_dir.rglob("*.txt")])
+                    if txts:
+                        log.info(
+                            "Found txt files under %s: %s",
+                            sample_dir,
+                            ", ".join(txts[:10]) + (" ..." if len(txts) > 10 else ""),
+                        )
+                    else:
+                        log.info("No txt files present under %s", sample_dir)
                 except Exception:
                     pass
-                if not fallback_found:
-                    log.warning("No ShapeMapper profile found for %s under %s", name, sdir)
+                continue
+
+            ga_profile_path = _resolve_profile_path(sample_dir, name, ga=True)
+
+            allowed_paths: Set[Path] = set()
+            try:
+                resolved_profile = profile_path.resolve()
+                allowed_paths.add(resolved_profile)
+            except Exception:
+                pass
+            if ga_profile_path:
+                try:
+                    allowed_paths.add(ga_profile_path.resolve())
+                except Exception:
+                    pass
+
+            sample_row = ctx.db.execute(
+                "SELECT id FROM sequencing_samples WHERE sample_name = ?",
+                (name,),
+            ).fetchone()
+            if sample_row is None:
+                log.error("Sample %s not found in sequencing_samples; skipping ingestion.", name)
+                continue
+            s_id = int(sample_row["id"] if hasattr(sample_row, "keys") else sample_row[0])
+
+            probing_row = ctx.db.execute(
+                "SELECT id, construct_id, treated FROM probing_reactions WHERE s_id = ?",
+                (s_id,),
+            ).fetchone()
+            if probing_row is None:
+                log.error("No probing_reactions entry linked to sample %s (id=%s); skipping.", name, s_id)
+                continue
+            if hasattr(probing_row, "keys"):
+                rxn_id = int(probing_row["id"])
+                construct_id = int(probing_row["construct_id"])
+                treated_flag = int(probing_row["treated"])
+            else:
+                rxn_id = int(probing_row[0])
+                construct_id = int(probing_row[1])
+                treated_flag = int(probing_row[2])
+
+            nt_rows = ctx.db.execute(
+                "SELECT id, site, base FROM nucleotides WHERE construct_id = ? ORDER BY site",
+                (construct_id,),
+            ).fetchall()
+            if not nt_rows:
+                log.error("No nucleotides found for construct %s (sample %s); skipping.", construct_id, name)
+                continue
+
+            nt_map: Dict[int, int] = {}
+            db_sequence_parts: List[str] = []
+            for row in nt_rows:
+                if hasattr(row, "keys"):
+                    nt_id = int(row["id"])
+                    site = int(row["site"])
+                    base = str(row["base"])
+                else:
+                    nt_id = int(row[0])
+                    site = int(row[1])
+                    base = str(row[2])
+                nt_map[site] = nt_id
+                db_sequence_parts.append(base)
+
+            log_path = self._find_shapemapper_log(run_dir, sample_dir, name)
+            meta = self._parse_shapemapper_log(log_path) if log_path else {}
+            histograms = meta.get("histograms") or {}
+            run_datetime = meta.get("run_datetime") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            software_version = meta.get("software_version") or tool_cfg.get("version") or "unknown"
+            run_args = meta.get("run_args") or ""
+            untreated_arg = meta.get("untreated")
+            use_untreated_calc = bool(untreated_arg) and treated_flag == 0
+
+            value_column = "Untreated_rate" if use_untreated_calc else "Modified_rate"
+            depth_column = "Untreated_read_depth" if use_untreated_calc else "Modified_read_depth"
+
+            run_data = {
+                "software_name": str(plugin_name or "unknown"),
+                "software_version": str(software_version),
+                "run_args": run_args,
+                "run_datetime": run_datetime,
+                "output_dir": str(sample_dir.resolve()),
+                "s_id": s_id,
+            }
+
+            run_id = db_api.insert_fmod_calc_run(ctx.db, run_data)
+            if run_id is None:
+                existing = ctx.db.execute(
+                    "SELECT id FROM fmod_calc_runs WHERE software_name = ? AND software_version = ? AND run_args = ? AND run_datetime = ? AND output_dir = ? AND s_id = ?",
+                    (
+                        run_data["software_name"],
+                        run_data["software_version"],
+                        run_data["run_args"],
+                        run_data["run_datetime"],
+                        run_data["output_dir"],
+                        run_data["s_id"],
+                    ),
+                ).fetchone()
+                if existing is None:
+                    log.error("Unable to insert or locate fmod_calc_run for %s; skipping fmod ingestion.", name)
+                    continue
+                run_id = int(existing["id"] if hasattr(existing, "keys") else existing[0])
+            else:
+                log.info("Inserted fmod_calc_run %s for sample %s", run_id, name)
+
+            existing_valtypes_rows = ctx.db.execute(
+                "SELECT DISTINCT valtype FROM fmod_vals WHERE fmod_calc_run_id = ?",
+                (run_id,),
+            ).fetchall()
+            existing_valtypes = {
+                (row["valtype"] if hasattr(row, "keys") else row[0]) for row in existing_valtypes_rows
+            }
+
+            profiles_to_ingest = [(profile_path, "modrate")]
+            if ga_profile_path:
+                profiles_to_ingest.append((ga_profile_path, "GAmodrate"))
+
+            inserted_for_sample = False
+            db_sequence = "".join(db_sequence_parts).upper().replace("T", "U")
+
+            for path, valtype in profiles_to_ingest:
+                if valtype in existing_valtypes:
+                    log.info("fmod_vals for %s (%s) already present; skipping.", name, valtype)
+                    continue
+
+                parsed_rows = plugin.parse_profile(path)
+                if not parsed_rows:
+                    log.warning("Profile %s for %s is empty; skipping %s ingestion.", path, name, valtype)
+                    continue
+
+                profile_sequence = "".join((row.get("Sequence") or "") for row in parsed_rows).upper().replace("T", "U")
+                if profile_sequence != db_sequence:
+                    log.warning(
+                        "Sequence mismatch for %s when ingesting %s (profile vs construct). Continuing with available nucleotides.",
+                        name,
+                        valtype,
+                    )
+
+                records: List[Dict[str, Any]] = []
+                for row in parsed_rows:
                     try:
-                        # Help debug by listing available txt files
-                        txts = sorted([str(p.relative_to(run_dir)) for p in sdir.rglob("*.txt")])
-                        if txts:
-                            log.info("Found txt files under %s: %s", sdir, ", ".join(txts[:10]) + (" ..." if len(txts) > 10 else ""))
-                        else:
-                            log.info("No txt files present under %s", sdir)
+                        site = int(float(row.get("Nucleotide", 0)))
+                    except (TypeError, ValueError):
+                        continue
+                    nt_id = nt_map.get(site)
+                    if nt_id is None:
+                        continue
+                    fmod_value = self._safe_float(row.get(value_column))
+                    depth_value = self._safe_float(row.get(depth_column))
+                    read_depth = int(round(depth_value)) if depth_value is not None else 0
+                    records.append(
+                        {
+                            "nt_id": nt_id,
+                            "fmod_calc_run_id": run_id,
+                            "fmod_val": fmod_value,
+                            "valtype": valtype,
+                            "read_depth": read_depth,
+                            "rxn_id": rxn_id,
+                        }
+                    )
+
+                if not records:
+                    log.warning("No fmod records generated for %s (%s); skipping.", name, valtype)
+                    continue
+
+                db_api.bulk_insert_fmod_vals(ctx.db, records)
+                log.info("Inserted %d fmod_vals records for %s (%s).", len(records), name, valtype)
+                existing_valtypes.add(valtype)
+                inserted_for_sample = True
+
+            if per_read_hist_enabled and histograms:
+                mod_hist = histograms.get("modrate")
+                if mod_hist:
+                    hist_path = sample_dir / "per_read_histogram.txt"
+                    self._write_histogram_file(hist_path, mod_hist)
+                    try:
+                        allowed_paths.add(hist_path.resolve())
                     except Exception:
                         pass
+                    log.info("Wrote per-read histogram for %s (%s) to %s", name, "Modified", hist_path)
+                ga_hist = histograms.get("GAmodrate")
+                if ga_hist:
+                    hist_ga_path = sample_dir / "per_read_histogram.txtga"
+                    self._write_histogram_file(hist_ga_path, ga_hist)
+                    try:
+                        allowed_paths.add(hist_ga_path.resolve())
+                    except Exception:
+                        pass
+                    log.info("Wrote per-read histogram for %s (%s) to %s", name, "GA", hist_ga_path)
 
-        log.info("mut_count completed. Profiles found for %d/%d samples.", found, len(sample_names))
+            if log_path and log_path.exists():
+                try:
+                    log_path.unlink()
+                    log.debug("Removed shapemapper log %s", log_path)
+                except Exception as exc:
+                    log.debug("Failed to remove shapemapper log %s: %s", log_path, exc)
+
+            if sample_dir.exists():
+                for item in list(sample_dir.iterdir()):
+                    try:
+                        resolved_item = item.resolve()
+                    except FileNotFoundError:
+                        continue
+                    if resolved_item in allowed_paths:
+                        continue
+                    if item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                    else:
+                        try:
+                            item.unlink()
+                        except FileNotFoundError:
+                            pass
+
+            if inserted_for_sample:
+                ingested_runs += 1
+
+        log.info(
+            "mut_count completed. Profiles found for %d/%d samples; ingested %d run(s).",
+            found_profiles,
+            len(sample_names),
+            ingested_runs,
+        )
+
+    def _find_shapemapper_log(self, run_dir: Path, sample_dir: Path, sample_name: str) -> Optional[Path]:
+        candidates = [
+            run_dir / f"{sample_name}_shapemapper_log.txt",
+            sample_dir / f"{sample_name}_shapemapper_log.txt",
+        ]
+        for cand in candidates:
+            if cand.exists():
+                return cand
+        matches = sorted(run_dir.glob(f"*{sample_name}*shapemapper_log*.txt"))
+        if matches:
+            return matches[0]
+        matches = sorted(sample_dir.glob("*shapemapper_log*.txt"))
+        if matches:
+            return matches[0]
+        return None
+
+    def _parse_shapemapper_log(self, log_path: Path) -> Dict[str, Any]:
+        if not log_path or not log_path.exists():
+            return {}
+        try:
+            lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except Exception:
+            return {}
+
+        indices = [i for i, line in enumerate(lines) if line.startswith("Started ShapeMapper")]
+        if not indices:
+            return {}
+        block = lines[indices[-1]:]
+        header = block[0].strip()
+        run_datetime = ""
+        software_version = ""
+        if " at " in header:
+            left, right = header.split(" at ", 1)
+            run_datetime = right.strip()
+            parts = left.split()
+            if len(parts) >= 3:
+                software_version = parts[2]
+        args_line = next((line for line in block if line.strip().startswith("args:")), "")
+        args_text = ""
+        if args_line:
+            args_text = args_line.split("args:", 1)[1].strip()
+        arg_map: Dict[str, Optional[str]] = {}
+        if args_text:
+            for chunk in args_text.split(" --"):
+                chunk = chunk.strip()
+                if not chunk:
+                    continue
+                if chunk.startswith("--"):
+                    chunk = chunk[2:]
+                if " " in chunk:
+                    flag, value = chunk.split(" ", 1)
+                    arg_map[flag] = value.strip()
+                else:
+                    arg_map[chunk] = None
+        histograms = self._extract_mutation_histograms(lines)
+        return {
+            "run_datetime": run_datetime,
+            "software_version": software_version,
+            "run_args": args_text,
+            "untreated": arg_map.get("untreated"),
+            "denatured": arg_map.get("denatured"),
+            "r1": arg_map.get("R1"),
+            "histograms": histograms,
+        }
+
+    def _extract_mutation_histograms(self, lines: List[str]) -> Dict[str, List[Tuple[int, float]]]:
+        hist_data: Dict[str, List[Tuple[int, float]]] = {}
+        current: Optional[str] = None
+        collecting = False
+        header_skip = 0
+        buffer: List[str] = []
+
+        def _finalize() -> None:
+            nonlocal buffer, current
+            if current and buffer:
+                parsed = self._parse_histogram_records(buffer)
+                if parsed:
+                    hist_data[current] = parsed
+            buffer = []
+
+        for raw_line in lines:
+            line = raw_line.rstrip("\n")
+            if "MutationCounterGA_Modified" in line:
+                if collecting:
+                    _finalize()
+                current = "GAmodrate"
+                collecting = False
+                header_skip = 0
+                continue
+            if "MutationCounter_Modified" in line and "MutationCounterGA_Modified" not in line:
+                if collecting:
+                    _finalize()
+                current = "modrate"
+                collecting = False
+                header_skip = 0
+                continue
+            if current is None:
+                continue
+            stripped = line.strip()
+            if stripped.startswith("| Mutations per read"):
+                if collecting:
+                    _finalize()
+                collecting = True
+                header_skip = 0
+                buffer = []
+                continue
+            if not collecting:
+                continue
+            if stripped.startswith("| --------------------"):
+                if header_skip < 2:
+                    header_skip += 1
+                    continue
+                _finalize()
+                collecting = False
+                header_skip = 0
+                continue
+            if header_skip < 2:
+                header_skip += 1
+                continue
+            buffer.append(line)
+
+        if collecting and buffer:
+            _finalize()
+
+        return hist_data
+
+    @staticmethod
+    def _parse_histogram_records(lines: List[str]) -> List[Tuple[int, float]]:
+        data: List[Tuple[int, float]] = []
+        for line in lines:
+            if "|" not in line:
+                continue
+            payload = line.split("|", 1)[1].strip()
+            if not payload:
+                continue
+            parts = re.split(r"\s+", payload)
+            if len(parts) < 2:
+                continue
+            try:
+                bin_left = int(parts[0])
+                frequency = float(parts[1])
+            except ValueError:
+                continue
+            data.append((bin_left, frequency))
+        return data
+
+    @staticmethod
+    def _write_histogram_file(path: Path, data: List[Tuple[int, float]]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            handle.write("bin_left\tfrequency\n")
+            for bin_left, frequency in data:
+                handle.write(f"{bin_left}\t{frequency:.6f}\n")
+
+    @staticmethod
+    def _safe_float(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            val = value.strip()
+            if not val or val.lower() == "nan":
+                return None
+        else:
+            val = value
+        try:
+            num = float(val)
+        except (TypeError, ValueError):
+            return None
+        if math.isnan(num):
+            return None
+        return num

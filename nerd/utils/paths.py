@@ -100,7 +100,7 @@ def update_latest_symlink(label_root: Path, task_name: str, run_dir: Path):
         task_name: The name of the task.
         run_dir: The path to the current run directory to be linked.
     """
-    task_dir = label_root / task_name
+    task_dir = Path(label_root) / task_name
     latest_link = task_dir / "latest"
 
     try:
@@ -116,9 +116,14 @@ def update_latest_symlink(label_root: Path, task_name: str, run_dir: Path):
             )
             return
 
-        # Create the new symlink
-        latest_link.symlink_to(run_dir, target_is_directory=True)
-        log.info("Updated 'latest' symlink for task '%s' to point to %s", task_name, run_dir)
+        # Create the new symlink using a target relative to the task directory.
+        run_dir_path = Path(run_dir).resolve()
+        target_dir = latest_link.parent.resolve()
+        relative_target = os.path.relpath(run_dir_path, start=target_dir)
+        latest_link.symlink_to(relative_target, target_is_directory=True)
+        log.info(
+            "Updated 'latest' symlink for task '%s' to point to %s", task_name, run_dir_path
+        )
 
     except OSError as e:
         log.exception(
