@@ -1,10 +1,10 @@
 run:
   output_dir: examples
-  label: create_constructs
+  label: create_all_samples
   backend: local
   threads: 4
-  mem_gb: 8
+  mem_gb: 7
   time: "00:11:00"
 
 create:
-  sequencing_runs: constructs.csv
+  sequencing_runs: sequencing_runs.csv

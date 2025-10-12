@@ -1,10 +1,10 @@
 run:
   output_dir: examples
-  label: create_samples
+  label: create_all_samples
   backend: local
   threads: 4
   mem_gb: 8
   time: "00:11:00"
 
 create:
-  samples: samples.csv
+  samples: probing_samples.csv

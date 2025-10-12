@@ -211,6 +211,17 @@ class CreateTask(Task):
     def _inflate_sheet_inputs(self, cfg_block: Dict[str, Any], search_roots: List[Path]) -> Dict[str, Any]:
         data = dict(cfg_block or {})
 
+        # Normalize common aliases so callers can use pluralized keys.
+        alias_map = {
+            "constructs": "construct",
+            "buffers": "buffer",
+            "sequencing_runs": "sequencing_run",
+            "sample": "samples",
+        }
+        for alias, canonical in alias_map.items():
+            if alias in data and canonical not in data:
+                data[canonical] = data.pop(alias)
+
         data["construct"] = self._maybe_load_sheet(
             section="construct",
             value=data.get("construct"),
