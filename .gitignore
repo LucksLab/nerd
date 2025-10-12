@@ -70,6 +70,7 @@ coverage.xml
 /test_output/**/*.sqlite*
 /test_output/plots/
 /examples
+*.out
 
 # Egg metadata in repo (keep ignored even if already present)
 /nerd.egg-info/

@@ -6,6 +6,7 @@ Task for creating and ingesting initial data from a YAML configuration file.
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -342,6 +343,83 @@ class CreateTask(Task):
             normalized[target_key] = value
         return normalized
 
+    @staticmethod
+    def _fetch_single_id(conn, sql: str, params: Tuple[Any, ...], context: str) -> Optional[int]:
+        try:
+            row = conn.execute(sql, params).fetchone()
+        except Exception:
+            log.exception("Failed to lookup %s", context)
+            return None
+        return int(row[0]) if row and row[0] is not None else None
+
+    def _lookup_construct_id(self, conn, payload: Dict[str, Any]) -> Optional[int]:
+        fields = ("family", "name", "version", "sequence", "disp_name")
+        if any(payload.get(field) in (None, "") for field in fields):
+            return None
+        sql = (
+            "SELECT id FROM constructs "
+            "WHERE family = ? AND name = ? AND version = ? AND sequence = ? AND disp_name = ?"
+        )
+        params = tuple(payload.get(field) for field in fields)
+        return self._fetch_single_id(conn, sql, params, "construct by unique key")
+
+    def _lookup_buffer_id(self, conn, payload: Dict[str, Any]) -> Optional[int]:
+        fields = ("name", "pH", "composition", "disp_name")
+        if any(payload.get(field) in (None, "") for field in fields):
+            return None
+        sql = (
+            "SELECT id FROM buffers "
+            "WHERE name = ? AND pH = ? AND composition = ? AND disp_name = ?"
+        )
+        params = tuple(payload.get(field) for field in fields)
+        return self._fetch_single_id(conn, sql, params, "buffer by unique key")
+
+    def _lookup_seqrun_id(self, conn, payload: Dict[str, Any]) -> Optional[int]:
+        fields = ("run_name", "date", "sequencer", "run_manager")
+        if any(payload.get(field) in (None, "") for field in fields):
+            return None
+        sql = (
+            "SELECT id FROM sequencing_runs "
+            "WHERE run_name = ? AND date = ? AND sequencer = ? AND run_manager = ?"
+        )
+        params = tuple(payload.get(field) for field in fields)
+        return self._fetch_single_id(conn, sql, params, "sequencing_run by unique key")
+
+    def _write_ingest_log(self, run_dir: Path, created_log: Dict[str, List[Dict[str, Any]]]) -> None:
+        run_dir = Path(run_dir)
+        try:
+            run_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            log.warning("Unable to ensure run directory %s for creation log: %s", run_dir, exc)
+            return
+
+        sections = ["constructs", "buffers", "sequencing_runs", "samples"]
+        summary = {section: len(created_log.get(section, [])) for section in sections}
+        payload = {section: created_log.get(section, []) for section in sections}
+        payload["summary"] = summary
+
+        json_path = run_dir / "created_objects.json"
+        text_path = run_dir / "created_objects.log"
+
+        try:
+            json_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+        except Exception as exc:
+            log.warning("Failed to write JSON creation log at %s: %s", json_path, exc)
+
+        try:
+            lines: List[str] = []
+            for section in sections:
+                entries = created_log.get(section, [])
+                lines.append(f"{section}: {len(entries)}")
+                for entry in entries:
+                    lines.append(f"  - {json.dumps(entry, sort_keys=True)}")
+                lines.append("")
+            text_path.write_text("\n".join(lines).rstrip() + "\n")
+            log.info("Created object log written to %s", text_path)
+        except Exception as exc:
+            log.warning("Failed to write text creation log at %s: %s", text_path, exc)
+
+
     def command(self, ctx, inputs: Dict[str, Any], params: Dict[str, Any]) -> Optional[str]:
         """
         This is a pure-Python task, so no shell command is executed.
@@ -367,6 +445,13 @@ class CreateTask(Task):
             buffer_cache: Dict[str, Optional[int]] = {}
             seqrun_map: Dict[str, int] = {}
             sample_seqrun_pairs: List[Tuple[Dict[str, Any], int]] = []
+            created_log: Dict[str, List[Dict[str, Any]]] = {
+                "constructs": [],
+                "buffers": [],
+                "sequencing_runs": [],
+                "samples": [],
+            }
+            sample_existing_map: Dict[Tuple[int, str, Optional[str]], Optional[int]] = {}
 
             if isinstance(samples_data, dict):
                 samples_data = [samples_data]
@@ -395,9 +480,21 @@ class CreateTask(Task):
                             nt_rows: List[Dict[str, Any]] = db_api.prep_nt_rows(nt_info_path)
                             payload = {**payload, "nt_rows": nt_rows}
 
+                        existing_cid = self._lookup_construct_id(ctx.db, payload)
                         cid = db_api.upsert_construct(ctx.db, payload)
                         log.debug("Construct upserted with id=%s", cid)
                         if cid is not None:
+                            status = "created" if existing_cid is None else "updated"
+                            created_log["constructs"].append(
+                                {
+                                    "disp_name": payload.get("disp_name"),
+                                    "family": payload.get("family"),
+                                    "name": payload.get("name"),
+                                    "version": payload.get("version"),
+                                    "id": cid,
+                                    "status": status,
+                                }
+                            )
                             if default_construct_id is None:
                                 default_construct_id = cid
                             disp = payload.get("disp_name")
@@ -414,9 +511,20 @@ class CreateTask(Task):
                     log.info("Inserting %d buffer definition(s).", len(buffer_entries))
                     for entry in buffer_entries:
                         payload = dict(entry)
+                        existing_bid = self._lookup_buffer_id(ctx.db, payload)
                         bid = db_api.upsert_buffer(ctx.db, payload)
                         log.debug("Buffer upserted with id=%s", bid)
                         if bid is not None:
+                            status = "created" if existing_bid is None else "updated"
+                            created_log["buffers"].append(
+                                {
+                                    "name": payload.get("name"),
+                                    "disp_name": payload.get("disp_name"),
+                                    "pH": payload.get("pH"),
+                                    "id": bid,
+                                    "status": status,
+                                }
+                            )
                             if default_buffer_id is None:
                                 default_buffer_id = bid
                             buf_name = payload.get("name")
@@ -444,16 +552,40 @@ class CreateTask(Task):
                             if run_name in (None, ""):
                                 log.warning("Skipping sequencing run entry lacking 'run_name': %s", payload)
                                 continue
+                            existing_seqrun_id = self._lookup_seqrun_id(ctx.db, payload)
                             seqrun_id = db_api.upsert_sequencing_run(ctx.db, payload)
                             if seqrun_id is not None:
+                                status = "created" if existing_seqrun_id is None else "updated"
+                                created_log["sequencing_runs"].append(
+                                    {
+                                        "run_name": run_name,
+                                        "date": payload.get("date"),
+                                        "sequencer": payload.get("sequencer"),
+                                        "run_manager": payload.get("run_manager"),
+                                        "id": seqrun_id,
+                                        "status": status,
+                                    }
+                                )
                                 seqrun_map[str(run_name)] = seqrun_id
                                 log.debug("Sequencing run '%s' upserted with id=%s", run_name, seqrun_id)
                 elif isinstance(seqrun_payload, dict):
                     run_name = seqrun_payload.get("run_name")
                     if run_name not in (None, ""):
                         log.info("Inserting sequencing run: %s", run_name)
+                        existing_seqrun_id = self._lookup_seqrun_id(ctx.db, seqrun_payload)
                         seqrun_id = db_api.upsert_sequencing_run(ctx.db, seqrun_payload)
                         if seqrun_id is not None:
+                            status = "created" if existing_seqrun_id is None else "updated"
+                            created_log["sequencing_runs"].append(
+                                {
+                                    "run_name": run_name,
+                                    "date": seqrun_payload.get("date"),
+                                    "sequencer": seqrun_payload.get("sequencer"),
+                                    "run_manager": seqrun_payload.get("run_manager"),
+                                    "id": seqrun_id,
+                                    "status": status,
+                                }
+                            )
                             seqrun_map[str(run_name)] = seqrun_id
                             log.debug("Sequencing run '%s' upserted with id=%s", run_name, seqrun_id)
 
@@ -488,12 +620,35 @@ class CreateTask(Task):
                                     f"Sequencing run '{run_name_str}' not found. Provide it in the config or ingest it before adding samples."
                                 )
                             seqrun_map[run_name_str] = seqrun_id
+                        sample_name = sample.get("sample_name")
+                        if sample_name in (None, ""):
+                            raise ValueError("Sample entry is missing 'sample_name'.")
+                        fq_dir_val = sample.get("fq_dir")
+                        existing_sample_id = db_api.get_sample_id(ctx.db, seqrun_id, sample_name, fq_dir_val)
+                        sample_existing_map[(seqrun_id, str(sample_name), fq_dir_val or None)] = existing_sample_id
                         grouped_samples.setdefault(seqrun_id, []).append(sample)
                         sample_seqrun_pairs.append((sample, seqrun_id))
 
                     for seqrun_id, group in grouped_samples.items():
                         inserted = db_api.bulk_upsert_samples(ctx.db, seqrun_id, group)
                         log.debug("Upserted %d samples for seqrun_id=%s", inserted, seqrun_id)
+                        for sample in group:
+                            sample_name = sample.get("sample_name")
+                            fq_dir_val = sample.get("fq_dir")
+                            sample_id = db_api.get_sample_id(ctx.db, seqrun_id, sample_name, fq_dir_val)
+                            key = (seqrun_id, str(sample_name), fq_dir_val or None)
+                            previous_id = sample_existing_map.get(key)
+                            status = "created" if previous_id is None else "updated"
+                            created_log["samples"].append(
+                                {
+                                    "sample_name": sample_name,
+                                    "sequencing_run_name": sample.get("sequencing_run_name"),
+                                    "seqrun_id": seqrun_id,
+                                    "fq_dir": fq_dir_val,
+                                    "id": sample_id,
+                                    "status": status,
+                                }
+                            )
 
                 # --- Optional: upsert derived_samples metadata (no FASTQs stored) ---
                 if derived_data:
@@ -614,6 +769,7 @@ class CreateTask(Task):
 
                         log.debug("Inserted reaction id=%s into group rg_id=%s (label=%s)", rxn_id, reaction["rg_id"], s.get("reaction_group"))
             
+            self._write_ingest_log(run_dir, created_log)
             log.info("'create' task consumption completed successfully.")
 
         except Exception as e:
