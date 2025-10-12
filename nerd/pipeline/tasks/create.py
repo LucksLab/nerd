@@ -215,19 +215,19 @@ class CreateTask(Task):
             section="construct",
             value=data.get("construct"),
             search_roots=search_roots,
-            allow_multiple=False,
+            allow_multiple=True,
         )
         data["buffer"] = self._maybe_load_sheet(
             section="buffer",
             value=data.get("buffer"),
             search_roots=search_roots,
-            allow_multiple=False,
+            allow_multiple=True,
         )
         data["sequencing_run"] = self._maybe_load_sheet(
             section="sequencing_run",
             value=data.get("sequencing_run"),
             search_roots=search_roots,
-            allow_multiple=False,
+            allow_multiple=True,
         )
         data["samples"] = self._maybe_load_sheet(
             section="samples",
