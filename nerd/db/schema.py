@@ -368,7 +368,7 @@ CREATE_TASKS = """
 CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,        -- task id
     task_name TEXT NOT NULL,                     -- e.g., create, mut_count, tc_free
-    scope_kind TEXT NOT NULL,                    -- 'sample' | 'rg' | 'tg' | 'nmr' | 'project'
+    scope_kind TEXT NOT NULL,                    -- 'sample' | 'sample_batch' | 'rg' | 'tg' | 'nmr' | 'project' | 'global'
     scope_id INTEGER,                            -- nullable; depends on scope_kind
     output_dir TEXT NOT NULL,                    -- directory where outputs are written
     label TEXT NOT NULL,                         -- human-friendly label, e.g., HIV-1_TAR_v1_37C_rep1
@@ -415,6 +415,19 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 """
 
+# === Table: task_scope_members ===
+CREATE_TASK_SCOPE_MEMBERS = """
+CREATE TABLE IF NOT EXISTS task_scope_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,        -- unique member row id
+    task_id INTEGER NOT NULL,                    -- FK → tasks.id
+    member_kind TEXT NOT NULL,                   -- 'sample' | 'derived_sample' | 'rg' | etc.
+    member_id INTEGER,                           -- nullable; id in domain table if available
+    member_label TEXT,                           -- human-readable identifier (e.g., sample_name)
+    extra_json TEXT,                             -- optional JSON metadata (sets, roles, etc.)
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+"""
+
 # === Indexes for tasks/task_attempts/artifacts ===
 CREATE_INDEX_TASKS_LABEL = """
 CREATE INDEX IF NOT EXISTS idx_tasks_label ON tasks (label);
@@ -430,6 +443,11 @@ CREATE INDEX IF NOT EXISTS idx_task_attempts_task ON task_attempts (task_id, try
 
 CREATE_INDEX_ARTIFACTS_TASK = """
 CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts (task_id, kind);
+"""
+
+# Track members per task
+CREATE_INDEX_TASK_SCOPE_MEMBERS_TASK = """
+CREATE INDEX IF NOT EXISTS idx_task_scope_members_task ON task_scope_members (task_id);
 """
 
 # Additional index to speed up lookups by rg_label
@@ -475,7 +493,8 @@ ALL_TABLES = [
     CREATE_PROBING_KINETIC_RATES,
     CREATE_TASKS,
     CREATE_TASK_ATTEMPTS,
-    CREATE_ARTIFACTS
+    CREATE_ARTIFACTS,
+    CREATE_TASK_SCOPE_MEMBERS
 ]
 
 ALL_INDEXES = [
@@ -486,6 +505,7 @@ ALL_INDEXES = [
     CREATE_INDEX_TASKS_SCOPE,
     CREATE_INDEX_ATTEMPTS_TASK,
     CREATE_INDEX_ARTIFACTS_TASK,
+    CREATE_INDEX_TASK_SCOPE_MEMBERS_TASK,
     CREATE_INDEX_RG_LABEL,
     CREATE_INDEX_TASKS_UNIQUE_SIG_ACTIVE,
     CREATE_INDEX_DERIVED_CHILD,

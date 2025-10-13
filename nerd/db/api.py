@@ -380,6 +380,63 @@ def record_cached_task(conn: sqlite3.Connection, name: str, scope_kind: str, sco
         log.exception("Failed to record cached task: %s", e)
         return None
 
+
+def record_task_scope_members(
+    conn: sqlite3.Connection,
+    task_id: int,
+    members: Iterable[Any],
+) -> None:
+    """
+    Inserts rows into task_scope_members to capture the entities processed by a task run.
+    Accepts TaskScopeMember dataclass instances or plain dictionaries with at least a 'kind'.
+    """
+    rows: List[tuple[Any, Any, Any, Any, Any]] = []
+    for member in members or []:
+        if member is None:
+            continue
+        if hasattr(member, "kind"):
+            kind = getattr(member, "kind", None)
+            ref_id = getattr(member, "ref_id", None)
+            label = getattr(member, "label", None)
+            extra = getattr(member, "extra", None)
+        elif isinstance(member, dict):
+            kind = member.get("kind")
+            ref_id = member.get("ref_id", member.get("member_id"))
+            label = member.get("label", member.get("member_label"))
+            extra = member.get("extra", member.get("extra_json"))
+        else:
+            kind = None
+            ref_id = None
+            label = None
+            extra = None
+        if not kind:
+            continue
+        extra_json = None
+        if extra not in (None, "", {}):
+            try:
+                extra_json = json.dumps(extra)
+            except TypeError:
+                extra_json = json.dumps(str(extra))
+        rows.append((task_id, str(kind), ref_id, label, extra_json))
+
+    if not rows:
+        return
+
+    sql = """
+        INSERT INTO task_scope_members (task_id, member_kind, member_id, member_label, extra_json)
+        VALUES (?, ?, ?, ?, ?)
+    """
+
+    def _insert() -> None:
+        with conn:
+            conn.executemany(sql, rows)
+
+    try:
+        _run_with_retry(conn, _insert, "record_task_scope_members")
+        log.debug("Recorded %d scope member(s) for task_id=%s", len(rows), task_id)
+    except sqlite3.Error as e:
+        log.exception("Failed to record scope members for task_id=%s: %s", task_id, e)
+
 # --- Domain-specific write operations ---
 
 def insert_fmod_calc_run(conn: sqlite3.Connection, run_data: Dict[str, Any]) -> Optional[int]:

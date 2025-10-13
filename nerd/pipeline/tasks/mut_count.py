@@ -11,7 +11,7 @@ import re
 import shutil
 from typing import Any, Dict, Tuple, Optional, List, Set
 
-from .base import Task, TaskContext
+from .base import Task, TaskContext, TaskScope, TaskScopeMember
 from nerd.utils.logging import get_logger
 from nerd.pipeline.runners.local import LocalRunner
 from nerd.pipeline.tasks.derived import (
@@ -36,6 +36,254 @@ class MutCountTask(Task):
         super().__init__()
         self._stage_in: List[Dict[str, str]] = []  # list of {src, dst} relative to remote workdir
         self._stage_out_extra: List[str] = []
+
+    def resolve_scope(self, ctx: Optional[TaskContext], inputs: Any) -> TaskScope:
+        if ctx is None or inputs is None:
+            return super().resolve_scope(ctx, inputs)
+
+        try:
+            resolved_samples, rg_map = self._resolve_sample_names(ctx, inputs)
+        except Exception:
+            return super().resolve_scope(ctx, inputs)
+
+        members: List[TaskScopeMember] = []
+        sample_ids: List[int] = []
+        member_key_seen: Set[tuple[Any, Any, Any]] = set()
+
+        def _add_member(member: TaskScopeMember) -> None:
+            key = (member.kind, member.ref_id, member.label)
+            if key in member_key_seen:
+                return
+            member_key_seen.add(key)
+            members.append(member)
+
+        # Attach reaction-group members (if any were resolved)
+        for rg_id, rg_label in rg_map.items():
+            _add_member(TaskScopeMember(kind="rg", ref_id=rg_id, label=rg_label))
+
+        # Attach sample/derived members
+        for name in resolved_samples:
+            if not name:
+                continue
+            row = ctx.db.execute(
+                """
+                SELECT ss.id AS sample_id,
+                       ss.sample_name AS sample_name,
+                       pr.rg_id AS rg_id,
+                       rg.rg_label AS rg_label
+                FROM sequencing_samples ss
+                LEFT JOIN probing_reactions pr ON pr.s_id = ss.id
+                LEFT JOIN reaction_groups rg ON rg.rg_id = pr.rg_id
+                WHERE ss.sample_name = ?
+                LIMIT 1
+                """,
+                (name,),
+            ).fetchone()
+            if row:
+                sample_id = int(row["sample_id"])
+                sample_ids.append(sample_id)
+                _add_member(TaskScopeMember(kind="sample", ref_id=sample_id, label=row["sample_name"]))
+                if row["rg_id"] is not None and row["rg_id"] not in rg_map:
+                    _add_member(TaskScopeMember(kind="rg", ref_id=int(row["rg_id"]), label=row["rg_label"]))
+                continue
+
+            drow = ctx.db.execute(
+                """
+                SELECT id, parent_sample_id, child_name
+                FROM derived_samples
+                WHERE child_name = ?
+                """,
+                (name,),
+            ).fetchone()
+            if drow:
+                parent_id = drow["parent_sample_id"]
+                extra: Dict[str, Any] = {}
+                if parent_id is not None:
+                    extra["parent_sample_id"] = int(parent_id)
+                _add_member(
+                    TaskScopeMember(
+                        kind="derived_sample",
+                        ref_id=int(drow["id"]),
+                        label=drow["child_name"],
+                        extra=extra or None,
+                    )
+                )
+                if parent_id is not None and parent_id not in sample_ids:
+                    prow = ctx.db.execute(
+                        "SELECT id, sample_name FROM sequencing_samples WHERE id = ?",
+                        (parent_id,),
+                    ).fetchone()
+                    if prow:
+                        pid = int(prow["id"])
+                        sample_ids.append(pid)
+                        _add_member(TaskScopeMember(kind="sample", ref_id=pid, label=prow["sample_name"]))
+                continue
+
+            _add_member(TaskScopeMember(kind="unknown_sample", label=name))
+
+        # Deduplicate sample_ids preserving order
+        unique_sample_ids: List[int] = []
+        seen_ids: Set[int] = set()
+        for sid in sample_ids:
+            if sid not in seen_ids:
+                unique_sample_ids.append(sid)
+                seen_ids.add(sid)
+
+        combined_rg_map = dict(rg_map)
+        if not combined_rg_map:
+            # Harvest rg information gleaned from samples (if any)
+            for member in members:
+                if member.kind == "rg" and member.ref_id is not None:
+                    combined_rg_map.setdefault(int(member.ref_id), member.label or None)
+
+        if len(combined_rg_map) == 1:
+            rg_id, rg_label = next(iter(combined_rg_map.items()))
+            return TaskScope(
+                kind="rg",
+                scope_id=int(rg_id),
+                label=rg_label,
+                members=members,
+            )
+
+        if len(unique_sample_ids) == 1:
+            sid = unique_sample_ids[0]
+            sample_label = next(
+                (m.label for m in members if m.kind == "sample" and m.ref_id == sid),
+                None,
+            )
+            return TaskScope(
+                kind="sample",
+                scope_id=sid,
+                label=sample_label,
+                members=members,
+            )
+
+        scope_kind = "sample_batch" if unique_sample_ids else self.scope_kind or "global"
+        scope = TaskScope(
+            kind=scope_kind,
+            scope_id=None,
+            members=members,
+        )
+        if scope_kind == "sample_batch":
+            # Provide a display label mentioning the first few samples
+            if members:
+                names = [
+                    m.label for m in members
+                    if m.kind in {"sample", "derived_sample"} and m.label
+                ]
+                if names:
+                    scope.label = ", ".join(names[:3]) + ("…" if len(names) > 3 else "")
+        return scope
+
+    def _resolve_sample_names(
+        self,
+        ctx: TaskContext,
+        inputs: Dict[str, Any],
+    ) -> Tuple[List[str], Dict[int, Optional[str]]]:
+        cache = inputs.get("_scope_resolution_cache")
+        if isinstance(cache, dict) and "samples" in cache:
+            samples = list(cache.get("samples") or [])
+            rg_map = dict(cache.get("reaction_groups") or {})
+            inputs["samples"] = samples
+            return samples, rg_map
+
+        configured_samples: List[str] = []
+        for raw_sample in inputs.get("samples") or []:
+            if raw_sample is None:
+                continue
+            text_val = str(raw_sample).strip()
+            if not text_val:
+                continue
+            configured_samples.append(text_val)
+
+        reaction_samples: List[str] = []
+        rg_map: Dict[int, Optional[str]] = {}
+        reaction_groups_cfg = inputs.get("reaction_group")
+        if reaction_groups_cfg:
+            if isinstance(reaction_groups_cfg, (list, tuple, set)):
+                rg_values = list(reaction_groups_cfg)
+            else:
+                rg_values = [reaction_groups_cfg]
+            for rg_value in rg_values:
+                info = self._fetch_reaction_group_info(ctx, rg_value)
+                if info is None:
+                    continue
+                rg_id, rg_label, samples = info
+                if rg_id is not None:
+                    rg_map.setdefault(rg_id, rg_label)
+                reaction_samples.extend(samples)
+                log.info("Resolved reaction_group %s to %d sample(s).", rg_value, len(samples))
+
+        combined = configured_samples + reaction_samples
+        seen: Set[str] = set()
+        sample_names: List[str] = []
+        for name in combined:
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            sample_names.append(name)
+
+        inputs["_scope_resolution_cache"] = {
+            "samples": list(sample_names),
+            "reaction_groups": dict(rg_map),
+        }
+        inputs["samples"] = sample_names
+        inputs["_resolved_reaction_groups"] = dict(rg_map)
+        return sample_names, rg_map
+
+    def _fetch_reaction_group_info(
+        self,
+        ctx: TaskContext,
+        rg_value: Any,
+    ) -> Optional[Tuple[int, Optional[str], List[str]]]:
+        if rg_value in (None, ""):
+            return None
+        rg_id: Optional[int] = None
+        rg_label: Optional[str] = None
+        if isinstance(rg_value, int):
+            row = ctx.db.execute(
+                "SELECT rg_id, rg_label FROM reaction_groups WHERE rg_id = ?",
+                (rg_value,),
+            ).fetchone()
+            if not row:
+                raise ValueError(f"Reaction group id '{rg_value}' not found in database.")
+            rg_id = int(row["rg_id"])
+            rg_label = row["rg_label"]
+        else:
+            text = str(rg_value).strip()
+            if not text:
+                return None
+            row = ctx.db.execute(
+                "SELECT rg_id, rg_label FROM reaction_groups WHERE rg_label = ?",
+                (text,),
+            ).fetchone()
+            if not row and text.isdigit():
+                row = ctx.db.execute(
+                    "SELECT rg_id, rg_label FROM reaction_groups WHERE rg_id = ?",
+                    (int(text),),
+                ).fetchone()
+            if not row:
+                raise ValueError(f"Reaction group '{rg_value}' not found in database.")
+            rg_id = int(row["rg_id"])
+            rg_label = row["rg_label"]
+
+        rows = ctx.db.execute(
+            """
+            SELECT ss.sample_name
+            FROM probing_reactions pr
+            JOIN sequencing_samples ss ON ss.id = pr.s_id
+            WHERE pr.rg_id = ?
+            ORDER BY pr.reaction_time, pr.replicate, ss.sample_name
+            """,
+            (rg_id,),
+        ).fetchall()
+        samples = [
+            row["sample_name"] if hasattr(row, "keys") else row[0]
+            for row in rows
+        ]
+        if not samples:
+            raise ValueError(f"Reaction group '{rg_value}' has no associated samples.")
+        return rg_id, rg_label, samples
 
     def prepare(self, cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if self.name not in cfg:
@@ -105,82 +353,7 @@ class MutCountTask(Task):
         }
         dry_run = bool(param_opts.get("dry_run", inputs.get("dry_run", False)))
 
-        configured_samples: List[str] = []
-        for _s in (inputs.get("samples") or []):
-            if _s is None:
-                continue
-            text_val = str(_s).strip()
-            if not text_val:
-                continue
-            configured_samples.append(text_val)
-        reaction_groups_cfg = inputs.get("reaction_group")
-        reaction_samples: List[str] = []
-
-        def _fetch_reaction_group_samples(rg_value: Any) -> List[str]:
-            label: Optional[str] = None
-            rg_id: Optional[int] = None
-            if isinstance(rg_value, int):
-                rg_id = rg_value
-            else:
-                text = str(rg_value or "").strip()
-                if not text:
-                    return []
-                label = text
-                if text.isdigit():
-                    try:
-                        rg_id = int(text)
-                    except ValueError:
-                        rg_id = None
-            samples: List[str] = []
-            if label:
-                rows = ctx.db.execute(
-                    """
-                    SELECT ss.sample_name
-                    FROM reaction_groups rg
-                    JOIN probing_reactions pr ON pr.rg_id = rg.rg_id
-                    JOIN sequencing_samples ss ON ss.id = pr.s_id
-                    WHERE rg.rg_label = ?
-                    ORDER BY pr.reaction_time, pr.replicate, ss.sample_name
-                    """,
-                    (label,),
-                ).fetchall()
-                samples = [row["sample_name"] if hasattr(row, "keys") else row[0] for row in rows]
-            if not samples and rg_id is not None:
-                rows = ctx.db.execute(
-                    """
-                    SELECT ss.sample_name
-                    FROM reaction_groups rg
-                    JOIN probing_reactions pr ON pr.rg_id = rg.rg_id
-                    JOIN sequencing_samples ss ON ss.id = pr.s_id
-                    WHERE rg.rg_id = ?
-                    ORDER BY pr.reaction_time, pr.replicate, ss.sample_name
-                    """,
-                    (rg_id,),
-                ).fetchall()
-                samples = [row["sample_name"] if hasattr(row, "keys") else row[0] for row in rows]
-            if not samples:
-                raise ValueError(f"Reaction group '{rg_value}' not found in database or has no associated samples.")
-            return samples
-
-        if reaction_groups_cfg:
-            if isinstance(reaction_groups_cfg, (list, tuple, set)):
-                rg_values = list(reaction_groups_cfg)
-            else:
-                rg_values = [reaction_groups_cfg]
-            for rg_value in rg_values:
-                samples = _fetch_reaction_group_samples(rg_value)
-                reaction_samples.extend(samples)
-                log.info("Resolved reaction_group %s to %d sample(s).", rg_value, len(samples))
-
-        combined_samples = configured_samples + reaction_samples
-        seen: set = set()
-        sample_names: List[str] = []
-        for s in combined_samples:
-            if s not in seen:
-                seen.add(s)
-                sample_names.append(s)
-
-        inputs["samples"] = sample_names
+        sample_names, _ = self._resolve_sample_names(ctx, inputs)
         if not sample_names:
             return None
 
@@ -406,7 +579,10 @@ class MutCountTask(Task):
         try:
             if ctx is None or inputs is None:
                 return None
-            sample_names: List[str] = inputs.get("samples", []) if isinstance(inputs, dict) else []
+            if isinstance(inputs, dict):
+                sample_names, _ = self._resolve_sample_names(ctx, inputs)
+            else:
+                sample_names = []
             if len(sample_names) != 1:
                 return None
             name = sample_names[0]

@@ -6,7 +6,7 @@ Defines the abstract base class for tasks and the context for their execution.
 import abc
 import sqlite3
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple, Dict, Any, Optional, List
 
 from nerd.utils.logging import get_logger
@@ -32,12 +32,38 @@ class TaskContext:
     output_dir: str
 
 
+@dataclass
+class TaskScopeMember:
+    """
+    Associates a task run with a specific domain entity (sample, rg, etc.).
+    """
+    kind: str
+    ref_id: Optional[int] = None
+    label: Optional[str] = None
+    extra: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class TaskScope:
+    """
+    Describes the scope that a task execution applies to.
+    """
+    kind: str
+    scope_id: Optional[int] = None
+    label: Optional[str] = None
+    members: List[TaskScopeMember] = field(default_factory=list)
+
+    def with_member(self, member: TaskScopeMember) -> "TaskScope":
+        self.members.append(member)
+        return self
+
+
 class Task(abc.ABC):
     """
     An abstract base class for a runnable task in the pipeline.
     """
     name: str = "base_task"
-    scope_kind: str = "sample"  # or 'rg' for reaction_group
+    scope_kind: str = "sample"  # Default scope; tasks may override resolve_scope()
 
     def exec(self, db_conn: sqlite3.Connection, cfg: Dict[str, Any], verbose: bool = False):
         """
@@ -58,12 +84,12 @@ class Task(abc.ABC):
         # 0.5. Check for an existing completed task with same signature and skip if found
         # Robustly detect prior completion even if a newer 'cached' entry exists
         existing = db_api.find_completed_task_by_signature(db_conn, label, output_dir, cache_key_full)
+        cached_scope = self.resolve_scope(ctx=None, inputs=None)
         if existing is not None:
             # Record a cached task to make the skip visible in DB, then return
             msg = f"Identical config (cfg={cfg_hash_short}) previously completed as task_id={existing['id']} — skipping."
-            scope_val = self.scope_id(ctx=None, inputs=None)
             db_api.record_cached_task(
-                db_conn, self.name, self.scope_kind, scope_val, cfg.get("run", {}).get("backend", "local"),
+                db_conn, self.name, cached_scope.kind, cached_scope.scope_id, cfg.get("run", {}).get("backend", "local"),
                 output_dir, label, cache_key_full, msg,
                 tool=self.task_tool(inputs=None), tool_version=self.task_tool_version(inputs=None)
             )
@@ -112,16 +138,22 @@ class Task(abc.ABC):
 
         # 3. Prepare inputs and parameters.
         inputs, params = self.prepare(cfg)
+        scope = self.resolve_scope(ctx, inputs)
         
         # 4. Record the start of the task in the database.
         task_id = db_api.begin_task(
-            ctx.db, self.name, self.scope_kind, self.scope_id(ctx, inputs),
+            ctx.db, self.name, scope.kind, scope.scope_id,
             ctx.backend, ctx.output_dir, ctx.label, cache_key=cache_key_full,
             tool=self.task_tool(inputs), tool_version=self.task_tool_version(inputs)
         )
         if task_id is None:
             log.error("Failed to begin task in database. Aborting.")
             raise SystemExit(1)
+        if scope.members:
+            try:
+                db_api.record_task_scope_members(ctx.db, task_id, scope.members)
+            except Exception:
+                log.exception("Failed to record task scope members for task_id=%s", task_id)
 
         # 5. Build the command to be executed.
         cmd = self.command(ctx, inputs, params)
@@ -237,6 +269,18 @@ class Task(abc.ABC):
     def scope_id(self, ctx: Optional[TaskContext], inputs: Any) -> Optional[int]:
         """Determines the primary ID for the task's scope (e.g., a sample ID)."""
         return None
+
+    def resolve_scope(self, ctx: Optional[TaskContext], inputs: Any) -> TaskScope:
+        """
+        Compute the scope metadata for this task execution. Default implementation
+        uses the class-level scope_kind and scope_id() result.
+        """
+        scope_kind = getattr(self, "scope_kind", "global") or "global"
+        try:
+            scope_value = self.scope_id(ctx, inputs)
+        except Exception:
+            scope_value = None
+        return TaskScope(kind=scope_kind, scope_id=scope_value)
 
     def task_tool(self, inputs: Any) -> Optional[str]:
         return None
