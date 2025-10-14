@@ -749,6 +749,131 @@ def bulk_insert_fmod_vals(conn: sqlite3.Connection, fmod_values: List[Dict[str, 
         log.exception("Bulk insert of fmod_vals failed: %s", e)
 
 
+def delete_probe_tc_fit_runs(
+    conn: sqlite3.Connection,
+    *,
+    fit_kind: str,
+    rg_id: Optional[int],
+    nt_id: Optional[int] = None,
+) -> int:
+    """
+    Remove existing probe timecourse fit runs (and their params via cascade)
+    matching the provided criteria.
+    """
+    clauses = ["fit_kind = ?"]
+    params: List[Any] = [fit_kind]
+    if rg_id is not None:
+        clauses.append("rg_id = ?")
+        params.append(rg_id)
+    else:
+        clauses.append("rg_id IS NULL")
+    if nt_id is None:
+        clauses.append("nt_id IS NULL")
+    else:
+        clauses.append("nt_id = ?")
+        params.append(nt_id)
+    sql = f"""
+        DELETE FROM probe_tc_fit_runs
+        WHERE {' AND '.join(clauses)}
+    """
+
+    def _op() -> int:
+        with conn:
+            cursor = conn.execute(sql, params)
+            return cursor.rowcount or 0
+
+    try:
+        return _run_with_retry(conn, _op, "delete_probe_tc_fit_runs")
+    except sqlite3.Error as e:
+        log.exception(
+            "Failed to delete probe_tc_fit_runs for fit_kind=%s, rg_id=%s, nt_id=%s: %s",
+            fit_kind,
+            rg_id,
+            nt_id,
+            e,
+        )
+        return 0
+
+
+def begin_probe_tc_fit_run(
+    conn: sqlite3.Connection,
+    *,
+    fit_kind: str,
+    rg_id: Optional[int],
+    nt_id: Optional[int],
+    model: Optional[str] = None,
+    fmod_run_id: Optional[int] = None,
+) -> Optional[int]:
+    """
+    Insert a row into probe_tc_fit_runs and return its primary key.
+    """
+    sql = """
+        INSERT INTO probe_tc_fit_runs (fit_kind, fmod_run_id, rg_id, nt_id, model)
+        VALUES (?, ?, ?, ?, ?)
+    """
+
+    def _op() -> Optional[int]:
+        with conn:
+            cursor = conn.execute(sql, (fit_kind, fmod_run_id, rg_id, nt_id, model))
+            return cursor.lastrowid
+
+    try:
+        return _run_with_retry(conn, _op, "begin_probe_tc_fit_run")
+    except sqlite3.Error as e:
+        log.exception(
+            "Failed to record probe_tc_fit_run for fit_kind=%s, rg_id=%s, nt_id=%s: %s",
+            fit_kind,
+            rg_id,
+            nt_id,
+            e,
+        )
+        return None
+
+
+def record_probe_tc_fit_params(
+    conn: sqlite3.Connection,
+    *,
+    fit_run_id: int,
+    entries: Iterable[Dict[str, Any]],
+) -> None:
+    """
+    Insert parameter rows for a probe timecourse fit run.
+    """
+    sql = """
+        INSERT INTO probe_tc_fit_params (fit_run_id, param_name, param_numeric, param_text, units)
+        VALUES (:fit_run_id, :param_name, :param_numeric, :param_text, :units)
+        ON CONFLICT(fit_run_id, param_name) DO UPDATE SET
+            param_numeric = excluded.param_numeric,
+            param_text = excluded.param_text,
+            units = excluded.units
+    """
+
+    rows: List[Dict[str, Any]] = []
+    for entry in entries:
+        name = entry.get("param_name")
+        if not name:
+            continue
+        row = {
+            "fit_run_id": fit_run_id,
+            "param_name": str(name),
+            "param_numeric": entry.get("param_numeric"),
+            "param_text": entry.get("param_text"),
+            "units": entry.get("units"),
+        }
+        rows.append(row)
+    if not rows:
+        return
+
+    def _op() -> None:
+        with conn:
+            conn.executemany(sql, rows)
+
+    try:
+        _run_with_retry(conn, _op, "record_probe_tc_fit_params")
+    except sqlite3.Error as e:
+        log.exception("Failed to insert probe_tc_fit_params for run_id=%s: %s", fit_run_id, e)
+
+
 def upsert_free_fit(conn: sqlite3.Connection, fit_data: Dict[str, Any]):
     """
     Inserts a new free_tc_fits record or updates it if it already exists

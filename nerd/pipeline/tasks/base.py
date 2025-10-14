@@ -83,9 +83,13 @@ class Task(abc.ABC):
 
         # 0.5. Check for an existing completed task with same signature and skip if found
         # Robustly detect prior completion even if a newer 'cached' entry exists
+        task_block = cfg.get(self.name)
+        force_rerun = False
+        if isinstance(task_block, dict):
+            force_rerun = bool(task_block.get("force_run")) or bool(task_block.get("overwrite"))
         existing = db_api.find_completed_task_by_signature(db_conn, label, output_dir, cache_key_full)
         cached_scope = self.resolve_scope(ctx=None, inputs=None)
-        if existing is not None:
+        if existing is not None and not force_rerun:
             # Record a cached task to make the skip visible in DB, then return
             msg = f"Identical config (cfg={cfg_hash_short}) previously completed as task_id={existing['id']} — skipping."
             db_api.record_cached_task(

@@ -15,6 +15,7 @@ from .mut_count import MutCountTask
 from .nmr_create import NmrCreateTask
 from .nmr_deg_kinetics import NmrDegKineticsTask
 from .nmr_add_kinetics import NmrAddKineticsTask
+from .timecourse import ProbeTimecourseTask
 
 __all__ = [
     "CreateTask",
@@ -22,6 +23,7 @@ __all__ = [
     "NmrCreateTask",
     "NmrDegKineticsTask",
     "NmrAddKineticsTask",
+    "ProbeTimecourseTask",
     "TASK_REGISTRY",
 ]
 
@@ -31,4 +33,6 @@ TASK_REGISTRY: Dict[str, Type[Task]] = {
     "nmr_create": NmrCreateTask,
     "nmr_deg_kinetics": NmrDegKineticsTask,
     "nmr_add_kinetics": NmrAddKineticsTask,
+    "probe_timecourse": ProbeTimecourseTask,
+    "probe_tc_kinetics": ProbeTimecourseTask,
 }

@@ -361,7 +361,7 @@ class MutCountTask(Task):
 
         def _nt_rows_for_construct(cid: int) -> List[Dict[str, Any]]:
             rows = ctx.db.execute(
-                "SELECT site, base, base_region FROM meta_nucleotides WHERE construct_id = ? ORDER BY site",
+                "SELECT id, site, base, base_region FROM meta_nucleotides WHERE construct_id = ? ORDER BY id",
                 (cid,),
             ).fetchall()
             return [dict(r) for r in rows]
@@ -435,7 +435,7 @@ class MutCountTask(Task):
                 # Build FASTA content locally to embed via heredoc on remote
                 def _fasta_text(nt_rows: List[Dict[str, Any]], header: str = "target") -> str:
                     seq_chars: List[str] = []
-                    for nt in nt_rows:
+                    for nt in sorted(nt_rows, key=lambda row: int(row.get("id", 0))):
                         base = str(nt.get("base", "")).strip()
                         region = str(nt.get("base_region", "")).strip()
                         # Normalize to DNA alphabet for external tools (use T, not U)
@@ -754,27 +754,31 @@ class MutCountTask(Task):
                 construct_id = int(probing_row[1])
                 treated_flag = int(probing_row[2])
 
-            nt_rows = ctx.db.execute(
-                "SELECT id, site, base FROM meta_nucleotides WHERE construct_id = ? ORDER BY site",
+            raw_nt_rows = ctx.db.execute(
+                "SELECT id, site, base, base_region FROM meta_nucleotides WHERE construct_id = ? ORDER BY id",
                 (construct_id,),
             ).fetchall()
-            if not nt_rows:
+            if not raw_nt_rows:
                 log.error("No meta_nucleotides found for construct %s (sample %s); skipping.", construct_id, name)
                 continue
 
-            nt_map: Dict[int, int] = {}
-            db_sequence_parts: List[str] = []
-            for row in nt_rows:
+            def _row_to_dict(row: Any) -> Dict[str, Any]:
                 if hasattr(row, "keys"):
-                    nt_id = int(row["id"])
-                    site = int(row["site"])
-                    base = str(row["base"])
-                else:
-                    nt_id = int(row[0])
-                    site = int(row[1])
-                    base = str(row[2])
-                nt_map[site] = nt_id
-                db_sequence_parts.append(base)
+                    return {
+                        "id": int(row["id"]),
+                        "site": int(row["site"]),
+                        "base": str(row["base"]),
+                        "base_region": str(row["base_region"]),
+                    }
+                return {
+                    "id": int(row[0]),
+                    "site": int(row[1]),
+                    "base": str(row[2]),
+                    "base_region": str(row[3]),
+                }
+
+            nt_rows = sorted([_row_to_dict(row) for row in raw_nt_rows], key=lambda entry: entry["id"])
+            db_sequence_parts: List[str] = [nt["base"] for nt in nt_rows]
 
             log_path = self._find_shapemapper_log(run_dir, sample_dir, name)
             meta = self._parse_shapemapper_log(log_path) if log_path else {}
@@ -842,29 +846,40 @@ class MutCountTask(Task):
                     log.warning("Profile %s for %s is empty; skipping %s ingestion.", path, name, valtype)
                     continue
 
-                profile_sequence = "".join((row.get("Sequence") or "") for row in parsed_rows).upper().replace("T", "U")
-                if profile_sequence != db_sequence:
+                profile_rows = list(parsed_rows)
+                if len(profile_rows) != len(nt_rows):
                     log.warning(
-                        "Sequence mismatch for %s when ingesting %s (profile vs construct). Continuing with available nucleotides.",
+                        "Profile row count (%d) does not match nucleotide count (%d) for %s (%s); skipping.",
+                        len(profile_rows),
+                        len(nt_rows),
                         name,
                         valtype,
                     )
+                    continue
+
+                profile_sequence = "".join((row.get("Sequence") or "") for row in profile_rows).upper().replace("T", "U")
+                if profile_sequence != db_sequence:
+                    log.warning(
+                        "Sequence mismatch for %s when ingesting %s (profile vs construct). Skipping ingestion.",
+                        name,
+                        valtype,
+                    )
+                    continue
 
                 records: List[Dict[str, Any]] = []
-                for row in parsed_rows:
-                    try:
-                        site = int(float(row.get("Nucleotide", 0)))
-                    except (TypeError, ValueError):
-                        continue
-                    nt_id = nt_map.get(site)
-                    if nt_id is None:
-                        continue
+                sequence_mismatch = False
+                for nt_info, row in zip(nt_rows, profile_rows):
+                    base_profile = str(row.get("Sequence") or "").strip().upper().replace("T", "U")
+                    base_db = str(nt_info.get("base", "")).strip().upper().replace("T", "U")
+                    if base_profile != base_db:
+                        sequence_mismatch = True
+                        break
                     fmod_value = self._safe_float(row.get(value_column))
                     depth_value = self._safe_float(row.get(depth_column))
                     read_depth = int(round(depth_value)) if depth_value is not None else 0
                     records.append(
                         {
-                            "nt_id": nt_id,
+                            "nt_id": nt_info["id"],
                             "fmod_run_id": run_id,
                             "fmod_val": fmod_value,
                             "valtype": valtype,
@@ -872,6 +887,14 @@ class MutCountTask(Task):
                             "rxn_id": rxn_id,
                         }
                     )
+
+                if sequence_mismatch:
+                    log.warning(
+                        "Per-nucleotide sequence mismatch detected for %s (%s); skipping ingestion.",
+                        name,
+                        valtype,
+                    )
+                    continue
 
                 if not records:
                     log.warning("No probe_fmod_values generated for %s (%s); skipping.", name, valtype)

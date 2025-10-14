@@ -84,6 +84,21 @@ Tools to extract nucleotide energy from chemical probing experiments.
     output: non-linear fit or params
 3. Store to db (kinetic params, kobs)
 
+#### Pipeline task `probe_timecourse`
+
+- Configuration keys:
+  - `engine` (default `python_baseline`) selects a registered timecourse engine.
+  - `rounds` allows subsetting the legacy three-round workflow (`round1_free`, `round2_global`, `round3_constrained`).
+  - `rg_ids` lists reaction-group identifiers to process; optional filters include `nt_ids`, `valtype`, `fmod_run_id`, and `min_points`.
+  - `engine_options` and `global_metadata` pass through tunables such as `global_filters.r2_threshold` or precomputed `kdeg_initial`.
+  - `overwrite` toggles whether previously stored fits in `probe_tc_fit_runs`/`probe_tc_fit_params` are replaced.
+- Output artefacts:
+  - JSON summaries are written to the task run directory (`results/rg_<rg_id>.json`) in a normalized schema (`engine_metadata`, `rounds`, `artifacts`).
+  - Fit parameters and QC metrics persist to `probe_tc_fit_runs`/`probe_tc_fit_params`, using per-round fit kinds and optional global entries.
+- Plugin architecture:
+  - `python_baseline` reproduces the three-round pipeline with per-nt fits, optional global filtering, and constrained refits.
+  - Stub engines `r_integration` and `ode_fit` register placeholders for future R/ODE implementations while emitting skipped-round metadata.
+
 ### `nerd calc_energy`
 
 1. 2-state melting fit - K linear curve
