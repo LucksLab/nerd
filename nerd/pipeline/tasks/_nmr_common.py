@@ -103,6 +103,8 @@ def run_fit_for_reaction(
             nmr_reaction_id=prepared.reaction_id,
             plugin=plugin_name,
             params={**plugin.options(), **dict(fit_params)},
+            model=model_name,
+            species=species,
         )
 
     request = FitRequest(
@@ -114,18 +116,31 @@ def run_fit_for_reaction(
 
     try:
         result = plugin.fit(request)
-        db_api.record_nmr_kinetic_rate(
-            ctx_db,
-            nmr_reaction_id=prepared.reaction_id,
-            species=species,
-            model=model_name,
-            k_value=float(result.k_value),
-            k_error=float(result.k_error) if result.k_error is not None else None,
-            r2=float(result.r2) if result.r2 is not None else None,
-            chisq=float(result.chisq) if result.chisq is not None else None,
-            fit_run_id=fit_run_id,
-        )
+
         if fit_run_id is not None:
+            entries = [
+                {"param_name": "k_value", "param_numeric": float(result.k_value)},
+            ]
+            if result.k_error is not None:
+                entries.append({"param_name": "k_error", "param_numeric": float(result.k_error)})
+            if result.r2 is not None:
+                entries.append({"param_name": "r2", "param_numeric": float(result.r2)})
+            if result.chisq is not None:
+                entries.append({"param_name": "chisq", "param_numeric": float(result.chisq)})
+            if species:
+                entries.append({"param_name": "species", "param_text": str(species)})
+            if model_name:
+                entries.append({"param_name": "model", "param_text": str(model_name)})
+            diagnostics = getattr(result, "diagnostics", {}) or {}
+            for key, value in diagnostics.items():
+                if value is None:
+                    continue
+                if isinstance(value, (int, float)):
+                    entries.append({"param_name": str(key), "param_numeric": float(value)})
+                else:
+                    entries.append({"param_name": str(key), "param_text": str(value)})
+
+            db_api.record_nmr_fit_params(ctx_db, fit_run_id=fit_run_id, entries=entries)
             db_api.finish_nmr_fit_run(ctx_db, fit_run_id, "completed")
         return result
     except Exception as exc:  # noqa: BLE001
@@ -188,4 +203,3 @@ def _copy_into_run_dir(path: Path, run_dir: Path, reaction_id: int, role: str) -
     dest_path = dest_dir / f"{role}{path.suffix or '.csv'}"
     shutil.copy2(path, dest_path)
     return dest_path
-

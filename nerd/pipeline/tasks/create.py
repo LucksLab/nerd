@@ -34,6 +34,8 @@ class CreateTask(Task):
             "disp_name": "disp_name",
             "display_name": "disp_name",
             "nt_info": "nt_info",
+            "nt_info_csv": "nt_info",
+            "nt_info_path": "nt_info",
         },
         "buffer": {
             "name": "name",
@@ -69,7 +71,9 @@ class CreateTask(Task):
             "probe": "probe",
             "probe_concentration": "probe_concentration",
             "probe_conc": "probe_concentration",
-            "rt": "RT",
+            "rt": "rt_protocol",
+            "RT": "rt_protocol",
+            "rt_protocol": "rt_protocol",
             "done_by": "done_by",
             "treated": "treated",
             "buffer": "buffer",
@@ -104,7 +108,7 @@ class CreateTask(Task):
             "reaction_time",
             "probe",
             "probe_concentration",
-            "RT",
+            "rt_protocol",
             "treated",
             "buffer",
             "construct",
@@ -357,7 +361,7 @@ class CreateTask(Task):
         if any(payload.get(field) in (None, "") for field in fields):
             return None
         sql = (
-            "SELECT id FROM constructs "
+            "SELECT id FROM meta_constructs "
             "WHERE family = ? AND name = ? AND version = ? AND sequence = ? AND disp_name = ?"
         )
         params = tuple(payload.get(field) for field in fields)
@@ -368,7 +372,7 @@ class CreateTask(Task):
         if any(payload.get(field) in (None, "") for field in fields):
             return None
         sql = (
-            "SELECT id FROM buffers "
+            "SELECT id FROM meta_buffers "
             "WHERE name = ? AND pH = ? AND composition = ? AND disp_name = ?"
         )
         params = tuple(payload.get(field) for field in fields)
@@ -393,7 +397,7 @@ class CreateTask(Task):
             log.warning("Unable to ensure run directory %s for creation log: %s", run_dir, exc)
             return
 
-        sections = ["constructs", "buffers", "sequencing_runs", "samples"]
+        sections = ["meta_constructs", "meta_buffers", "sequencing_runs", "samples"]
         summary = {section: len(created_log.get(section, [])) for section in sections}
         payload = {section: created_log.get(section, []) for section in sections}
         payload["summary"] = summary
@@ -446,8 +450,8 @@ class CreateTask(Task):
             seqrun_map: Dict[str, int] = {}
             sample_seqrun_pairs: List[Tuple[Dict[str, Any], int]] = []
             created_log: Dict[str, List[Dict[str, Any]]] = {
-                "constructs": [],
-                "buffers": [],
+                "meta_constructs": [],
+                "meta_buffers": [],
                 "sequencing_runs": [],
                 "samples": [],
             }
@@ -471,21 +475,31 @@ class CreateTask(Task):
                     log.info("Inserting %d construct definition(s).", len(construct_entries))
                     for entry in construct_entries:
                         payload = dict(entry)
-                        nt_info_rel = payload.get("nt_info")
+                        nt_info_rel_raw = payload.get("nt_info")
+                        nt_info_rel = str(nt_info_rel_raw).strip() if nt_info_rel_raw not in (None, "") else ""
                         if nt_info_rel:
                             configs_dir = label_dir / "configs"
                             nt_info_path = Path(nt_info_rel)
                             if not nt_info_path.is_absolute():
                                 nt_info_path = configs_dir / nt_info_path
-                            nt_rows: List[Dict[str, Any]] = db_api.prep_nt_rows(nt_info_path)
-                            payload = {**payload, "nt_rows": nt_rows}
+                            try:
+                                nt_rows: List[Dict[str, Any]] = db_api.prep_nt_rows(nt_info_path)
+                                payload = {**payload, "nt_rows": nt_rows}
+                                log.info("Loaded nt_info for construct %s from %s", payload.get("disp_name"), nt_info_path)
+                                log.debug("nt_info rows extracted: count=%d", len(nt_rows))
+                            except FileNotFoundError:
+                                log.warning("nt_info file %s not found; using generated nucleotides for construct %s", nt_info_path, payload.get("disp_name"))
+                            except Exception:
+                                log.exception("Failed to read nt_info %s; using default nucleotide generation for construct %s", nt_info_path, payload.get("disp_name"))
+                        else:
+                            log.info("No nt_info provided for construct %s; using generated nucleotide rows.", payload.get("disp_name"))
 
                         existing_cid = self._lookup_construct_id(ctx.db, payload)
                         cid = db_api.upsert_construct(ctx.db, payload)
                         log.debug("Construct upserted with id=%s", cid)
                         if cid is not None:
                             status = "created" if existing_cid is None else "updated"
-                            created_log["constructs"].append(
+                            created_log["meta_constructs"].append(
                                 {
                                     "disp_name": payload.get("disp_name"),
                                     "family": payload.get("family"),
@@ -516,17 +530,16 @@ class CreateTask(Task):
                         log.debug("Buffer upserted with id=%s", bid)
                         if bid is not None:
                             status = "created" if existing_bid is None else "updated"
-                            created_log["buffers"].append(
-                                {
-                                    "name": payload.get("name"),
-                                    "disp_name": payload.get("disp_name"),
-                                    "pH": payload.get("pH"),
-                                    "id": bid,
-                                    "status": status,
-                                }
-                            )
+                            created_log["meta_buffers"].append({
+                                "name": payload.get("name"),
+                                "disp_name": payload.get("disp_name"),
+                                "pH": payload.get("pH"),
+                                "id": bid,
+                                "status": status,
+                            })
                             if default_buffer_id is None:
                                 default_buffer_id = bid
+                            default_buffer_id = bid
                             buf_name = payload.get("name")
                             buf_disp = payload.get("disp_name")
                             if buf_name not in (None, ""):
@@ -754,7 +767,7 @@ class CreateTask(Task):
                             "reaction_time": int(s.get("reaction_time")),
                             "probe_concentration": float(s.get("probe_concentration")),
                             "probe": str(s.get("probe")),
-                            "RT": str(s.get("RT")),
+                            "rt_protocol": str(s.get("rt_protocol")),
                             "done_by": str(s.get("done_by", "NO_DONEBY")),
                             "treated": int(s.get("treated", 1)),
                             "buffer_id": int(local_buffer_id),

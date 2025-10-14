@@ -72,8 +72,8 @@ class MutCountTask(Task):
                        pr.rg_id AS rg_id,
                        rg.rg_label AS rg_label
                 FROM sequencing_samples ss
-                LEFT JOIN probing_reactions pr ON pr.s_id = ss.id
-                LEFT JOIN reaction_groups rg ON rg.rg_id = pr.rg_id
+                LEFT JOIN probe_reactions pr ON pr.s_id = ss.id
+                LEFT JOIN probe_reaction_groups rg ON rg.rg_id = pr.rg_id
                 WHERE ss.sample_name = ?
                 LIMIT 1
                 """,
@@ -90,7 +90,7 @@ class MutCountTask(Task):
             drow = ctx.db.execute(
                 """
                 SELECT id, parent_sample_id, child_name
-                FROM derived_samples
+                FROM sequencing_derived_samples
                 WHERE child_name = ?
                 """,
                 (name,),
@@ -242,7 +242,7 @@ class MutCountTask(Task):
         rg_label: Optional[str] = None
         if isinstance(rg_value, int):
             row = ctx.db.execute(
-                "SELECT rg_id, rg_label FROM reaction_groups WHERE rg_id = ?",
+                "SELECT rg_id, rg_label FROM probe_reaction_groups WHERE rg_id = ?",
                 (rg_value,),
             ).fetchone()
             if not row:
@@ -254,12 +254,12 @@ class MutCountTask(Task):
             if not text:
                 return None
             row = ctx.db.execute(
-                "SELECT rg_id, rg_label FROM reaction_groups WHERE rg_label = ?",
+                "SELECT rg_id, rg_label FROM probe_reaction_groups WHERE rg_label = ?",
                 (text,),
             ).fetchone()
             if not row and text.isdigit():
                 row = ctx.db.execute(
-                    "SELECT rg_id, rg_label FROM reaction_groups WHERE rg_id = ?",
+                    "SELECT rg_id, rg_label FROM probe_reaction_groups WHERE rg_id = ?",
                     (int(text),),
                 ).fetchone()
             if not row:
@@ -270,7 +270,7 @@ class MutCountTask(Task):
         rows = ctx.db.execute(
             """
             SELECT ss.sample_name
-            FROM probing_reactions pr
+            FROM probe_reactions pr
             JOIN sequencing_samples ss ON ss.id = pr.s_id
             WHERE pr.rg_id = ?
             ORDER BY pr.reaction_time, pr.replicate, ss.sample_name
@@ -361,7 +361,7 @@ class MutCountTask(Task):
 
         def _nt_rows_for_construct(cid: int) -> List[Dict[str, Any]]:
             rows = ctx.db.execute(
-                "SELECT site, base, base_region FROM nucleotides WHERE construct_id = ? ORDER BY site",
+                "SELECT site, base, base_region FROM meta_nucleotides WHERE construct_id = ? ORDER BY site",
                 (cid,),
             ).fetchall()
             return [dict(r) for r in rows]
@@ -379,14 +379,14 @@ class MutCountTask(Task):
 
         def _derived_by_child(child_name: str):
             row = ctx.db.execute(
-                "SELECT * FROM derived_samples WHERE child_name = ?",
+                "SELECT * FROM sequencing_derived_samples WHERE child_name = ?",
                 (child_name,),
             ).fetchone()
             return row
 
         def _construct_id_for_sample_id(sid: int) -> Optional[int]:
             row = ctx.db.execute(
-                "SELECT construct_id FROM probing_reactions WHERE s_id = ? ORDER BY rowid DESC LIMIT 1",
+                "SELECT construct_id FROM probe_reactions WHERE s_id = ? ORDER BY rowid DESC LIMIT 1",
                 (sid,),
             ).fetchone()
             return int(row[0]) if row and row[0] is not None else None
@@ -399,161 +399,178 @@ class MutCountTask(Task):
             "artifacts/*/per_read_histogram.txt",
             "artifacts/*/per_read_histogram.txtga",
         ]
+        successes = 0
         for name in sample_names:
-            parent_srow = _sample_row_by_name(name)
-            is_derived = False
-            derived_row = None
-            if parent_srow is None:
-                # Try derived by child_name
-                derived_row = _derived_by_child(name)
-                if derived_row is None:
-                    raise ValueError(f"Unknown sample or derived child_name: {name}")
-                is_derived = True
-                parent_id = int(derived_row["parent_sample_id"]) if "parent_sample_id" in derived_row.keys() else int(derived_row[1])
-                parent_srow = ctx.db.execute("SELECT * FROM sequencing_samples WHERE id = ?", (parent_id,)).fetchone()
+            start_cmd_idx = len(cmds)
+            start_stage_in_idx = len(self._stage_in)
+            start_stage_out_idx = len(self._stage_out_extra)
+            try:
+                parent_srow = _sample_row_by_name(name)
+                is_derived = False
+                derived_row = None
                 if parent_srow is None:
-                    raise ValueError(f"Derived sample '{name}' refers to missing parent sample id={parent_id}")
+                    # Try derived by child_name
+                    derived_row = _derived_by_child(name)
+                    if derived_row is None:
+                        raise ValueError(f"Unknown sample or derived child_name: {name}")
+                    is_derived = True
+                    parent_id = int(derived_row["parent_sample_id"]) if "parent_sample_id" in derived_row.keys() else int(derived_row[1])
+                    parent_srow = ctx.db.execute("SELECT * FROM sequencing_samples WHERE id = ?", (parent_id,)).fetchone()
+                    if parent_srow is None:
+                        raise ValueError(f"Derived sample '{name}' refers to missing parent sample id={parent_id}")
 
-            sid = int(parent_srow["id"]) if "id" in parent_srow.keys() else int(parent_srow[0])
-            # Resolve parent R1/R2 local paths
-            fq_dir = Path(str(parent_srow["fq_dir"]))
-            if not fq_dir.is_absolute():
-                fq_dir = label_dir / fq_dir
-            r1 = fq_dir / str(parent_srow["r1_file"])
-            r2 = fq_dir / str(parent_srow["r2_file"])
+                sid = int(parent_srow["id"]) if "id" in parent_srow.keys() else int(parent_srow[0])
+                # Resolve parent R1/R2 local paths
+                fq_dir = Path(str(parent_srow["fq_dir"]))
+                if not fq_dir.is_absolute():
+                    fq_dir = label_dir / fq_dir
+                r1 = fq_dir / str(parent_srow["r1_file"])
+                r2 = fq_dir / str(parent_srow["r2_file"])
 
-            cid = _construct_id_for_sample_id(sid)
-            if cid is None:
-                raise ValueError(f"Could not resolve construct for sample '{name}' (parent s_id={sid})")
-            nt_rows = _nt_rows_for_construct(cid)
+                cid = _construct_id_for_sample_id(sid)
+                if cid is None:
+                    raise ValueError(f"Could not resolve construct for sample '{name}' (parent s_id={sid})")
+                nt_rows = _nt_rows_for_construct(cid)
 
-            # Build FASTA content locally to embed via heredoc on remote
-            def _fasta_text(nt_rows: List[Dict[str, Any]], header: str = "target") -> str:
-                seq_chars: List[str] = []
-                for nt in nt_rows:
-                    base = str(nt.get("base", "")).strip()
-                    region = str(nt.get("base_region", "")).strip()
-                    # Normalize to DNA alphabet for external tools (use T, not U)
-                    b = base.upper()
-                    if b == "U":
-                        b = "T"
-                    if region in {"0", "2"}:
-                        b = b.lower()
-                    seq_chars.append(b)
-                return f">{header}\n{''.join(seq_chars)}\n"
+                # Build FASTA content locally to embed via heredoc on remote
+                def _fasta_text(nt_rows: List[Dict[str, Any]], header: str = "target") -> str:
+                    seq_chars: List[str] = []
+                    for nt in nt_rows:
+                        base = str(nt.get("base", "")).strip()
+                        region = str(nt.get("base_region", "")).strip()
+                        # Normalize to DNA alphabet for external tools (use T, not U)
+                        b = base.upper()
+                        if b == "U":
+                            b = "T"
+                        if region in {"0", "2"}:
+                            b = b.lower()
+                        seq_chars.append(b)
+                    return f">{header}\n{''.join(seq_chars)}\n"
 
-            sample_dir = Path("artifacts") / name
-            target_fa = sample_dir / "target.fa"
+                sample_dir = Path("artifacts") / name
+                target_fa = sample_dir / "target.fa"
 
-            # 1) ensure sample dir on remote
-            cmds.append(f"mkdir -p {sample_dir}")
-            # 2) write FASTA via heredoc
-            fasta_text = _fasta_text(nt_rows, header=name)
-            # Protect EOF and content; use single-quoted EOF to avoid shell interpolation
-            heredoc = (
-                f"cat > {target_fa} << 'EOF'\n" + fasta_text + "EOF\n"
-            )
-            cmds.append(heredoc)
-            # 3) stage-in parent R1/R2 to remote sample dir
-            out_dir = sample_dir  # write outputs under the sample directory
-            remote_r1 = sample_dir / r1.name
-            remote_r2 = sample_dir / r2.name
-            backend = str(ctx.backend or "").lower()
-            needs_stage = backend not in {"local"}
-            if needs_stage:
-                self._stage_in.append({"src": str(r1), "dst": str(remote_r1)})
-                self._stage_in.append({"src": str(r2), "dst": str(remote_r2)})
+                # 1) ensure sample dir on remote
+                cmds.append(f"mkdir -p {sample_dir}")
+                # 2) write FASTA via heredoc
+                fasta_text = _fasta_text(nt_rows, header=name)
+                # Protect EOF and content; use single-quoted EOF to avoid shell interpolation
+                heredoc = (
+                    f"cat > {target_fa} << 'EOF'\n" + fasta_text + "EOF\n"
+                )
+                cmds.append(heredoc)
+                # 3) stage-in parent R1/R2 to remote sample dir
+                out_dir = sample_dir  # write outputs under the sample directory
+                remote_r1 = sample_dir / r1.name
+                remote_r2 = sample_dir / r2.name
+                backend = str(ctx.backend or "").lower()
+                needs_stage = backend not in {"local"}
+                if needs_stage:
+                    self._stage_in.append({"src": str(r1), "dst": str(remote_r1)})
+                    self._stage_in.append({"src": str(r2), "dst": str(remote_r2)})
 
-            # If derived, materialize child FASTQs on remote first
-            parent_r1_for_use = remote_r1 if needs_stage else r1
-            parent_r2_for_use = remote_r2 if needs_stage else r2
-            use_r1 = parent_r1_for_use
-            use_r2 = parent_r2_for_use
-            if is_derived and derived_row is not None:
-                import json as _json
-                params_json = derived_row["params_json"] if "params_json" in derived_row.keys() else derived_row[6]
-                try:
-                    params = _json.loads(params_json) if params_json else {}
-                except Exception:
-                    params = {}
-                kind = (derived_row["kind"] if "kind" in derived_row.keys() else derived_row[3]) or "subsample"
-                # Select materializer
-                if str(kind).lower() == "filter_singlehit":
-                    max_mut = int(params.get("max_mutations", 1))
-                    materializer: DerivedMaterializer = FilterSingleHitMaterializer(max_mutations=max_mut)
-                else:
-                    cmd_template = derived_row["cmd_template"] if "cmd_template" in derived_row.keys() else derived_row[5]
-                    materializer = SubsampleMaterializer(cmd_template)
+                # If derived, materialize child FASTQs on remote first
+                parent_r1_for_use = remote_r1 if needs_stage else r1
+                parent_r2_for_use = remote_r2 if needs_stage else r2
+                use_r1 = parent_r1_for_use
+                use_r2 = parent_r2_for_use
+                if is_derived and derived_row is not None:
+                    import json as _json
+                    params_json = derived_row["params_json"] if "params_json" in derived_row.keys() else derived_row[6]
+                    try:
+                        params = _json.loads(params_json) if params_json else {}
+                    except Exception:
+                        params = {}
+                    kind = (derived_row["kind"] if "kind" in derived_row.keys() else derived_row[3]) or "subsample"
+                    # Select materializer
+                    if str(kind).lower() == "filter_singlehit":
+                        max_mut = int(params.get("max_mutations", 1))
+                        materializer: DerivedMaterializer = FilterSingleHitMaterializer(max_mutations=max_mut)
+                    else:
+                        cmd_template = derived_row["cmd_template"] if "cmd_template" in derived_row.keys() else derived_row[5]
+                        materializer = SubsampleMaterializer(cmd_template)
 
-                # Minimal plugin opts propagated
-                plugin_opts = {
-                    "amplicon": bool(inputs.get("amplicon", True)),
-                    "dms_mode": bool(inputs.get("dms_mode", False)),
-                    "output_N7": bool(inputs.get("output_N7", False)),
-                }
-                out_r1, out_r2, prep_cmds, patterns = materializer.prepare(
+                    # Minimal plugin opts propagated
+                    plugin_opts = {
+                        "amplicon": bool(inputs.get("amplicon", True)),
+                        "dms_mode": bool(inputs.get("dms_mode", False)),
+                        "output_N7": bool(inputs.get("output_N7", False)),
+                    }
+                    out_r1, out_r2, prep_cmds, patterns = materializer.prepare(
+                        sample_name=name,
+                        parent_r1_remote=parent_r1_for_use,
+                        parent_r2_remote=parent_r2_for_use,
+                        sample_dir=sample_dir,
+                        target_fa_remote=target_fa,
+                        plugin=plugin,
+                        plugin_opts=plugin_opts,
+                        params=params,
+                    )
+                    if patterns:
+                        self._stage_out_extra.extend([str(p) for p in patterns])
+                    cmds.extend(prep_cmds)
+                    use_r1 = out_r1
+                    use_r2 = out_r2
+
+                shapecmd = plugin.command(
                     sample_name=name,
-                    parent_r1_remote=parent_r1_for_use,
-                    parent_r2_remote=parent_r2_for_use,
-                    sample_dir=sample_dir,
-                    target_fa_remote=target_fa,
-                    plugin=plugin,
-                    plugin_opts=plugin_opts,
-                    params=params,
+                    r1_path=Path(str(use_r1)),
+                    r2_path=Path(str(use_r2)),
+                    fasta_path=Path(str(target_fa)),
+                    out_dir=Path(str(out_dir)),
+                    options=options,
                 )
-                if patterns:
-                    self._stage_out_extra.extend([str(p) for p in patterns])
-                cmds.extend(prep_cmds)
-                use_r1 = out_r1
-                use_r2 = out_r2
+                wrapped_shapecmd = f"{shapecmd} || echo 'shapemapper failed for {name}'"
+                sep = "################################################################################"
+                if not is_derived:
+                    # Add verification steps for non-derived cases (derived already logs these)
+                    verify_label = "Verify staged FASTQ" if needs_stage else "Verify FASTQ inputs"
+                    cmds.append(f"echo '{sep}'")
+                    cmds.append(f"echo '# 3 - {verify_label}'")
+                    cmds.append(f"echo '{sep}'")
+                    cmds.append(f"ls -lh {use_r1} {use_r2} || true")
+                    cmds.append(f"echo '{sep}'")
+                    cmds.append("echo '# 4 - Verify created FASTA'")
+                    cmds.append(f"echo '{sep}'")
+                    cmds.append(f"head -n 2 {target_fa} || true")
 
-            shapecmd = plugin.command(
-                sample_name=name,
-                r1_path=Path(str(use_r1)),
-                r2_path=Path(str(use_r2)),
-                fasta_path=Path(str(target_fa)),
-                out_dir=Path(str(out_dir)),
-                options=options,
-            )
-            sep = "################################################################################"
-            if not is_derived:
-                # Add verification steps for non-derived cases (derived already logs these)
-                verify_label = "Verify staged FASTQ" if needs_stage else "Verify FASTQ inputs"
+                # Step 5: show/create shapemapper command
                 cmds.append(f"echo '{sep}'")
-                cmds.append(f"echo '# 3 - {verify_label}'")
+                cmds.append("echo '# 5 - Create shapemapper' ")
                 cmds.append(f"echo '{sep}'")
-                cmds.append(f"ls -lh {use_r1} {use_r2} || true")
-                cmds.append(f"echo '{sep}'")
-                cmds.append("echo '# 4 - Verify created FASTA'")
-                cmds.append(f"echo '{sep}'")
-                cmds.append(f"head -n 2 {target_fa} || true")
+                cmds.append(f"echo 'Command: {shapecmd}'")
 
-            # Step 5: show/create shapemapper command
-            cmds.append(f"echo '{sep}'")
-            cmds.append("echo '# 5 - Create shapemapper' ")
-            cmds.append(f"echo '{sep}'")
-            cmds.append(f"echo 'Command: {shapecmd}'")
+                # Step 6: run shapemapper (or stage in dry-run)
+                cmds.append(f"echo '{sep}'")
+                cmds.append("echo '# 6 - Run shapemapper'")
+                cmds.append(f"echo '{sep}'")
+                if dry_run:
+                    dry_label = "staged FASTQs" if needs_stage else "FASTQ inputs"
+                    cmds.append(f"echo '[Step 1] Verifying {dry_label} for {name}'")
+                    cmds.append(f"ls -lh {use_r1} {use_r2} || true")
+                    cmds.append(f"echo '[Step 2] FASTA created for {name} at {target_fa}'")
+                    cmds.append(f"head -n 2 {target_fa} || true")
+                    run_script = sample_dir / "run_shapemapper.sh"
+                    cmds.append(f"echo '[Step 3] Creating shapemapper script for {name}: {run_script}'")
+                    mk_script = (
+                        f"cat > {run_script} << 'EOSH'\n#!/usr/bin/env bash\nset -euo pipefail\n{shapecmd}\nEOSH\n"
+                    )
+                    cmds.append(mk_script)
+                    cmds.append(f"chmod +x {run_script}")
+                    cmds.append(f"echo '[Step 4] Would run shapemapper via {run_script} (skipped in dry_run)'")
+                else:
+                    cmds.append(wrapped_shapecmd)
+            except Exception:
+                cmds[:] = cmds[:start_cmd_idx]
+                self._stage_in[:] = self._stage_in[:start_stage_in_idx]
+                self._stage_out_extra[:] = self._stage_out_extra[:start_stage_out_idx]
+                log.exception("Failed to prepare mut_count inputs for sample %s; skipping.", name)
+                continue
 
-            # Step 6: run shapemapper (or stage in dry-run)
-            cmds.append(f"echo '{sep}'")
-            cmds.append("echo '# 6 - Run shapemapper'")
-            cmds.append(f"echo '{sep}'")
-            if dry_run:
-                dry_label = "staged FASTQs" if needs_stage else "FASTQ inputs"
-                cmds.append(f"echo '[Step 1] Verifying {dry_label} for {name}'")
-                cmds.append(f"ls -lh {use_r1} {use_r2} || true")
-                cmds.append(f"echo '[Step 2] FASTA created for {name} at {target_fa}'")
-                cmds.append(f"head -n 2 {target_fa} || true")
-                run_script = sample_dir / "run_shapemapper.sh"
-                cmds.append(f"echo '[Step 3] Creating shapemapper script for {name}: {run_script}'")
-                mk_script = (
-                    f"cat > {run_script} << 'EOSH'\n#!/usr/bin/env bash\nset -euo pipefail\n{shapecmd}\nEOSH\n"
-                )
-                cmds.append(mk_script)
-                cmds.append(f"chmod +x {run_script}")
-                cmds.append(f"echo '[Step 4] Would run shapemapper via {run_script} (skipped in dry_run)'")
-            else:
-                cmds.append(shapecmd)
+            successes += 1
+
+        if successes == 0:
+            raise RuntimeError("No samples qualified for mut_count task.")
 
         # Use newlines between commands; 'set -e' in the job script ensures abort on failure.
         return "\n".join(cmds)
@@ -594,7 +611,7 @@ class MutCountTask(Task):
                 return int(row[0][0])
             # Try derived child name → parent id
             d = ctx.db.execute(
-                "SELECT parent_sample_id FROM derived_samples WHERE child_name = ?",
+                "SELECT parent_sample_id FROM sequencing_derived_samples WHERE child_name = ?",
                 (name,),
             ).fetchone()
             if d is not None:
@@ -722,11 +739,11 @@ class MutCountTask(Task):
             s_id = int(sample_row["id"] if hasattr(sample_row, "keys") else sample_row[0])
 
             probing_row = ctx.db.execute(
-                "SELECT id, construct_id, treated FROM probing_reactions WHERE s_id = ?",
+                "SELECT id, construct_id, treated FROM probe_reactions WHERE s_id = ?",
                 (s_id,),
             ).fetchone()
             if probing_row is None:
-                log.error("No probing_reactions entry linked to sample %s (id=%s); skipping.", name, s_id)
+                log.error("No probe_reactions entry linked to sample %s (id=%s); skipping.", name, s_id)
                 continue
             if hasattr(probing_row, "keys"):
                 rxn_id = int(probing_row["id"])
@@ -738,11 +755,11 @@ class MutCountTask(Task):
                 treated_flag = int(probing_row[2])
 
             nt_rows = ctx.db.execute(
-                "SELECT id, site, base FROM nucleotides WHERE construct_id = ? ORDER BY site",
+                "SELECT id, site, base FROM meta_nucleotides WHERE construct_id = ? ORDER BY site",
                 (construct_id,),
             ).fetchall()
             if not nt_rows:
-                log.error("No nucleotides found for construct %s (sample %s); skipping.", construct_id, name)
+                log.error("No meta_nucleotides found for construct %s (sample %s); skipping.", construct_id, name)
                 continue
 
             nt_map: Dict[int, int] = {}
@@ -780,10 +797,10 @@ class MutCountTask(Task):
                 "s_id": s_id,
             }
 
-            run_id = db_api.insert_fmod_calc_run(ctx.db, run_data)
+            run_id = db_api.insert_probe_fmod_run(ctx.db, run_data)
             if run_id is None:
                 existing = ctx.db.execute(
-                    "SELECT id FROM fmod_calc_runs WHERE software_name = ? AND software_version = ? AND run_args = ? AND run_datetime = ? AND output_dir = ? AND s_id = ?",
+                    "SELECT id FROM probe_fmod_runs WHERE software_name = ? AND software_version = ? AND run_args = ? AND run_datetime = ? AND output_dir = ? AND s_id = ?",
                     (
                         run_data["software_name"],
                         run_data["software_version"],
@@ -794,14 +811,14 @@ class MutCountTask(Task):
                     ),
                 ).fetchone()
                 if existing is None:
-                    log.error("Unable to insert or locate fmod_calc_run for %s; skipping fmod ingestion.", name)
+                    log.error("Unable to insert or locate probe_fmod_run for %s; skipping fmod ingestion.", name)
                     continue
                 run_id = int(existing["id"] if hasattr(existing, "keys") else existing[0])
             else:
-                log.info("Inserted fmod_calc_run %s for sample %s", run_id, name)
+                log.info("Inserted probe_fmod_run %s for sample %s", run_id, name)
 
             existing_valtypes_rows = ctx.db.execute(
-                "SELECT DISTINCT valtype FROM fmod_vals WHERE fmod_calc_run_id = ?",
+                "SELECT DISTINCT valtype FROM probe_fmod_values WHERE fmod_run_id = ?",
                 (run_id,),
             ).fetchall()
             existing_valtypes = {
@@ -817,7 +834,7 @@ class MutCountTask(Task):
 
             for path, valtype in profiles_to_ingest:
                 if valtype in existing_valtypes:
-                    log.info("fmod_vals for %s (%s) already present; skipping.", name, valtype)
+                    log.info("probe_fmod_values for %s (%s) already present; skipping.", name, valtype)
                     continue
 
                 parsed_rows = plugin.parse_profile(path)
@@ -848,7 +865,7 @@ class MutCountTask(Task):
                     records.append(
                         {
                             "nt_id": nt_id,
-                            "fmod_calc_run_id": run_id,
+                            "fmod_run_id": run_id,
                             "fmod_val": fmod_value,
                             "valtype": valtype,
                             "read_depth": read_depth,
@@ -857,11 +874,11 @@ class MutCountTask(Task):
                     )
 
                 if not records:
-                    log.warning("No fmod records generated for %s (%s); skipping.", name, valtype)
+                    log.warning("No probe_fmod_values generated for %s (%s); skipping.", name, valtype)
                     continue
 
                 db_api.bulk_insert_fmod_vals(ctx.db, records)
-                log.info("Inserted %d fmod_vals records for %s (%s).", len(records), name, valtype)
+                log.info("Inserted %d probe_fmod_values records for %s (%s).", len(records), name, valtype)
                 existing_valtypes.add(valtype)
                 inserted_for_sample = True
 

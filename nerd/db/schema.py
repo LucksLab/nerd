@@ -1,571 +1,473 @@
-# your science tables + (tasks, task_attempts, artifacts)
-
-# nerd/db/schema.py
 """
-This module defines the SQLite schema used by the nerd CLI tool.
-Each table creation SQL is written explicitly for clarity and maintainability.
-"""
+Schema definitions for initializing the project database.
 
-# === Table: probing_reactions ===
-CREATE_PROBING_REACTIONS = """ 
-CREATE TABLE IF NOT EXISTS probing_reactions (
-    id INTEGER UNIQUE,                           -- Primary key for this table
-    temperature INTEGER NOT NULL,                -- Reaction temperature (Celsius)
-    replicate INTEGER NOT NULL,                  -- Replicate number
-    reaction_time INTEGER NOT NULL,              -- Reaction time (seconds)
-    probe_concentration REAL NOT NULL,           -- Concentration of probe (M)
-    probe TEXT NOT NULL,                         -- Name of chemical probe (e.g. "dms")
-    RT TEXT NOT NULL,                            -- Reverse transcription enzyme or protocol ("MRT", "SSIII", etc.)
-    done_by TEXT NOT NULL,                       -- Initials of person who performed the reaction
-    treated INTEGER NOT NULL,                    -- 1 if treated, 0 if control
-    buffer_id INTEGER NOT NULL,                  -- Foreign key to buffers table
-    construct_id INTEGER NOT NULL,               -- Foreign key to constructs table
-    rg_id INTEGER NOT NULL,                      -- Foreign key to reaction_groups table
-    s_id INTEGER NOT NULL,                       -- Foreign key to sequencing_samples table
-    PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(buffer_id) REFERENCES buffers(id),
-    FOREIGN KEY(construct_id) REFERENCES constructs(id),
-    FOREIGN KEY(rg_id) REFERENCES reaction_groups(rg_id),
-    FOREIGN KEY(s_id) REFERENCES sequencing_samples(id)
-);
+Tables are grouped by domain:
+  • core_*      task orchestration metadata
+  • meta_*      shared metadata (buffers, constructs, nucleotides)
+  • probe_*     probing chemistry experiments and derived fits
+  • nmr_*       NMR experiments and fits
+  • tempgrad_*  temperature-gradient / melt fits
+
+Tall parameter tables follow the pattern (fit_run_id, param_name, param_numeric,
+param_text, units) so new metrics can be added without migrations.
 """
 
-# === Table: reaction_groups ===
-CREATE_REACTION_GROUPS = """ 
-CREATE TABLE IF NOT EXISTS reaction_groups (
-    rg_id INTEGER PRIMARY KEY,                   -- Stable reaction group identifier (referenced by other tables)
-    rg_label TEXT UNIQUE                         -- Human-provided label for this reaction group (from YAML)
-);
-"""
+# ---------------------------------------------------------------------------
+# Metadata tables
+# ---------------------------------------------------------------------------
 
-# === Table: tempgrad_group ===
-# temperature_gradient group shares buffer, construct, probe, probe_conc, RT
-
-CREATE_TEMPGRAD_GROUPS = """
-CREATE TABLE IF NOT EXISTS tempgrad_groups (
-    id INTEGER NOT NULL UNIQUE,                  -- Primary key for this table
-    tg_id INTEGER NOT NULL,                      -- Temperature gradient group identifier
-    rg_id INTEGER NOT NULL,                      -- Foreign key to reaction_groups (rg_id)
-    buffer_id INTEGER NOT NULL,                  -- Foreign key to buffers table
-    construct_id INTEGER NOT NULL,               -- Foreign key to constructs table
-    RT TEXT NOT NULL,                            -- Reverse transcription enzyme or protocol ("MRT", "SSIII", etc.)
-    probe TEXT NOT NULL,                         -- Name of chemical probe (e.g. "dms")
-    probe_concentration REAL NOT NULL,           -- Concentration of probe (M)
-    temperature REAL NOT NULL,                   -- Temperature of the reaction (Celsius)
-    replicate INTEGER NOT NULL,                  -- Replicate number
-    PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(rg_id) REFERENCES reaction_groups(rg_id),
-    UNIQUE(tg_id, rg_id)                         -- Ensure unique temperature gradient group IDs
-);
-"""
-
-
-# === Table: constructs ===
-CREATE_CONSTRUCTS = """ 
-CREATE TABLE IF NOT EXISTS constructs (
-    id INTEGER NOT NULL UNIQUE,                  -- Primary key for this table
-    family TEXT NOT NULL,                        -- Family or group the construct belongs to
-    name TEXT NOT NULL,                          -- Name of the construct
-    version TEXT NOT NULL,                       -- Version identifier for the construct
-    sequence TEXT NOT NULL,                      -- Nucleotide sequence of the construct
-    disp_name TEXT NOT NULL,                     -- Display name for the construct
-    PRIMARY KEY(id AUTOINCREMENT),
-    UNIQUE(family, name, version, sequence, disp_name)      -- Ensure unique constructs by family, name, and version
-);
-"""
-
-# === Table: buffers ===
-CREATE_BUFFERS = """ 
-CREATE TABLE IF NOT EXISTS buffers (
-    id INTEGER NOT NULL UNIQUE,                  -- Primary key for this table
-    name TEXT NOT NULL,                          -- Name of the buffer (e.g. "Tris", "HEPES")
-    pH REAL NOT NULL,                            -- pH of the buffer
-    composition TEXT NOT NULL,                   -- Buffer composition (e.g. "50 mM Tris, 100 mM NaCl")
-    disp_name TEXT NOT NULL,                     -- Display name for the buffer
-    PRIMARY KEY(id AUTOINCREMENT),
-    UNIQUE(name, pH, composition, disp_name)     -- Ensure unique buffers by name, pH, composition, and display name
-);
-"""
-
-# === Table: nucleotides ===
-CREATE_NUCLEOTIDES = """ 
-CREATE TABLE IF NOT EXISTS nucleotides (
-    id INTEGER NOT NULL UNIQUE,                  -- Primary key for this table
-    site INTEGER NOT NULL,                       -- Nucleotide position (1-based)
-    base TEXT NOT NULL,                          -- Nucleotide base (A, C, G, U)
-    base_region TEXT NOT NULL,                   -- Region annotation (e.g. "loop", "stem")
-    construct_id INTEGER NOT NULL,               -- Foreign key to constructs table
-    PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(construct_id) REFERENCES constructs(id) ON DELETE CASCADE,
-    UNIQUE(site, base, base_region, construct_id)  -- Ensure unique nucleotides by site, base, region, and construct
-);
-"""
-
-# === Table: sequencing_runs ===
-CREATE_SEQUENCING_RUNS = """ 
-CREATE TABLE IF NOT EXISTS sequencing_runs (
-    id INTEGER NOT NULL UNIQUE,                  -- Primary key for this table
-    run_name TEXT NOT NULL,                      -- Name of the sequencing run
-    date TEXT NOT NULL,                          -- Date of the sequencing run
-    sequencer TEXT NOT NULL,                     -- Sequencer used (e.g. "Illumina", "Nanopore")
-    run_manager TEXT NOT NULL,                   -- Person responsible for the run
-    PRIMARY KEY(id AUTOINCREMENT),
-    UNIQUE(run_name, date, sequencer, run_manager)  -- Ensure unique runs by name, date, sequencer, and manager
-);
-"""
-
-# === Table: sequencing_samples ===
-CREATE_SEQUENCING_SAMPLES = """ 
-CREATE TABLE IF NOT EXISTS sequencing_samples (
-    id INTEGER NOT NULL UNIQUE,                  -- Primary key for this table
-    seqrun_id INTEGER NOT NULL,                  -- Foreign key to sequencing_runs table
-    sample_name TEXT NOT NULL,                   -- Name of the sequencing sample
-    fq_dir TEXT NOT NULL,                        -- Directory containing fastq files
-    r1_file TEXT NOT NULL,                       -- Filename of read 1 fastq
-    r2_file TEXT NOT NULL,                       -- Filename of read 2 fastq
-    to_drop INTEGER NOT NULL DEFAULT 0,          -- 1 if sample should be dropped, 0 otherwise
-    PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(seqrun_id) REFERENCES sequencing_runs(id),
-    UNIQUE(seqrun_id, sample_name, fq_dir)       -- Ensure unique samples by run ID, name, and directory
-);
-"""
-
-# === Table: derived_samples ===
-CREATE_DERIVED_SAMPLES = """
-CREATE TABLE IF NOT EXISTS derived_samples (
+CREATE_META_BUFFERS = """
+CREATE TABLE IF NOT EXISTS meta_buffers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    parent_sample_id INTEGER NOT NULL,           -- FK → sequencing_samples.id (the full/raw sample)
-    child_name TEXT NOT NULL,                    -- human-friendly derived sample name
-    kind TEXT NOT NULL,                          -- subsample | filter | trim | other
-    tool TEXT NOT NULL,                          -- e.g., seqtk, custom
-    cmd_template TEXT NOT NULL,                  -- templated command to materialize R1/R2
-    params_json TEXT,                            -- JSON of structured params (e.g., {count: 1000000, seed: 42})
-    cache_key TEXT,                              -- hash(parent + tool + params + template)
+    name TEXT NOT NULL,
+    pH REAL NOT NULL,
+    composition TEXT NOT NULL,
+    disp_name TEXT NOT NULL,
+    UNIQUE(name, pH, composition, disp_name)
+);
+"""
+
+CREATE_META_CONSTRUCTS = """
+CREATE TABLE IF NOT EXISTS meta_constructs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    family TEXT NOT NULL,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    sequence TEXT NOT NULL,
+    disp_name TEXT NOT NULL,
+    UNIQUE(family, name, version, sequence, disp_name)
+);
+"""
+
+CREATE_META_NUCLEOTIDES = """
+CREATE TABLE IF NOT EXISTS meta_nucleotides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    construct_id INTEGER NOT NULL,
+    site INTEGER NOT NULL,
+    base TEXT NOT NULL,
+    base_region TEXT NOT NULL,
+    FOREIGN KEY(construct_id) REFERENCES meta_constructs(id) ON DELETE CASCADE,
+    UNIQUE(construct_id, site)
+);
+"""
+
+# ---------------------------------------------------------------------------
+# Sequencing metadata
+# ---------------------------------------------------------------------------
+
+CREATE_SEQUENCING_RUNS = """
+CREATE TABLE IF NOT EXISTS sequencing_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_name TEXT NOT NULL,
+    date TEXT NOT NULL,
+    sequencer TEXT NOT NULL,
+    run_manager TEXT NOT NULL,
+    UNIQUE(run_name, date, sequencer, run_manager)
+);
+"""
+
+CREATE_SEQUENCING_SAMPLES = """
+CREATE TABLE IF NOT EXISTS sequencing_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seqrun_id INTEGER NOT NULL,
+    sample_name TEXT NOT NULL,
+    fq_dir TEXT NOT NULL,
+    r1_file TEXT NOT NULL,
+    r2_file TEXT NOT NULL,
+    to_drop INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY(seqrun_id) REFERENCES sequencing_runs(id),
+    UNIQUE(seqrun_id, sample_name, fq_dir)
+);
+"""
+
+CREATE_SEQUENCING_DERIVED_SAMPLES = """
+CREATE TABLE IF NOT EXISTS sequencing_derived_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_sample_id INTEGER NOT NULL,
+    child_name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    tool TEXT NOT NULL,
+    cmd_template TEXT NOT NULL,
+    params_json TEXT,
+    cache_key TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY(parent_sample_id) REFERENCES sequencing_samples(id) ON DELETE CASCADE,
     UNIQUE(parent_sample_id, child_name)
 );
 """
 
-# === Table: fmod_calc_runs ===
-CREATE_FMOD_CALC_RUNS = """ 
-CREATE TABLE IF NOT EXISTS fmod_calc_runs (
-    id INTEGER NOT NULL UNIQUE,                      -- Primary key for this table
-    software_name TEXT NOT NULL,                     -- Name of the software used for calculation
-    software_version INTEGER NOT NULL,               -- Version of the software
-    run_args INTEGER NOT NULL,                       -- Arguments used for the run (should likely be TEXT)
-    run_datetime TEXT NOT NULL,                      -- Date and time of the run
-    output_dir TEXT NOT NULL UNIQUE,                 -- Directory where output files are stored
-    s_id INTEGER NOT NULL,                           -- Foreign key to sequencing_samples table
-    PRIMARY KEY(id AUTOINCREMENT),
+# ---------------------------------------------------------------------------
+# Probe experiments
+# ---------------------------------------------------------------------------
+
+CREATE_PROBE_REACTION_GROUPS = """
+CREATE TABLE IF NOT EXISTS probe_reaction_groups (
+    rg_id INTEGER PRIMARY KEY,
+    rg_label TEXT UNIQUE
+);
+"""
+
+CREATE_PROBE_REACTIONS = """
+CREATE TABLE IF NOT EXISTS probe_reactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rg_id INTEGER NOT NULL,
+    s_id INTEGER NOT NULL,
+    construct_id INTEGER NOT NULL,
+    buffer_id INTEGER NOT NULL,
+    temperature REAL NOT NULL,
+    replicate INTEGER NOT NULL,
+    reaction_time REAL NOT NULL,
+    probe_concentration REAL NOT NULL,
+    probe TEXT NOT NULL,
+    rt_protocol TEXT NOT NULL,
+    done_by TEXT NOT NULL,
+    treated INTEGER NOT NULL,
+    FOREIGN KEY(rg_id) REFERENCES probe_reaction_groups(rg_id),
     FOREIGN KEY(s_id) REFERENCES sequencing_samples(id),
-    UNIQUE(software_name, software_version, run_args, run_datetime, output_dir, s_id)  -- Ensure unique calculation runs
+    FOREIGN KEY(construct_id) REFERENCES meta_constructs(id),
+    FOREIGN KEY(buffer_id) REFERENCES meta_buffers(id)
 );
 """
 
-# === Table: fmod_vals ===
-CREATE_FMOD_VALS = """ 
-CREATE TABLE IF NOT EXISTS fmod_vals (
-    id INTEGER NOT NULL UNIQUE,                      -- Primary key for this table
-    nt_id INTEGER NOT NULL,                          -- Foreign key to nucleotides table
-    fmod_calc_run_id INTEGER NOT NULL,               -- Foreign key to fmod_calc_runs table
-    fmod_val REAL,                                   -- Fraction modified value (may be NULL)
-    valtype TEXT NOT NULL,                           -- Type of value (e.g. "raw", "normalized")
-    read_depth INTEGER NOT NULL,                     -- Read depth at this nucleotide
-    rxn_id INTEGER NOT NULL,                         -- Foreign key to probing_reactions table
-    PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(nt_id) REFERENCES nucleotides(id),
-    FOREIGN KEY(fmod_calc_run_id) REFERENCES fmod_calc_runs(id),
-    FOREIGN KEY(rxn_id) REFERENCES probing_reactions(id)
+CREATE_PROBE_TEMPGRAD_GROUPS = """
+CREATE TABLE IF NOT EXISTS probe_tempgrad_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tg_id INTEGER NOT NULL,
+    rg_id INTEGER NOT NULL,
+    buffer_id INTEGER NOT NULL,
+    construct_id INTEGER NOT NULL,
+    rt_protocol TEXT NOT NULL,
+    probe TEXT NOT NULL,
+    probe_concentration REAL NOT NULL,
+    temperature REAL NOT NULL,
+    replicate INTEGER NOT NULL,
+    FOREIGN KEY(rg_id) REFERENCES probe_reaction_groups(rg_id),
+    FOREIGN KEY(buffer_id) REFERENCES meta_buffers(id),
+    FOREIGN KEY(construct_id) REFERENCES meta_constructs(id),
+    UNIQUE(tg_id, rg_id)
 );
 """
 
-# === Table: free_tc_fits ===
-CREATE_FREE_TC_FITS = """ 
-CREATE TABLE IF NOT EXISTS free_tc_fits (
-    id INTEGER NOT NULL UNIQUE,                      -- Primary key for this table
-    rg_id INTEGER NOT NULL,                          -- Foreign key to reaction_groups table
-    nt_id INTEGER NOT NULL,                          -- Foreign key to nucleotides table
-    kobs_val REAL NOT NULL,                          -- Observed rate constant value
-    kobs_err REAL NOT NULL,                          -- Error in observed rate constant
-    kdeg_val REAL NOT NULL,                          -- Degradation rate constant value
-    kdeg_err REAL NOT NULL,                          -- Error in degradation rate constant
-    fmod0 REAL NOT NULL,                             -- Initial fraction modified
-    fmod0_err REAL NOT NULL,                         -- Error in initial fraction modified
-    r2 REAL NOT NULL,                                -- R-squared value of the fit
-    chisq REAL NOT NULL,                             -- Chi-squared value of the fit
-    time_min REAL NOT NULL,                          -- Minimum time (in seconds) used in fit
-    time_max REAL NOT NULL,                          -- Maximum time (in seconds) used in fit
-    PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(rg_id) REFERENCES reaction_groups(rg_id),
-    FOREIGN KEY(nt_id) REFERENCES nucleotides(id),
-    UNIQUE(rg_id, nt_id)                             -- Ensure unique fits per reaction group and nucleotide
+CREATE_PROBE_FMOD_RUNS = """
+CREATE TABLE IF NOT EXISTS probe_fmod_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    software_name TEXT NOT NULL,
+    software_version TEXT,
+    run_args TEXT,
+    run_datetime TEXT NOT NULL,
+    output_dir TEXT NOT NULL UNIQUE,
+    s_id INTEGER NOT NULL,
+    FOREIGN KEY(s_id) REFERENCES sequencing_samples(id),
+    UNIQUE(software_name, software_version, run_datetime, output_dir, s_id)
 );
 """
 
-# === Table: constrained_tc_deg_fits ===
-CREATE_CONSTRAINED_TC_FITS = """ 
-CREATE TABLE IF NOT EXISTS constrained_tc_fits (
-    id INTEGER NOT NULL UNIQUE,                      -- Primary key for this table
-    rg_id INTEGER NOT NULL,                          -- Foreign key to reaction_groups table
-    nt_id INTEGER NOT NULL,                          -- Foreign key to nucleotides table
-    kobs_val REAL NOT NULL,                          -- Observed rate constant value (global fit)
-    kobs_err REAL NOT NULL,                          -- Error in observed rate constant (global fit)
-    kdeg_val REAL NOT NULL,                          -- Degradation rate constant value (global fit)
-    kdeg_err REAL NOT NULL,                          -- Error in degradation rate constant (global fit)
-    fmod0 REAL NOT NULL,                             -- Initial fraction modified (global fit)
-    fmod0_err REAL NOT NULL,                          -- Error in initial fraction modified (global fit)
-    r2 REAL NOT NULL,                                -- R-squared value of the fit
-    chisq REAL NOT NULL,                             -- Chi-squared value of the fit
-    time_min REAL NOT NULL,                          -- Minimum time (in seconds) used in fit
-    time_max REAL NOT NULL,                          -- Maximum time (in seconds) used in fit
-    PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(rg_id) REFERENCES reaction_groups(rg_id),
-    FOREIGN KEY(nt_id) REFERENCES nucleotides(id),
-    UNIQUE(rg_id, nt_id)                             -- Ensure unique fits per reaction group and nucleotide
+CREATE_PROBE_FMOD_VALUES = """
+CREATE TABLE IF NOT EXISTS probe_fmod_values (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nt_id INTEGER NOT NULL,
+    fmod_run_id INTEGER NOT NULL,
+    rxn_id INTEGER NOT NULL,
+    valtype TEXT NOT NULL,
+    fmod_val REAL,
+    read_depth INTEGER NOT NULL,
+    FOREIGN KEY(nt_id) REFERENCES meta_nucleotides(id),
+    FOREIGN KEY(fmod_run_id) REFERENCES probe_fmod_runs(id),
+    FOREIGN KEY(rxn_id) REFERENCES probe_reactions(id)
 );
 """
 
-# === Table: probing_melt_fits ===
-CREATE_PROBING_MELT_FITS = """
-CREATE TABLE IF NOT EXISTS probing_melt_fits (
-    id INTEGER NOT NULL UNIQUE,                      -- Primary key for this table
-    tg_id INTEGER NOT NULL,                          -- Foreign key to tempgrad_groups table
-    nt_id INTEGER NOT NULL,                          -- Foreign key to nucleotides table
-    a REAL NOT NULL,                                 -- Slope of the unfolded state
-    a_err REAL NOT NULL,                            -- Standard error of the slope of the unfolded state
-    b REAL NOT NULL,                                 -- Y-intercept of the unfolded state
-    b_err REAL NOT NULL,                             -- Standard error of the Y-intercept of the unfolded state
-    c REAL NOT NULL,                                 -- Slope of the folded state
-    c_err REAL NOT NULL,                             -- Standard error of the slope of the folded state
-    d REAL NOT NULL,                                 -- Y-intercept of the folded state
-    d_err REAL NOT NULL,                             -- Standard error of the Y-intercept of the folded state
-    f REAL NOT NULL,                                 -- Energy of the transition state
-    f_err REAL NOT NULL,                             -- Standard error of the energy of the transition state
-    g REAL NOT NULL,                                 -- Temperature of the transition state
-    g_err REAL NOT NULL,                             -- Standard error of the temperature of the transition state
-    r2 REAL NOT NULL,                                -- R-squared value of the fit
-    chisq REAL NOT NULL,                             -- Chi-squared value of the fit
-    PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(tg_id) REFERENCES tempgrad_groups(tg_id),
-    FOREIGN KEY(nt_id) REFERENCES nucleotides(id)
+CREATE_PROBE_TC_FIT_RUNS = """
+CREATE TABLE IF NOT EXISTS probe_tc_fit_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fit_kind TEXT NOT NULL,
+    fmod_run_id INTEGER,
+    rg_id INTEGER,
+    nt_id INTEGER,
+    model TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(fmod_run_id) REFERENCES probe_fmod_runs(id),
+    FOREIGN KEY(rg_id) REFERENCES probe_reaction_groups(rg_id),
+    FOREIGN KEY(nt_id) REFERENCES meta_nucleotides(id)
 );
 """
 
-# === Table: nmr_reactions ===
+CREATE_PROBE_TC_FIT_PARAMS = """
+CREATE TABLE IF NOT EXISTS probe_tc_fit_params (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fit_run_id INTEGER NOT NULL,
+    param_name TEXT NOT NULL,
+    param_numeric REAL,
+    param_text TEXT,
+    units TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(fit_run_id) REFERENCES probe_tc_fit_runs(id) ON DELETE CASCADE,
+    UNIQUE(fit_run_id, param_name)
+);
+"""
+
+# ---------------------------------------------------------------------------
+# NMR experiments
+# ---------------------------------------------------------------------------
+
 CREATE_NMR_REACTIONS = """
 CREATE TABLE IF NOT EXISTS nmr_reactions (
-    id INTEGER NOT NULL UNIQUE,                 -- Primary key for this table
-    reaction_type TEXT NOT NULL,                 -- "deg", "add"
-    temperature REAL NOT NULL,                   -- Temperature in Celsius
-    replicate INTEGER NOT NULL,                  -- Replicate number
-    num_scans INTEGER NOT NULL,                  -- Number of scans per read
-    time_per_read REAL NOT NULL,                 -- Time per NMR read in mins
-    total_kinetic_reads INTEGER NOT NULL,        -- Total number of kinetic reads
-    total_kinetic_time INTEGER NOT NULL,         -- Total time for kinetic reads in seconds
-    probe TEXT NOT NULL,                         -- Chemical probe used (e.g. "dms")
-    probe_conc REAL NOT NULL,                    -- Concentration of the probe in M
-    probe_solvent TEXT NOT NULL,                 -- Solvent used for the probe (e.g. "etoh", "dmso")
-    substrate TEXT NOT NULL,                     -- Substrate used (e.g. "ATP", "GTP", "none" if degradation)
-    substrate_conc REAL NOT NULL,                -- Concentration of the substrate in M (0 if degradation)
-    buffer_id INT NOT NULL,                        -- Buffer id (foreign key to buffers table)
-    nmr_machine TEXT NOT NULL,                   -- NMR machine used for the experiment
-    kinetic_data_dir TEXT NOT NULL,              -- Directory containing kinetic data csv file
-    mnova_analysis_dir TEXT,                     -- Directory containing MNova analysis files
-    raw_fid_dir TEXT,                             -- Directory containing raw FID files
-    PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(buffer_id) REFERENCES buffers(id),
-    UNIQUE(kinetic_data_dir)                   -- Ensure unique directory for kinetic data
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reaction_type TEXT NOT NULL,
+    temperature REAL NOT NULL,
+    replicate INTEGER NOT NULL,
+    num_scans INTEGER NOT NULL,
+    time_per_read REAL NOT NULL,
+    total_kinetic_reads INTEGER NOT NULL,
+    total_kinetic_time INTEGER NOT NULL,
+    probe TEXT NOT NULL,
+    probe_conc REAL NOT NULL,
+    probe_solvent TEXT NOT NULL,
+    substrate TEXT NOT NULL,
+    substrate_conc REAL NOT NULL,
+    buffer_id INTEGER NOT NULL,
+    nmr_machine TEXT NOT NULL,
+    kinetic_data_dir TEXT NOT NULL UNIQUE,
+    mnova_analysis_dir TEXT,
+    raw_fid_dir TEXT,
+    FOREIGN KEY(buffer_id) REFERENCES meta_buffers(id)
 );
 """
 
-# === Table: nmr_trace_files ===
 CREATE_NMR_TRACE_FILES = """
 CREATE TABLE IF NOT EXISTS nmr_trace_files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nmr_reaction_id INTEGER NOT NULL,            -- Foreign key to nmr_reactions table
-    role TEXT NOT NULL,                          -- 'decay_trace', 'dms_trace', 'peak_trace', etc.
-    path TEXT NOT NULL,                          -- Relative or absolute path to staged file
-    checksum TEXT,                               -- Optional checksum for provenance
-    task_id INTEGER,                             -- Optional FK → tasks.id (who registered the file)
+    nmr_reaction_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    path TEXT NOT NULL,
+    checksum TEXT,
+    task_id INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY(nmr_reaction_id) REFERENCES nmr_reactions(id) ON DELETE CASCADE,
-    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE SET NULL,
+    FOREIGN KEY(task_id) REFERENCES core_tasks(id) ON DELETE SET NULL,
     UNIQUE(nmr_reaction_id, role)
 );
 """
 
-# === Table: nmr_fit_runs ===
 CREATE_NMR_FIT_RUNS = """
 CREATE TABLE IF NOT EXISTS nmr_fit_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_id INTEGER NOT NULL,                    -- FK → tasks.id
-    nmr_reaction_id INTEGER NOT NULL,            -- FK → nmr_reactions.id
-    plugin TEXT NOT NULL,                        -- Plugin identifier (e.g., 'lmfit_kdeg')
-    params_json TEXT,                            -- Serialized plugin parameters
-    status TEXT NOT NULL DEFAULT 'running',      -- running|completed|failed
-    message TEXT,                                -- Optional diagnostic status
+    task_id INTEGER NOT NULL,
+    nmr_reaction_id INTEGER NOT NULL,
+    plugin TEXT NOT NULL,
+    model TEXT,
+    species TEXT,
+    params_json TEXT,
+    status TEXT NOT NULL DEFAULT 'running',
+    message TEXT,
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
-    finished_at TEXT,                            -- When the run finished
-    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    finished_at TEXT,
+    FOREIGN KEY(task_id) REFERENCES core_tasks(id) ON DELETE CASCADE,
     FOREIGN KEY(nmr_reaction_id) REFERENCES nmr_reactions(id) ON DELETE CASCADE
 );
 """
 
-
-# === Table: nmr_kinetic_rates ===
-CREATE_NMR_KINETIC_RATES = """
-CREATE TABLE IF NOT EXISTS nmr_kinetic_rates (
-    id INTEGER NOT NULL UNIQUE,                  -- Primary key for this table
-    nmr_reaction_id INTEGER,                      -- Foreign key to nmr_reactions table
-    model TEXT NOT NULL,                         -- Model used for fitting (e.g. "exponential", "ode")
-    k_value REAL NOT NULL,                       -- Fitted kinetic rate value
-    k_error REAL,                                -- Fitted kinetic rate std error
-    r2 REAL,                                     -- R-squared value of the fit
-    chisq REAL,                                  -- Chi-squared value of the fit
-    species TEXT NOT NULL,                       -- Species for which the rate is calculated (e.g. "dms", "atp-c8", etc.)
-    fit_run_id INTEGER,                          -- Foreign key to nmr_fit_runs table
-    PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(nmr_reaction_id) REFERENCES nmr_reactions(id),
-    FOREIGN KEY(fit_run_id) REFERENCES nmr_fit_runs(id) ON DELETE SET NULL,
-    UNIQUE(nmr_reaction_id, species)            -- Ensure unique rates per reaction and species
-);
-"""
-
-# === Table: probing_kinetic_rates ===
-CREATE_PROBING_KINETIC_RATES = """
-CREATE TABLE IF NOT EXISTS probing_kinetic_rates (
-    id INTEGER NOT NULL UNIQUE,                  -- Primary key for this table
-    rg_id INTEGER,                               -- Foreign key to reaction_groups table
-    model TEXT NOT NULL,                         -- Model used for fitting (e.g. "global_deg", "agg_add")
-    k_value REAL NOT NULL,                       -- Fitted kinetic rate value
-    k_error REAL NOT NULL,                       -- Fitted kinetic rate std error
-    r2 REAL,                                     -- R-squared value of the fit
-    chisq REAL,                                  -- Chi-squared value of the fit
-    species TEXT NOT NULL,                       -- Species for which the rate is calculated (e.g. "dms", "rna_A", "rna_C", "rna_G", etc.)
-    nt_id INTEGER,                               -- Foreign key to nucleotides table (optional, if extracted individually)
-    rxn_id INTEGER,                              -- Foreign key to probing_reactions table (optional, if extracted individually)
-    PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(rg_id) REFERENCES reaction_groups(rg_id),
-    FOREIGN KEY(nt_id) REFERENCES nucleotides(id),
-    FOREIGN KEY(rxn_id) REFERENCES probing_reactions(id),
-    UNIQUE(rg_id, model, species, nt_id, rxn_id)        -- Ensure unique rates per reaction group and species
-);
-"""
-
-
-# === Table: arrhenius_fits ===
-CREATE_ARRHENIUS_FITS = """
-CREATE TABLE IF NOT EXISTS arrhenius_fits (
-    id INTEGER NOT NULL UNIQUE,
-    reaction_type TEXT NOT NULL,                 -- "deg_nmr", "add_nmr", "rna_probe"
-    data_source TEXT NOT NULL,                   -- "nmr", "probe_global", "probe_free"
-    substrate TEXT NOT NULL,                     -- Substrate for which the fit is calculated (e.g. "ATP", "GTP", "none" for degradation)
-    buffer_id INTEGER NOT NULL,                  -- Foreign key to buffers table
-    tg_id INTEGER,                               -- Foreign key to tempgrad_groups table
-    nt_id INTEGER,                               -- Foreign key to nucleotides table (optional, if extracted individually)
-    construct_family TEXT,                       -- Family of the construct (e.g. "Salm_4U_thermometer", "HIV-1_TAR")
-    slope REAL NOT NULL,                         -- Slope of the Arrhenius fit (activation energy)
-    slope_err REAL NOT NULL,                     -- Standard error of the slope
-    intercept REAL NOT NULL,                     -- Intercept of the Arrhenius fit (log pre-exponential factor)
-    intercept_err REAL NOT NULL,                 -- Standard error of the intercept
-    r2 REAL NOT NULL,                            -- R-squared value of the fit
-    model_file TEXT,                             -- Optional path to serialized fit object
-    PRIMARY KEY(id AUTOINCREMENT),
-    FOREIGN KEY(buffer_id) REFERENCES buffers(id),
-    FOREIGN KEY(tg_id) REFERENCES tempgrad_groups(tg_id)
-);
-"""
-
-# === Partial Unique Indexes for arrhenius_fits ===
-
-CREATE_INDEX_ARRHENIUS_NO_GROUP = """
-CREATE UNIQUE INDEX IF NOT EXISTS unique_arrhenius_no_group
-ON arrhenius_fits (reaction_type, data_source, substrate, buffer_id)
-WHERE tg_id IS NULL AND nt_id IS NULL;
-"""
-
-CREATE_INDEX_ARRHENIUS_TG_ONLY = """
-CREATE UNIQUE INDEX IF NOT EXISTS unique_arrhenius_tg_only
-ON arrhenius_fits (reaction_type, data_source, substrate, buffer_id, tg_id)
-WHERE tg_id IS NOT NULL AND nt_id IS NULL;
-"""
-
-
-CREATE_INDEX_ARRHENIUS_TG_NT = """
-CREATE UNIQUE INDEX IF NOT EXISTS unique_arrhenius_tg_nt
-ON arrhenius_fits (reaction_type, data_source, substrate, buffer_id, tg_id, nt_id)
-WHERE tg_id IS NOT NULL AND nt_id IS NOT NULL;
-"""
-
-# === Table: tasks ===
-CREATE_TASKS = """
-CREATE TABLE IF NOT EXISTS tasks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,        -- task id
-    task_name TEXT NOT NULL,                     -- e.g., create, mut_count, tc_free
-    scope_kind TEXT NOT NULL,                    -- 'sample' | 'sample_batch' | 'rg' | 'tg' | 'nmr' | 'project' | 'global'
-    scope_id INTEGER,                            -- nullable; depends on scope_kind
-    output_dir TEXT NOT NULL,                    -- directory where outputs are written
-    label TEXT NOT NULL,                         -- human-friendly label, e.g., HIV-1_TAR_v1_37C_rep1
-    backend TEXT NOT NULL DEFAULT 'local',       -- local | slurm | other
-    cache_key TEXT,                              -- hash(inputs + params + code)
-    tool TEXT,                                   -- e.g., shapemapper, lmfit
-    tool_version TEXT,                           -- e.g., 2.4.1, 1.3
-    config_hash TEXT,                            -- short hash of effective config
-    started_at TEXT NOT NULL DEFAULT (datetime('now')),
-    ended_at   TEXT,                             -- when finished
-    state TEXT NOT NULL DEFAULT 'pending',       -- pending|running|completed|failed|cached|skipped
-    message TEXT                                 -- short status / error summary
-);
-"""
-
-# === Table: task_attempts ===
-CREATE_TASK_ATTEMPTS = """
-CREATE TABLE IF NOT EXISTS task_attempts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,        -- attempt id
-    task_id INTEGER NOT NULL,                    -- FK → tasks.id
-    try_index INTEGER NOT NULL,                  -- 1,2,3,... per task
-    command TEXT,                                -- shell command (if any)
-    resources_json TEXT,                         -- serialized resources (threads, mem, time, env)
-    exit_code INTEGER,                           -- return code from runner
-    log_path TEXT,                               -- path to command log
-    stderr_tail TEXT,                            -- optional short tail for quick diagnostics
+CREATE_NMR_FIT_PARAMS = """
+CREATE TABLE IF NOT EXISTS nmr_fit_params (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fit_run_id INTEGER NOT NULL,
+    param_name TEXT NOT NULL,
+    param_numeric REAL,
+    param_text TEXT,
+    units TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY(fit_run_id) REFERENCES nmr_fit_runs(id) ON DELETE CASCADE,
+    UNIQUE(fit_run_id, param_name)
+);
+"""
+
+# ---------------------------------------------------------------------------
+# Temperature-gradient fits
+# ---------------------------------------------------------------------------
+
+CREATE_TEMPGRAD_FIT_RUNS = """
+CREATE TABLE IF NOT EXISTS tempgrad_fit_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fit_kind TEXT NOT NULL,
+    data_source TEXT NOT NULL,
+    buffer_id INTEGER,
+    tg_id INTEGER,
+    nt_id INTEGER,
+    model TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(buffer_id) REFERENCES meta_buffers(id),
+    FOREIGN KEY(tg_id) REFERENCES probe_tempgrad_groups(tg_id),
+    FOREIGN KEY(nt_id) REFERENCES meta_nucleotides(id)
+);
+"""
+
+CREATE_TEMPGRAD_FIT_PARAMS = """
+CREATE TABLE IF NOT EXISTS tempgrad_fit_params (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fit_run_id INTEGER NOT NULL,
+    param_name TEXT NOT NULL,
+    param_numeric REAL,
+    param_text TEXT,
+    units TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(fit_run_id) REFERENCES tempgrad_fit_runs(id) ON DELETE CASCADE,
+    UNIQUE(fit_run_id, param_name)
+);
+"""
+
+# ---------------------------------------------------------------------------
+# Core task tables
+# ---------------------------------------------------------------------------
+
+CREATE_CORE_TASKS = """
+CREATE TABLE IF NOT EXISTS core_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_name TEXT NOT NULL,
+    scope_kind TEXT NOT NULL,
+    scope_id INTEGER,
+    output_dir TEXT NOT NULL,
+    label TEXT NOT NULL,
+    backend TEXT NOT NULL DEFAULT 'local',
+    cache_key TEXT,
+    tool TEXT,
+    tool_version TEXT,
+    config_hash TEXT,
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at TEXT,
+    state TEXT NOT NULL DEFAULT 'pending',
+    message TEXT
+);
+"""
+
+CREATE_CORE_TASK_ATTEMPTS = """
+CREATE TABLE IF NOT EXISTS core_task_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    try_index INTEGER NOT NULL,
+    command TEXT,
+    resources_json TEXT,
+    exit_code INTEGER,
+    log_path TEXT,
+    stderr_tail TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(task_id) REFERENCES core_tasks(id) ON DELETE CASCADE,
     UNIQUE(task_id, try_index)
 );
 """
 
-# === Table: artifacts ===
-CREATE_ARTIFACTS = """
-CREATE TABLE IF NOT EXISTS artifacts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,        -- artifact id
-    task_id INTEGER NOT NULL,                    -- FK → tasks.id
-    kind TEXT NOT NULL,                          -- e.g., 'mut_tsv', 'html_report', 'tc_free_tsv'
-    key TEXT,                                    -- semantic key within task (e.g., 'per_nt', 'free', 'global')
-    path TEXT NOT NULL,                          -- absolute or project-relative file path
+CREATE_CORE_ARTIFACTS = """
+CREATE TABLE IF NOT EXISTS core_artifacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    key TEXT,
+    path TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY(task_id) REFERENCES core_tasks(id) ON DELETE CASCADE,
     UNIQUE(task_id, kind, key)
 );
 """
 
-# === Table: task_scope_members ===
-CREATE_TASK_SCOPE_MEMBERS = """
-CREATE TABLE IF NOT EXISTS task_scope_members (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,        -- unique member row id
-    task_id INTEGER NOT NULL,                    -- FK → tasks.id
-    member_kind TEXT NOT NULL,                   -- 'sample' | 'derived_sample' | 'rg' | etc.
-    member_id INTEGER,                           -- nullable; id in domain table if available
-    member_label TEXT,                           -- human-readable identifier (e.g., sample_name)
-    extra_json TEXT,                             -- optional JSON metadata (sets, roles, etc.)
-    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+CREATE_CORE_TASK_SCOPE_MEMBERS = """
+CREATE TABLE IF NOT EXISTS core_task_scope_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    member_kind TEXT NOT NULL,
+    member_id INTEGER,
+    member_label TEXT,
+    extra_json TEXT,
+    FOREIGN KEY(task_id) REFERENCES core_tasks(id) ON DELETE CASCADE
 );
 """
 
-# === Indexes for tasks/task_attempts/artifacts ===
-CREATE_INDEX_TASKS_LABEL = """
-CREATE INDEX IF NOT EXISTS idx_tasks_label ON tasks (label);
+# ---------------------------------------------------------------------------
+# Indexes
+# ---------------------------------------------------------------------------
+
+CREATE_INDEX_CORE_TASKS_LABEL = """
+CREATE INDEX IF NOT EXISTS idx_core_tasks_label ON core_tasks (label);
 """
 
-CREATE_INDEX_TASKS_SCOPE = """
-CREATE INDEX IF NOT EXISTS idx_tasks_scope ON tasks (scope_kind, scope_id);
+CREATE_INDEX_CORE_TASKS_SCOPE = """
+CREATE INDEX IF NOT EXISTS idx_core_tasks_scope ON core_tasks (scope_kind, scope_id);
 """
 
-CREATE_INDEX_ATTEMPTS_TASK = """
-CREATE INDEX IF NOT EXISTS idx_task_attempts_task ON task_attempts (task_id, try_index);
+CREATE_INDEX_CORE_TASK_ATTEMPTS = """
+CREATE INDEX IF NOT EXISTS idx_core_task_attempts_task ON core_task_attempts (task_id, try_index);
 """
 
-CREATE_INDEX_ARTIFACTS_TASK = """
-CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts (task_id, kind);
+CREATE_INDEX_CORE_ARTIFACTS = """
+CREATE INDEX IF NOT EXISTS idx_core_artifacts_task ON core_artifacts (task_id, kind);
 """
 
-# Track members per task
-CREATE_INDEX_TASK_SCOPE_MEMBERS_TASK = """
-CREATE INDEX IF NOT EXISTS idx_task_scope_members_task ON task_scope_members (task_id);
+CREATE_INDEX_CORE_TASK_SCOPE_MEMBERS = """
+CREATE INDEX IF NOT EXISTS idx_core_task_scope_members_task ON core_task_scope_members (task_id);
 """
 
-# Additional index to speed up lookups by rg_label
-CREATE_INDEX_RG_LABEL = """
-CREATE INDEX IF NOT EXISTS idx_reaction_groups_label ON reaction_groups (rg_label);
+CREATE_INDEX_PROBE_REACTION_GROUPS = """
+CREATE INDEX IF NOT EXISTS idx_probe_reaction_groups_label ON probe_reaction_groups (rg_label);
 """
 
-# Uniqueness for active tasks per signature; allow duplicates only for cached skips
-CREATE_INDEX_TASKS_UNIQUE_SIG_ACTIVE = """
-CREATE UNIQUE INDEX IF NOT EXISTS unique_tasks_signature_active
-ON tasks (task_name, label, output_dir, cache_key)
-WHERE state <> 'cached';
-"""
-
-# Indexes for derived_samples convenience lookups
 CREATE_INDEX_DERIVED_CHILD = """
-CREATE INDEX IF NOT EXISTS idx_derived_samples_child ON derived_samples (child_name);
+CREATE INDEX IF NOT EXISTS idx_derived_samples_child ON sequencing_derived_samples (child_name);
 """
 
 CREATE_INDEX_DERIVED_PARENT = """
-CREATE INDEX IF NOT EXISTS idx_derived_samples_parent ON derived_samples (parent_sample_id);
+CREATE INDEX IF NOT EXISTS idx_derived_samples_parent ON sequencing_derived_samples (parent_sample_id);
 """
 
-# === Aggregate all table creation statements ===
+CREATE_INDEX_PROBE_TC_PARAMS = """
+CREATE INDEX IF NOT EXISTS idx_probe_tc_params_name ON probe_tc_fit_params (param_name);
+"""
+
+CREATE_INDEX_NMR_FIT_PARAMS = """
+CREATE INDEX IF NOT EXISTS idx_nmr_fit_params_name ON nmr_fit_params (param_name);
+"""
+
+CREATE_INDEX_TEMPGRAD_FIT_PARAMS = """
+CREATE INDEX IF NOT EXISTS idx_tempgrad_fit_params_name ON tempgrad_fit_params (param_name);
+"""
+
+# ---------------------------------------------------------------------------
+# Aggregate table/index lists
+# ---------------------------------------------------------------------------
+
 ALL_TABLES = [
-    CREATE_PROBING_REACTIONS,
-    CREATE_REACTION_GROUPS,
-    CREATE_TEMPGRAD_GROUPS,
-    CREATE_CONSTRUCTS,
-    CREATE_BUFFERS,
-    CREATE_NUCLEOTIDES,
+    CREATE_META_BUFFERS,
+    CREATE_META_CONSTRUCTS,
+    CREATE_META_NUCLEOTIDES,
     CREATE_SEQUENCING_RUNS,
     CREATE_SEQUENCING_SAMPLES,
-    CREATE_DERIVED_SAMPLES,
-    CREATE_FMOD_CALC_RUNS,
-    CREATE_FMOD_VALS,
-    CREATE_FREE_TC_FITS,
-    CREATE_CONSTRAINED_TC_FITS,
+    CREATE_SEQUENCING_DERIVED_SAMPLES,
+    CREATE_PROBE_REACTION_GROUPS,
+    CREATE_PROBE_REACTIONS,
+    CREATE_PROBE_TEMPGRAD_GROUPS,
+    CREATE_PROBE_FMOD_RUNS,
+    CREATE_PROBE_FMOD_VALUES,
+    CREATE_PROBE_TC_FIT_RUNS,
+    CREATE_PROBE_TC_FIT_PARAMS,
     CREATE_NMR_REACTIONS,
     CREATE_NMR_TRACE_FILES,
     CREATE_NMR_FIT_RUNS,
-    CREATE_NMR_KINETIC_RATES,
-    CREATE_ARRHENIUS_FITS,
-    CREATE_PROBING_MELT_FITS,
-    CREATE_PROBING_KINETIC_RATES,
-    CREATE_TASKS,
-    CREATE_TASK_ATTEMPTS,
-    CREATE_ARTIFACTS,
-    CREATE_TASK_SCOPE_MEMBERS
+    CREATE_NMR_FIT_PARAMS,
+    CREATE_TEMPGRAD_FIT_RUNS,
+    CREATE_TEMPGRAD_FIT_PARAMS,
+    CREATE_CORE_TASKS,
+    CREATE_CORE_TASK_ATTEMPTS,
+    CREATE_CORE_ARTIFACTS,
+    CREATE_CORE_TASK_SCOPE_MEMBERS,
 ]
 
-# === Indexes for NMR tables ===
-CREATE_INDEX_NMR_TRACE_REACTION = """
-CREATE INDEX IF NOT EXISTS idx_nmr_trace_files_reaction ON nmr_trace_files (nmr_reaction_id);
-"""
-
-CREATE_INDEX_NMR_TRACE_ROLE = """
-CREATE INDEX IF NOT EXISTS idx_nmr_trace_files_role ON nmr_trace_files (role);
-"""
-
-CREATE_INDEX_NMR_FIT_RUNS_TASK = """
-CREATE INDEX IF NOT EXISTS idx_nmr_fit_runs_task ON nmr_fit_runs (task_id, nmr_reaction_id);
-"""
-
-CREATE_INDEX_NMR_KIN_RATES_REACTION = """
-CREATE INDEX IF NOT EXISTS idx_nmr_kinetic_rates_reaction ON nmr_kinetic_rates (nmr_reaction_id, species);
-"""
-
 ALL_INDEXES = [
-    CREATE_INDEX_ARRHENIUS_NO_GROUP,
-    CREATE_INDEX_ARRHENIUS_TG_ONLY,
-    CREATE_INDEX_ARRHENIUS_TG_NT,
-    CREATE_INDEX_TASKS_LABEL,
-    CREATE_INDEX_TASKS_SCOPE,
-    CREATE_INDEX_ATTEMPTS_TASK,
-    CREATE_INDEX_ARTIFACTS_TASK,
-    CREATE_INDEX_TASK_SCOPE_MEMBERS_TASK,
-    CREATE_INDEX_RG_LABEL,
-    CREATE_INDEX_TASKS_UNIQUE_SIG_ACTIVE,
+    CREATE_INDEX_CORE_TASKS_LABEL,
+    CREATE_INDEX_CORE_TASKS_SCOPE,
+    CREATE_INDEX_CORE_TASK_ATTEMPTS,
+    CREATE_INDEX_CORE_ARTIFACTS,
+    CREATE_INDEX_CORE_TASK_SCOPE_MEMBERS,
+    CREATE_INDEX_PROBE_REACTION_GROUPS,
     CREATE_INDEX_DERIVED_CHILD,
     CREATE_INDEX_DERIVED_PARENT,
-    CREATE_INDEX_NMR_TRACE_REACTION,
-    CREATE_INDEX_NMR_TRACE_ROLE,
-    CREATE_INDEX_NMR_FIT_RUNS_TASK,
-    CREATE_INDEX_NMR_KIN_RATES_REACTION
+    CREATE_INDEX_PROBE_TC_PARAMS,
+    CREATE_INDEX_NMR_FIT_PARAMS,
+    CREATE_INDEX_TEMPGRAD_FIT_PARAMS,
 ]

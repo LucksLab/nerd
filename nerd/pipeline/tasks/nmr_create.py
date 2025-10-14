@@ -138,7 +138,7 @@ class NmrCreateTask(Task):
                 buffer_identifier = buffer_identifier.strip()
             buffer_id = db_api.get_buffer_id_by_name_or_disp(ctx.db, buffer_identifier)
         if buffer_id is None:
-            available = ctx.db.execute("SELECT id, name, disp_name FROM buffers ORDER BY id LIMIT 10").fetchall()
+            available = ctx.db.execute("SELECT id, name, disp_name FROM meta_buffers ORDER BY id LIMIT 10").fetchall()
             log.error(
                 "Available buffers (first 10): %s",
                 [(row['id'], row['name'], row['disp_name']) for row in available],
