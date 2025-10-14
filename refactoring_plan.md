@@ -99,6 +99,15 @@ Tools to extract nucleotide energy from chemical probing experiments.
   - `python_baseline` reproduces the three-round pipeline with per-nt fits, optional global filtering, and constrained refits.
   - Stub engines `r_integration` and `ode_fit` register placeholders for future R/ODE implementations while emitting skipped-round metadata.
 
+### `nerd tempgrad_fit`
+
+- Modes:
+  - `arrhenius`: log-linear fit for temperature-dependent rate constants (NMR or probing-derived).
+  - `two_state_melt`: two-state melt curve fitting from temperature gradient data.
+- Engines live under `pipeline/plugins/tempgrad` so alternative fitters (e.g., external R integration) can be swapped in.
+- Results persist to `tempgrad_fit_runs`/`tempgrad_fit_params` using tall parameter storage; per-series fits include diagnostics and metadata captured from the request.
+- Config exposes `series` overrides or DB-backed filters (e.g., buffer, reaction_type, species) and allows custom engine options such as temperature units or initial guesses.
+
 ### `nerd calc_energy`
 
 1. 2-state melting fit - K linear curve

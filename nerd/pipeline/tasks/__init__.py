@@ -16,6 +16,7 @@ from .nmr_create import NmrCreateTask
 from .nmr_deg_kinetics import NmrDegKineticsTask
 from .nmr_add_kinetics import NmrAddKineticsTask
 from .timecourse import ProbeTimecourseTask
+from .tempgrad_fit import TempgradFitTask
 
 __all__ = [
     "CreateTask",
@@ -24,6 +25,7 @@ __all__ = [
     "NmrDegKineticsTask",
     "NmrAddKineticsTask",
     "ProbeTimecourseTask",
+    "TempgradFitTask",
     "TASK_REGISTRY",
 ]
 
@@ -35,4 +37,5 @@ TASK_REGISTRY: Dict[str, Type[Task]] = {
     "nmr_add_kinetics": NmrAddKineticsTask,
     "probe_timecourse": ProbeTimecourseTask,
     "probe_tc_kinetics": ProbeTimecourseTask,
+    "tempgrad_fit": TempgradFitTask,
 }

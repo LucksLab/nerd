@@ -1,0 +1,389 @@
+"""
+Task for temperature-gradient fitting (Arrhenius and melt models).
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple
+
+import sqlite3
+
+from nerd.db import api as db_api
+from nerd.pipeline.plugins.tempgrad import (
+    TempgradRequest,
+    TempgradSeries,
+    load_tempgrad_engine,
+)
+from .base import Task, TaskContext, TaskScope
+from nerd.utils.logging import get_logger
+
+log = get_logger(__name__)
+
+
+class TempgradFitTask(Task):
+    """
+    Execute Arrhenius or two-state melt fits using pluggable engines.
+    """
+
+    name = "tempgrad_fit"
+    scope_kind = "global"
+
+    _DEFAULT_ENGINE = {
+        "arrhenius": "arrhenius_python",
+        "two_state_melt": "two_state_melt",
+    }
+
+    def prepare(self, cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        if self.name not in cfg:
+            raise ValueError(f"Configuration must contain a '{self.name}' section.")
+
+        block = dict(cfg[self.name])
+        mode = str(block.get("mode") or "").strip().lower()
+        if mode not in {"arrhenius", "two_state_melt"}:
+            raise ValueError("tempgrad_fit.mode must be one of: 'arrhenius', 'two_state_melt'.")
+        block["mode"] = mode
+
+        engine = str(block.get("engine") or "").strip().lower()
+        if not engine:
+            engine = self._DEFAULT_ENGINE[mode]
+        block["engine"] = engine
+
+        block["series"] = list(block.get("series") or [])
+        block["filters"] = dict(block.get("filters") or {})
+        block["engine_options"] = dict(block.get("engine_options") or {})
+        block["metadata"] = dict(block.get("metadata") or {})
+        block["overwrite"] = bool(block.get("overwrite", False))
+        if block["overwrite"]:
+            block["force_run"] = True
+        else:
+            block["force_run"] = bool(block.get("force_run", False))
+
+        block["data_source"] = str(block.get("data_source") or block["filters"].get("data_source") or "manual")
+
+        return block, {}
+
+    def command(self, ctx: TaskContext, inputs: Dict[str, Any], params: Dict[str, Any]) -> Optional[str]:
+        return None
+
+    def consume_outputs(
+        self,
+        ctx: TaskContext,
+        inputs: Dict[str, Any],
+        params: Dict[str, Any],
+        run_dir: Path,
+        task_id: Optional[int] = None,
+    ):
+        series_list = self._build_series(ctx, inputs)
+        if not series_list:
+            raise ValueError("No input series available for tempgrad fitting.")
+
+        engine = load_tempgrad_engine(inputs["engine"], **dict(inputs.get("engine_options") or {}))
+
+        request = TempgradRequest(
+            mode=inputs["mode"],
+            series=series_list,
+            options=dict(inputs.get("engine_options") or {}),
+            metadata=dict(inputs.get("metadata") or {}),
+        )
+
+        result = engine.run(request)
+
+        self._write_artifact(run_dir, result)
+
+        overwrite = bool(inputs.get("overwrite", False))
+        for series, series_result in zip(series_list, result.series_results):
+            scope_kind = str(series.metadata.get("scope_kind") or inputs.get("scope_kind") or self.scope_kind or "global")
+            scope_id = self._safe_int(series.metadata.get("scope_id") or inputs.get("scope_id"))
+            tg_id = self._safe_int(series.metadata.get("tg_id"))
+            nt_id = self._safe_int(series.metadata.get("nt_id"))
+
+            if overwrite:
+                db_api.delete_tempgrad_fit_runs(
+                    ctx.db,
+                    fit_kind=request.mode,
+                    scope_kind=scope_kind,
+                    scope_id=scope_id,
+                    tg_id=tg_id,
+                    nt_id=nt_id,
+                )
+
+            fit_run_id = db_api.begin_tempgrad_fit_run(
+                ctx.db,
+                fit_kind=request.mode,
+                task_id=task_id,
+                scope_kind=scope_kind,
+                scope_id=scope_id,
+                data_source=str(inputs.get("data_source")),
+                target_label=series.series_id,
+                rg_id=self._safe_int(series.metadata.get("rg_id")),
+                tg_id=tg_id,
+                nt_id=nt_id,
+            )
+            if fit_run_id is None:
+                continue
+
+            entries = []
+            entries.extend(self._entries_from_mapping(series_result.params))
+            entries.extend(self._entries_from_mapping(series_result.diagnostics, prefix="diag:"))
+            entries.extend(self._entries_from_mapping(series.metadata or {}, prefix="meta:"))
+            entries.extend(self._entries_from_mapping(result.metadata or {}, prefix="request:"))
+            db_api.record_tempgrad_fit_params(ctx.db, fit_run_id=fit_run_id, entries=entries)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _build_series(self, ctx: TaskContext, inputs: Dict[str, Any]) -> List[TempgradSeries]:
+        mode = inputs["mode"]
+        series_cfg = inputs.get("series") or []
+
+        series_list: List[TempgradSeries] = []
+        series_list.extend(self._series_from_config(series_cfg, mode, inputs))
+
+        if not series_list:
+            if mode == "arrhenius":
+                series_list.extend(self._series_from_db_arrhenius(ctx, inputs))
+            elif mode == "two_state_melt":
+                series_list.extend(self._series_from_db_melt(ctx, inputs))
+
+        return series_list
+
+    def _series_from_config(
+        self,
+        series_cfg: Sequence[Mapping[str, Any]],
+        mode: str,
+        inputs: Mapping[str, Any],
+    ) -> List[TempgradSeries]:
+        series_list: List[TempgradSeries] = []
+        for idx, entry in enumerate(series_cfg):
+            if not isinstance(entry, Mapping):
+                continue
+            series_id = str(entry.get("series_id") or entry.get("label") or f"series_{idx}")
+            temperatures = entry.get("temperatures") or entry.get("temperature_c") or entry.get("temp_c")
+            responses = entry.get("rates") or entry.get("k_values") or entry.get("responses")
+            if temperatures is None or responses is None:
+                log.warning("Series config '%s' is missing temperatures or responses; skipping.", series_id)
+                continue
+            temp_vals = [float(v) for v in temperatures]
+            resp_vals = [float(v) for v in responses]
+            if len(temp_vals) != len(resp_vals):
+                log.warning("Series '%s' has mismatched temperature/response lengths; skipping.", series_id)
+                continue
+            weights = None
+            errors_key = "rate_errors" if mode == "arrhenius" else "response_errors"
+            errors = entry.get(errors_key) or entry.get("errors")
+            if errors:
+                try:
+                    errs = np.asarray(errors, dtype=float)
+                    if errs.shape == (len(temp_vals),):
+                        with np.errstate(divide="ignore"):
+                            if mode == "arrhenius":
+                                # Convert to ln(k) uncertainty: sigma_y = error / rate
+                                sigma_y = errs / np.asarray(resp_vals, dtype=float)
+                                weights = np.where(sigma_y > 0, 1.0 / sigma_y, 0.0)
+                            else:
+                                weights = np.where(errs > 0, 1.0 / errs, 0.0)
+                    else:
+                        log.warning("Error array for series '%s' has unexpected shape; ignoring.", series_id)
+                except Exception:
+                    log.warning("Failed to parse errors for series '%s'; ignoring.", series_id)
+            metadata = dict(entry.get("metadata") or {})
+            metadata.setdefault("temperature_unit", entry.get("temperature_unit") or inputs.get("temperature_unit") or "c")
+            for key in ("scope_kind", "scope_id", "tg_id", "nt_id", "rg_id"):
+                if key not in metadata and key in entry:
+                    metadata[key] = entry[key]
+            series_list.append(
+                TempgradSeries(
+                    series_id=series_id,
+                    x_values=temp_vals,
+                    y_values=resp_vals,
+                    weights=weights,
+                    metadata=metadata,
+                )
+            )
+        return series_list
+
+    def _series_from_db_arrhenius(self, ctx: TaskContext, inputs: Dict[str, Any]) -> List[TempgradSeries]:
+        filters = dict(inputs.get("filters") or {})
+        data_source = str(inputs.get("data_source") or filters.get("data_source") or "nmr").lower()
+        if data_source != "nmr":
+            log.info("Arrhenius data_source '%s' not supported yet; falling back to manual series.", data_source)
+            return []
+
+        reaction_type = filters.get("reaction_type")
+        substrate = filters.get("substrate") or filters.get("species")
+        buffer_name = filters.get("buffer") or filters.get("buffer_name")
+        plugin = filters.get("plugin")
+        model = filters.get("model")
+
+        buffer_id = None
+        buffer_disp = None
+        if buffer_name:
+            row = ctx.db.execute(
+                """
+                SELECT id, disp_name FROM meta_buffers
+                WHERE name = ? OR disp_name = ?
+                ORDER BY id LIMIT 1
+                """,
+                (buffer_name, buffer_name),
+            ).fetchone()
+            if row:
+                buffer_id = int(row["id"] if hasattr(row, "keys") else row[0])
+                buffer_disp = str(row["disp_name"] if hasattr(row, "keys") else row[1])
+            else:
+                log.warning("Buffer '%s' not found; continuing without buffer filter.", buffer_name)
+
+        params = []
+        clauses = ["fr.status = 'completed'"]
+        if reaction_type:
+            clauses.append("nr.reaction_type = ?")
+            params.append(str(reaction_type))
+        if substrate:
+            clauses.append("(fr.species = ? OR nr.substrate = ?)")
+            params.extend([str(substrate), str(substrate)])
+        if buffer_id is not None:
+            clauses.append("nr.buffer_id = ?")
+            params.append(buffer_id)
+        if plugin:
+            clauses.append("fr.plugin = ?")
+            params.append(str(plugin))
+        if model:
+            clauses.append("fr.model = ?")
+            params.append(str(model))
+
+        sql = f"""
+            SELECT
+                nr.id AS reaction_id,
+                nr.temperature,
+                nr.buffer_id,
+                fr.id AS fit_run_id,
+                fr.plugin,
+                fr.model,
+                fr.species,
+                kv.param_numeric AS k_value,
+                ke.param_numeric AS k_error
+            FROM nmr_fit_runs fr
+            JOIN nmr_reactions nr ON nr.id = fr.nmr_reaction_id
+            JOIN nmr_fit_params kv ON kv.fit_run_id = fr.id AND kv.param_name = 'k_value'
+            LEFT JOIN nmr_fit_params ke ON ke.fit_run_id = fr.id AND ke.param_name = 'k_error'
+            WHERE { ' AND '.join(clauses) }
+            ORDER BY nr.temperature, fr.id
+        """
+
+        rows = ctx.db.execute(sql, params).fetchall()
+        if not rows:
+            log.warning("No NMR fits matched filters %s; manual series required.", filters)
+            return []
+
+        temperatures: List[float] = []
+        rates: List[float] = []
+        weights: List[float] = []
+        for row in rows:
+            if hasattr(row, "keys"):
+                temp = float(row["temperature"])
+                k_value = float(row["k_value"])
+                k_error = row["k_error"]
+                spec = row["species"]
+            else:
+                temp = float(row[1])
+                k_value = float(row[7])
+                k_error = row[8]
+                spec = row[6]
+            if k_value <= 0:
+                continue
+            temperatures.append(temp)
+            rates.append(k_value)
+            if k_error is not None and k_error > 0 and k_value > 0:
+                sigma_y = float(k_error) / k_value
+                weights.append(1.0 / sigma_y if sigma_y > 0 else 0.0)
+            else:
+                weights.append(math.nan)
+
+        if not temperatures:
+            return []
+
+        weights_array = None
+        if any(math.isfinite(w) and w > 0 for w in weights):
+            weights_array = [w if math.isfinite(w) and w > 0 else 0.0 for w in weights]
+
+        metadata: Dict[str, Any] = {
+            "temperature_unit": "c",
+            "data_source": "nmr",
+            "reaction_type": reaction_type,
+            "substrate": substrate,
+            "plugin": plugin,
+            "model": model,
+        }
+        if buffer_id is not None:
+            metadata["buffer_id"] = buffer_id
+            metadata["buffer_name"] = buffer_name
+            metadata["buffer_disp_name"] = buffer_disp
+        if substrate:
+            metadata.setdefault("species", substrate)
+
+        series_id_parts = ["nmr"]
+        if reaction_type:
+            series_id_parts.append(reaction_type)
+        if substrate:
+            series_id_parts.append(str(substrate))
+        if buffer_name:
+            series_id_parts.append(str(buffer_name))
+        series_id = ":".join(part for part in series_id_parts if part)
+
+        return [
+            TempgradSeries(
+                series_id=series_id or "nmr_arrhenius",
+                x_values=temperatures,
+                y_values=rates,
+                weights=weights_array,
+                metadata=metadata,
+            )
+        ]
+
+    def _series_from_db_melt(self, ctx: TaskContext, inputs: Dict[str, Any]) -> List[TempgradSeries]:
+        log.info("No database loader implemented for two_state_melt; supply 'series' entries in config.")
+        return []
+
+    def _write_artifact(self, run_dir: Path, result) -> None:
+        out_dir = run_dir / "results"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        payload = asdict(result)
+        target = out_dir / "tempgrad_result.json"
+        target.write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+    @staticmethod
+    def _entries_from_mapping(data: Mapping[str, Any], prefix: str = "") -> List[Dict[str, Any]]:
+        entries: List[Dict[str, Any]] = []
+        if not data:
+            return entries
+        for key, value in data.items():
+            if value is None:
+                continue
+            name = f"{prefix}{key}"
+            if isinstance(value, (int, float)) and math.isfinite(value):
+                entries.append({"param_name": name, "param_numeric": float(value)})
+            elif isinstance(value, (dict, list, tuple)):
+                entries.append({"param_name": name, "param_text": json.dumps(value, sort_keys=True)})
+            else:
+                entries.append({"param_name": name, "param_text": str(value)})
+        return entries
+
+    @staticmethod
+    def _safe_int(value: Any) -> Optional[int]:
+        try:
+            if value in (None, ""):
+                return None
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+
+# numpy is optional at runtime; import only after definitions to keep annotations simple.
+try:
+    import numpy as np  # type: ignore
+except Exception as exc:  # pragma: no cover - numpy should be present
+    raise RuntimeError("TempgradFitTask requires numpy to be installed.") from exc

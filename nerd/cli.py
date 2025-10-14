@@ -40,6 +40,7 @@ class RunStep(str, enum.Enum):
     nmr_deg_kinetics = "nmr_deg_kinetics"
     nmr_add_kinetics = "nmr_add_kinetics"
     probe_tc_kinetics = "probe_tc_kinetics"
+    tempgrad_fit = "tempgrad_fit"
 
 
 @app.callback()

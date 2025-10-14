@@ -445,6 +445,7 @@ def register_nmr_trace_file(
     nmr_reaction_id: int,
     role: str,
     path: str,
+    species: Optional[str] = None,
     checksum: Optional[str] = None,
     task_id: Optional[int] = None,
 ) -> Optional[int]:
@@ -452,10 +453,11 @@ def register_nmr_trace_file(
     Insert or update a trace file record for an NMR reaction.
     """
     sql = """
-        INSERT INTO nmr_trace_files (nmr_reaction_id, role, path, checksum, task_id)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO nmr_trace_files (nmr_reaction_id, role, path, species, checksum, task_id)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(nmr_reaction_id, role) DO UPDATE SET
             path = excluded.path,
+            species = excluded.species,
             checksum = excluded.checksum,
             task_id = excluded.task_id,
             created_at = datetime('now')
@@ -463,7 +465,7 @@ def register_nmr_trace_file(
 
     def _op() -> Optional[int]:
         with conn:
-            conn.execute(sql, (nmr_reaction_id, role, path, checksum, task_id))
+            conn.execute(sql, (nmr_reaction_id, role, path, species, checksum, task_id))
             row = conn.execute(
                 """
                 SELECT id FROM nmr_trace_files
@@ -872,6 +874,160 @@ def record_probe_tc_fit_params(
         _run_with_retry(conn, _op, "record_probe_tc_fit_params")
     except sqlite3.Error as e:
         log.exception("Failed to insert probe_tc_fit_params for run_id=%s: %s", fit_run_id, e)
+
+
+def delete_tempgrad_fit_runs(
+    conn: sqlite3.Connection,
+    *,
+    fit_kind: str,
+    scope_kind: Optional[str] = None,
+    scope_id: Optional[int] = None,
+    tg_id: Optional[int] = None,
+    nt_id: Optional[int] = None,
+) -> int:
+    """
+    Remove existing tempgrad fit runs (and their params via cascade) matching filters.
+    """
+    clauses = ["fit_kind = ?"]
+    params: List[Any] = [fit_kind]
+    if scope_kind is not None:
+        clauses.append("scope_kind = ?")
+        params.append(scope_kind)
+    if scope_id is not None:
+        clauses.append("scope_id = ?")
+        params.append(scope_id)
+    if tg_id is not None:
+        clauses.append("tg_id = ?")
+        params.append(tg_id)
+    if nt_id is not None:
+        clauses.append("nt_id = ?")
+        params.append(nt_id)
+
+    sql = f"""
+        DELETE FROM tempgrad_fit_runs
+        WHERE {' AND '.join(clauses)}
+    """
+
+    def _op() -> int:
+        with conn:
+            cursor = conn.execute(sql, params)
+            return cursor.rowcount or 0
+
+    try:
+        return _run_with_retry(conn, _op, "delete_tempgrad_fit_runs")
+    except sqlite3.Error as e:
+        log.exception(
+            "Failed to delete tempgrad_fit_runs for fit_kind=%s, scope_kind=%s, scope_id=%s, tg_id=%s, nt_id=%s: %s",
+            fit_kind,
+            scope_kind,
+            scope_id,
+            tg_id,
+            nt_id,
+            e,
+        )
+        return 0
+
+
+def begin_tempgrad_fit_run(
+    conn: sqlite3.Connection,
+    *,
+    fit_kind: str,
+    task_id: Optional[int] = None,
+    scope_kind: Optional[str] = None,
+    scope_id: Optional[int] = None,
+    data_source: Optional[str] = None,
+    target_label: Optional[str] = None,
+    rg_id: Optional[int] = None,
+    tg_id: Optional[int] = None,
+    nt_id: Optional[int] = None,
+) -> Optional[int]:
+    """
+    Insert a tempgrad_fit_runs record and return its id.
+    """
+    sql = """
+        INSERT INTO tempgrad_fit_runs (
+            fit_kind, task_id, scope_kind, scope_id,
+            data_source, target_label, rg_id, tg_id, nt_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+
+    def _op() -> Optional[int]:
+        with conn:
+            cursor = conn.execute(
+                sql,
+                (
+                    fit_kind,
+                    task_id,
+                    scope_kind,
+                    scope_id,
+                    data_source,
+                    target_label,
+                    rg_id,
+                    tg_id,
+                    nt_id,
+                ),
+            )
+            return cursor.lastrowid
+
+    try:
+        return _run_with_retry(conn, _op, "begin_tempgrad_fit_run")
+    except sqlite3.Error as e:
+        log.exception(
+            "Failed to insert tempgrad_fit_run for fit_kind=%s, scope_kind=%s, scope_id=%s, tg_id=%s, nt_id=%s: %s",
+            fit_kind,
+            scope_kind,
+            scope_id,
+            tg_id,
+            nt_id,
+            e,
+        )
+        return None
+
+
+def record_tempgrad_fit_params(
+    conn: sqlite3.Connection,
+    *,
+    fit_run_id: int,
+    entries: Iterable[Dict[str, Any]],
+) -> None:
+    """
+    Insert parameter rows for a tempgrad fit run.
+    """
+    sql = """
+        INSERT INTO tempgrad_fit_params (fit_run_id, param_name, param_numeric, param_text, units)
+        VALUES (:fit_run_id, :param_name, :param_numeric, :param_text, :units)
+        ON CONFLICT(fit_run_id, param_name) DO UPDATE SET
+            param_numeric = excluded.param_numeric,
+            param_text = excluded.param_text,
+            units = excluded.units
+    """
+
+    rows: List[Dict[str, Any]] = []
+    for entry in entries:
+        name = entry.get("param_name")
+        if not name:
+            continue
+        rows.append(
+            {
+                "fit_run_id": fit_run_id,
+                "param_name": str(name),
+                "param_numeric": entry.get("param_numeric"),
+                "param_text": entry.get("param_text"),
+                "units": entry.get("units"),
+            }
+        )
+    if not rows:
+        return
+
+    def _op() -> None:
+        with conn:
+            conn.executemany(sql, rows)
+
+    try:
+        _run_with_retry(conn, _op, "record_tempgrad_fit_params")
+    except sqlite3.Error as e:
+        log.exception("Failed to insert tempgrad_fit_params for run_id=%s: %s", fit_run_id, e)
 
 
 def upsert_free_fit(conn: sqlite3.Connection, fit_data: Dict[str, Any]):
@@ -2032,6 +2188,7 @@ def register_nmr_trace_file(
     nmr_reaction_id: int,
     role: str,
     path: str,
+    species: Optional[str] = None,
     checksum: Optional[str] = None,
     task_id: Optional[int] = None,
 ) -> Optional[int]:
@@ -2039,10 +2196,11 @@ def register_nmr_trace_file(
     Insert or update a trace file record for an NMR reaction.
     """
     sql = """
-        INSERT INTO nmr_trace_files (nmr_reaction_id, role, path, checksum, task_id)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO nmr_trace_files (nmr_reaction_id, role, path, species, checksum, task_id)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(nmr_reaction_id, role) DO UPDATE SET
             path = excluded.path,
+            species = excluded.species,
             checksum = excluded.checksum,
             task_id = excluded.task_id,
             created_at = datetime('now')
@@ -2050,7 +2208,7 @@ def register_nmr_trace_file(
 
     def _op() -> Optional[int]:
         with conn:
-            conn.execute(sql, (nmr_reaction_id, role, path, checksum, task_id))
+            conn.execute(sql, (nmr_reaction_id, role, path, species, checksum, task_id))
             row = conn.execute(
                 """
                 SELECT id FROM nmr_trace_files

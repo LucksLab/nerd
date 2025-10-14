@@ -89,13 +89,15 @@ class NmrCreateTask(Task):
             if reaction_id is None:
                 raise RuntimeError(f"Failed to insert/update NMR reaction '{record['kinetic_data_dir']}'.")
 
-            for role, path_str in trace_map.items():
-                resolved = self._resolve_trace_path(path_str, roots)
+            for role, info in trace_map.items():
+                path_value = info["path"]
+                resolved = self._resolve_trace_path(path_value, roots)
                 db_api.register_nmr_trace_file(
                     ctx.db,
                     nmr_reaction_id=reaction_id,
                     role=role,
-                    path=str(path_str),
+                    path=str(path_value),
+                    species=info.get("species"),
                     checksum=None,
                     task_id=task_id,
                 )
@@ -130,7 +132,11 @@ class NmrCreateTask(Task):
             scope.label = f"{len(members)} reactions"
         return scope
 
-    def _build_reaction_payload(self, ctx: TaskContext, reaction: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
+    def _build_reaction_payload(
+        self,
+        ctx: TaskContext,
+        reaction: Dict[str, Any],
+    ) -> tuple[Dict[str, Any], Dict[str, Dict[str, Optional[str]]]]:
         buffer_id = reaction.get("buffer_id")
         if buffer_id in (None, ""):
             buffer_identifier = reaction.get("buffer")
@@ -169,7 +175,25 @@ class NmrCreateTask(Task):
         if not isinstance(trace_files, dict):
             raise TypeError("trace_files must be a mapping of role → path.")
 
-        return record, {str(role): str(path) for role, path in trace_files.items()}
+        normalized: Dict[str, Dict[str, Optional[str]]] = {}
+        for role, value in trace_files.items():
+            role_str = str(role)
+            species_val: Optional[str] = None
+            if isinstance(value, dict):
+                path_val = value.get("path")
+                species_raw = value.get("species")
+                if species_raw not in (None, ""):
+                    species_val = str(species_raw).strip()
+            else:
+                path_val = value
+            if path_val in (None, ""):
+                raise ValueError(f"Trace role '{role_str}' is missing a path.")
+            normalized[role_str] = {
+                "path": str(path_val),
+                "species": species_val,
+            }
+
+        return record, normalized
 
     @staticmethod
     def _resolve_trace_path(path_value: str, roots: List[Path]) -> Path:

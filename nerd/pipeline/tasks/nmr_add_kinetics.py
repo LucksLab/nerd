@@ -58,7 +58,26 @@ class NmrAddKineticsTask(Task):
         block["fit_params"] = dict(block.get("fit_params") or {})
         block["plugin_options"] = dict(block.get("plugin_options") or {})
         block["search_roots"] = list(block.get("search_roots") or [])
-        block["species"] = block.get("species")
+
+        species_cfg = block.get("species")
+        species_list: List[str] = []
+        if species_cfg:
+            if isinstance(species_cfg, (list, tuple, set)):
+                species_list = [str(item).strip() for item in species_cfg if item not in (None, "")]
+            else:
+                val = str(species_cfg).strip()
+                if val:
+                    species_list = [val]
+        block["species_list"] = species_list
+
+        substrates_cfg = block.get("substrates")
+        substrates_list: List[str] = []
+        if substrates_cfg:
+            if not isinstance(substrates_cfg, (list, tuple, set)):
+                substrates_cfg = [substrates_cfg]
+            substrates_list = [str(item).strip() for item in substrates_cfg if item not in (None, "")]
+        block["substrates"] = substrates_list
+
         block["model"] = block.get("model") or block.get("plugin")
 
         return block, {}
@@ -89,21 +108,40 @@ class NmrAddKineticsTask(Task):
         fit_params = inputs.get("fit_params") or {}
         model_name = str(inputs.get("model") or plugin_name or "nmr_add")
 
+        species_filter: List[str] = inputs.get("species_list") or []
+        substrate_filter: List[str] = inputs.get("substrates") or []
+
         for row in reactions:
             metadata = dict(row)
-            metadata.setdefault("species", inputs.get("species") or row["substrate"] or "ntp_probe")
+
+            substrate_label = str(row["substrate"] or "").strip()
+            if substrate_filter and substrate_label not in substrate_filter:
+                continue
+
+            reaction_traces = trace_map.get(row["id"], {})
+            peak_role = inputs["trace_roles"].get("peak_trace")
+            peak_record = reaction_traces.get(peak_role) if peak_role else None
+            peak_species = None
+            if peak_record is not None and "species" in peak_record.keys():
+                peak_species = peak_record["species"]
+                if peak_species in (None, ""):
+                    peak_species = None
+            if species_filter and peak_species not in species_filter:
+                continue
+
+            metadata.setdefault("species", peak_species or substrate_label or "ntp_probe")
             metadata.setdefault("ntp_conc", row["substrate_conc"])
             metadata.setdefault("dms_conc", row["probe_conc"])
 
             prepared = prepare_reaction_inputs(
                 row,
-                trace_map.get(row["id"], {}),
+                reaction_traces,
                 inputs["trace_roles"],
                 roots,
                 run_dir,
                 metadata=metadata,
             )
-            species = str(inputs.get("species") or metadata.get("species") or "ntp_probe")
+            species = str(metadata.get("species") or "ntp_probe")
             result = run_fit_for_reaction(
                 ctx.db,
                 prepared,

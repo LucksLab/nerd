@@ -207,6 +207,41 @@ CREATE TABLE IF NOT EXISTS probe_tc_fit_params (
 """
 
 # ---------------------------------------------------------------------------
+# Temperature gradient fits
+# ---------------------------------------------------------------------------
+
+CREATE_TEMPGRAD_FIT_RUNS = """
+CREATE TABLE IF NOT EXISTS tempgrad_fit_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fit_kind TEXT NOT NULL,
+    task_id INTEGER,
+    scope_kind TEXT,
+    scope_id INTEGER,
+    data_source TEXT,
+    target_label TEXT,
+    rg_id INTEGER,
+    tg_id INTEGER,
+    nt_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(task_id) REFERENCES core_tasks(id) ON DELETE SET NULL
+);
+"""
+
+CREATE_TEMPGRAD_FIT_PARAMS = """
+CREATE TABLE IF NOT EXISTS tempgrad_fit_params (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fit_run_id INTEGER NOT NULL,
+    param_name TEXT NOT NULL,
+    param_numeric REAL,
+    param_text TEXT,
+    units TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(fit_run_id) REFERENCES tempgrad_fit_runs(id) ON DELETE CASCADE,
+    UNIQUE(fit_run_id, param_name)
+);
+"""
+
+# ---------------------------------------------------------------------------
 # NMR experiments
 # ---------------------------------------------------------------------------
 
@@ -240,6 +275,7 @@ CREATE TABLE IF NOT EXISTS nmr_trace_files (
     nmr_reaction_id INTEGER NOT NULL,
     role TEXT NOT NULL,
     path TEXT NOT NULL,
+    species TEXT,
     checksum TEXT,
     task_id INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),

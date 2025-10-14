@@ -63,6 +63,7 @@ def prepare_reaction_inputs(
     Copy trace files for a reaction into the run directory and build metadata.
     """
     files: Dict[str, Path] = {}
+    trace_species: Dict[str, Any] = {}
     for plugin_role, db_role in trace_roles.items():
         record = trace_records.get(db_role)
         if record is None:
@@ -70,12 +71,14 @@ def prepare_reaction_inputs(
         resolved = _resolve_trace_path(str(record["path"]), roots)
         staged = _copy_into_run_dir(resolved, run_dir, int(reaction["id"]), plugin_role)
         files[plugin_role] = staged
+        if "species" in record.keys():
+            trace_species[plugin_role] = record["species"]
 
     return PreparedReaction(
         reaction_id=int(reaction["id"]),
         row=reaction,
         files=files,
-        metadata=dict(metadata),
+        metadata={**dict(metadata), "trace_species": {**(metadata.get("trace_species") or {}), **trace_species}},
     )
 
 
