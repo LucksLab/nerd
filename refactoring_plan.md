@@ -107,6 +107,7 @@ Tools to extract nucleotide energy from chemical probing experiments.
 - Engines live under `pipeline/plugins/tempgrad` so alternative fitters (e.g., external R integration) can be swapped in.
 - Results persist to `tempgrad_fit_runs`/`tempgrad_fit_params` using tall parameter storage; per-series fits include diagnostics and metadata captured from the request.
 - Config exposes `series` overrides or DB-backed filters (e.g., buffer, reaction_type, species) and allows custom engine options such as temperature units or initial guesses.
+- Probe timecourse data can be grouped dynamically (matching construct, buffer, probe, concentration, and RT conditions), filtered by melt threshold, and fit via weighted Arrhenius per nucleotide using `data_source: probe_tc`.
 
 ### `nerd calc_energy`
 
