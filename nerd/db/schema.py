@@ -279,6 +279,39 @@ CREATE TABLE IF NOT EXISTS nmr_reactions (
 );
 """
 
+# === Table: nmr_trace_files ===
+CREATE_NMR_TRACE_FILES = """
+CREATE TABLE IF NOT EXISTS nmr_trace_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nmr_reaction_id INTEGER NOT NULL,            -- Foreign key to nmr_reactions table
+    role TEXT NOT NULL,                          -- 'decay_trace', 'dms_trace', 'peak_trace', etc.
+    path TEXT NOT NULL,                          -- Relative or absolute path to staged file
+    checksum TEXT,                               -- Optional checksum for provenance
+    task_id INTEGER,                             -- Optional FK → tasks.id (who registered the file)
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(nmr_reaction_id) REFERENCES nmr_reactions(id) ON DELETE CASCADE,
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE SET NULL,
+    UNIQUE(nmr_reaction_id, role)
+);
+"""
+
+# === Table: nmr_fit_runs ===
+CREATE_NMR_FIT_RUNS = """
+CREATE TABLE IF NOT EXISTS nmr_fit_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,                    -- FK → tasks.id
+    nmr_reaction_id INTEGER NOT NULL,            -- FK → nmr_reactions.id
+    plugin TEXT NOT NULL,                        -- Plugin identifier (e.g., 'lmfit_kdeg')
+    params_json TEXT,                            -- Serialized plugin parameters
+    status TEXT NOT NULL DEFAULT 'running',      -- running|completed|failed
+    message TEXT,                                -- Optional diagnostic status
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at TEXT,                            -- When the run finished
+    FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY(nmr_reaction_id) REFERENCES nmr_reactions(id) ON DELETE CASCADE
+);
+"""
+
 
 # === Table: nmr_kinetic_rates ===
 CREATE_NMR_KINETIC_RATES = """
@@ -287,12 +320,14 @@ CREATE TABLE IF NOT EXISTS nmr_kinetic_rates (
     nmr_reaction_id INTEGER,                      -- Foreign key to nmr_reactions table
     model TEXT NOT NULL,                         -- Model used for fitting (e.g. "exponential", "ode")
     k_value REAL NOT NULL,                       -- Fitted kinetic rate value
-    k_error REAL NOT NULL,                       -- Fitted kinetic rate std error
-    r2 REAL NOT NULL,                            -- R-squared value of the fit
-    chisq REAL NOT NULL,                         -- Chi-squared value of the fit
+    k_error REAL,                                -- Fitted kinetic rate std error
+    r2 REAL,                                     -- R-squared value of the fit
+    chisq REAL,                                  -- Chi-squared value of the fit
     species TEXT NOT NULL,                       -- Species for which the rate is calculated (e.g. "dms", "atp-c8", etc.)
+    fit_run_id INTEGER,                          -- Foreign key to nmr_fit_runs table
     PRIMARY KEY(id AUTOINCREMENT),
     FOREIGN KEY(nmr_reaction_id) REFERENCES nmr_reactions(id),
+    FOREIGN KEY(fit_run_id) REFERENCES nmr_fit_runs(id) ON DELETE SET NULL,
     UNIQUE(nmr_reaction_id, species)            -- Ensure unique rates per reaction and species
 );
 """
@@ -486,8 +521,10 @@ ALL_TABLES = [
     CREATE_FMOD_VALS,
     CREATE_FREE_TC_FITS,
     CREATE_CONSTRAINED_TC_FITS,
-    CREATE_NMR_KINETIC_RATES,
     CREATE_NMR_REACTIONS,
+    CREATE_NMR_TRACE_FILES,
+    CREATE_NMR_FIT_RUNS,
+    CREATE_NMR_KINETIC_RATES,
     CREATE_ARRHENIUS_FITS,
     CREATE_PROBING_MELT_FITS,
     CREATE_PROBING_KINETIC_RATES,
@@ -496,6 +533,23 @@ ALL_TABLES = [
     CREATE_ARTIFACTS,
     CREATE_TASK_SCOPE_MEMBERS
 ]
+
+# === Indexes for NMR tables ===
+CREATE_INDEX_NMR_TRACE_REACTION = """
+CREATE INDEX IF NOT EXISTS idx_nmr_trace_files_reaction ON nmr_trace_files (nmr_reaction_id);
+"""
+
+CREATE_INDEX_NMR_TRACE_ROLE = """
+CREATE INDEX IF NOT EXISTS idx_nmr_trace_files_role ON nmr_trace_files (role);
+"""
+
+CREATE_INDEX_NMR_FIT_RUNS_TASK = """
+CREATE INDEX IF NOT EXISTS idx_nmr_fit_runs_task ON nmr_fit_runs (task_id, nmr_reaction_id);
+"""
+
+CREATE_INDEX_NMR_KIN_RATES_REACTION = """
+CREATE INDEX IF NOT EXISTS idx_nmr_kinetic_rates_reaction ON nmr_kinetic_rates (nmr_reaction_id, species);
+"""
 
 ALL_INDEXES = [
     CREATE_INDEX_ARRHENIUS_NO_GROUP,
@@ -509,5 +563,9 @@ ALL_INDEXES = [
     CREATE_INDEX_RG_LABEL,
     CREATE_INDEX_TASKS_UNIQUE_SIG_ACTIVE,
     CREATE_INDEX_DERIVED_CHILD,
-    CREATE_INDEX_DERIVED_PARENT
+    CREATE_INDEX_DERIVED_PARENT,
+    CREATE_INDEX_NMR_TRACE_REACTION,
+    CREATE_INDEX_NMR_TRACE_ROLE,
+    CREATE_INDEX_NMR_FIT_RUNS_TASK,
+    CREATE_INDEX_NMR_KIN_RATES_REACTION
 ]

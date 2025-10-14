@@ -625,7 +625,7 @@ class MutCountTask(Task):
             pass
         return None
 
-    def consume_outputs(self, ctx: TaskContext, inputs: Dict[str, Any], params: Dict[str, Any], run_dir: Path):
+    def consume_outputs(self, ctx: TaskContext, inputs: Dict[str, Any], params: Dict[str, Any], run_dir: Path, task_id: Optional[int] = None):
         """
         Execute mutation counting for the selected parent samples and ingest the results.
         """

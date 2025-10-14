@@ -257,7 +257,7 @@ class Task(abc.ABC):
 
         # 8. Consume the outputs of the task.
         log.info("Command completed successfully. Consuming outputs.")
-        self.consume_outputs(ctx, inputs, params, run_dir)
+        self.consume_outputs(ctx, inputs, params, run_dir, task_id=task_id)
 
         # 9. Mark the task as completed.
         db_api.finish_task(ctx.db, task_id, "completed")
@@ -309,7 +309,7 @@ class Task(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def consume_outputs(self, ctx: TaskContext, inputs: Any, params: Any, run_dir: Path):
+    def consume_outputs(self, ctx: TaskContext, inputs: Any, params: Any, run_dir: Path, task_id: Optional[int] = None):
         """
         Process the outputs after the command has successfully run.
         """

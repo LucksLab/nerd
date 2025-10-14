@@ -426,7 +426,7 @@ class CreateTask(Task):
         """
         return None
 
-    def consume_outputs(self, ctx: TaskContext, inputs: Dict[str, Any], params: Dict[str, Any], run_dir: Path):
+    def consume_outputs(self, ctx: TaskContext, inputs: Dict[str, Any], params: Dict[str, Any], run_dir: Path, task_id: Optional[int] = None):
         """
         Parses the 'create' config and writes the data to the database.
         """

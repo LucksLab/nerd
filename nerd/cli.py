@@ -12,7 +12,13 @@ from nerd.utils.logging import setup_logger, get_logger
 from nerd.utils.config import load_config
 from nerd.utils.hashing import config_hash
 from nerd.db import api as db_api
-from nerd.pipeline.tasks import create, mut_count, tc_free
+from nerd.pipeline.tasks import TASK_REGISTRY
+try:
+    from nerd.pipeline.tasks import tc_free as _tc_free_mod
+except ImportError:  # pragma: no cover - optional legacy task
+    _tc_free_mod = None
+else:
+    TASK_REGISTRY.setdefault("tc_free", _tc_free_mod.TimecourseFreeTask)
 from datetime import datetime
 
 # Create the main Typer application
@@ -27,8 +33,12 @@ state = {}
 
 class RunStep(str, enum.Enum):
     """Enum for available pipeline steps."""
+
     create = "create"
     mut_count = "mut_count"
+    nmr_create = "nmr_create"
+    nmr_deg_kinetics = "nmr_deg_kinetics"
+    nmr_add_kinetics = "nmr_add_kinetics"
     tc_free = "tc_free"
 
 
@@ -109,16 +119,11 @@ def run(
         conn = db_api.connect(Path(state["db"]))
         db_api.init_schema(conn)
 
-        # Map step name to task class
-        task_map = {
-            "create": create.CreateTask(),
-            "mut_count": mut_count.MutCountTask(),
-            "tc_free": tc_free.TimecourseFreeTask(),
-        }
+        task_map = {name: cls() for name, cls in TASK_REGISTRY.items()}
 
         task = task_map.get(step.value)
         if not task:
-            log.error("Unknown task step: %s", step.value)
+            log.error("Task '%s' is not available in this build.", step.value)
             raise typer.Exit(code=1)
 
         # Execute the task

@@ -437,6 +437,288 @@ def record_task_scope_members(
     except sqlite3.Error as e:
         log.exception("Failed to record scope members for task_id=%s: %s", task_id, e)
 
+# --- NMR-specific helpers ---------------------------------------------------
+
+def register_nmr_trace_file(
+    conn: sqlite3.Connection,
+    *,
+    nmr_reaction_id: int,
+    role: str,
+    path: str,
+    checksum: Optional[str] = None,
+    task_id: Optional[int] = None,
+) -> Optional[int]:
+    """
+    Insert or update a trace file record for an NMR reaction.
+    """
+    sql = """
+        INSERT INTO nmr_trace_files (nmr_reaction_id, role, path, checksum, task_id)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(nmr_reaction_id, role) DO UPDATE SET
+            path = excluded.path,
+            checksum = excluded.checksum,
+            task_id = excluded.task_id,
+            created_at = datetime('now')
+    """
+
+    def _op() -> Optional[int]:
+        with conn:
+            conn.execute(sql, (nmr_reaction_id, role, path, checksum, task_id))
+            row = conn.execute(
+                """
+                SELECT id FROM nmr_trace_files
+                WHERE nmr_reaction_id = ? AND role = ?
+                """,
+                (nmr_reaction_id, role),
+            ).fetchone()
+            return int(row["id"]) if row else None
+
+    try:
+        return _run_with_retry(conn, _op, "register_nmr_trace_file")
+    except sqlite3.Error as e:
+        log.exception("Failed to register NMR trace file for reaction_id=%s, role=%s: %s", nmr_reaction_id, role, e)
+        return None
+
+
+def fetch_nmr_trace_files(
+    conn: sqlite3.Connection,
+    reaction_ids: Iterable[int],
+) -> Dict[int, Dict[str, sqlite3.Row]]:
+    """
+    Return trace files keyed by reaction_id and role for the provided reactions.
+    """
+    ids = list(reaction_ids)
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    sql = f"""
+        SELECT *
+        FROM nmr_trace_files
+        WHERE nmr_reaction_id IN ({placeholders})
+    """
+    rows = conn.execute(sql, ids).fetchall()
+    mapping: Dict[int, Dict[str, sqlite3.Row]] = {}
+    for row in rows:
+        rid = int(row["nmr_reaction_id"])
+        mapping.setdefault(rid, {})
+        mapping[rid][row["role"]] = row
+    return mapping
+
+
+def fetch_nmr_reactions(
+    conn: sqlite3.Connection,
+    *,
+    reaction_type: Optional[str] = None,
+    reaction_ids: Optional[Iterable[int]] = None,
+) -> List[sqlite3.Row]:
+    """Return NMR reactions filtered by type and/or specific IDs."""
+    clauses: List[str] = []
+    params: List[Any] = []
+    if reaction_type:
+        clauses.append("reaction_type = ?")
+        params.append(reaction_type)
+    if reaction_ids:
+        ids = list(reaction_ids)
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        clauses.append(f"id IN ({placeholders})")
+        params.extend(ids)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    sql = f"""
+        SELECT *
+        FROM nmr_reactions
+        {where}
+        ORDER BY id
+    """
+    return conn.execute(sql, params).fetchall()
+
+
+def begin_nmr_fit_run(
+    conn: sqlite3.Connection,
+    *,
+    task_id: int,
+    nmr_reaction_id: int,
+    plugin: str,
+    params: Optional[Dict[str, Any]] = None,
+) -> Optional[int]:
+    """Create an nmr_fit_runs row marking the start of a fit attempt."""
+    params_json = json.dumps(params or {})
+    sql = """
+        INSERT INTO nmr_fit_runs (task_id, nmr_reaction_id, plugin, params_json)
+        VALUES (?, ?, ?, ?)
+    """
+
+    def _op() -> Optional[int]:
+        with conn:
+            cur = conn.execute(sql, (task_id, nmr_reaction_id, plugin, params_json))
+            return cur.lastrowid
+
+    try:
+        return _run_with_retry(conn, _op, "begin_nmr_fit_run")
+    except sqlite3.Error as e:
+        log.exception("Failed to begin NMR fit run for reaction_id=%s: %s", nmr_reaction_id, e)
+        return None
+
+
+def finish_nmr_fit_run(
+    conn: sqlite3.Connection,
+    fit_run_id: int,
+    status: str,
+    message: Optional[str] = None,
+) -> None:
+    """Update an nmr_fit_runs row when a fit completes."""
+    sql = """
+        UPDATE nmr_fit_runs
+        SET status = ?, message = ?, finished_at = datetime('now')
+        WHERE id = ?
+    """
+
+    def _op() -> None:
+        with conn:
+            conn.execute(sql, (status, message, fit_run_id))
+
+    try:
+        _run_with_retry(conn, _op, "finish_nmr_fit_run")
+    except sqlite3.Error as e:
+        log.exception("Failed to finish NMR fit run %s: %s", fit_run_id, e)
+
+
+def record_nmr_kinetic_rate(
+    conn: sqlite3.Connection,
+    *,
+    nmr_reaction_id: int,
+    species: str,
+    model: str,
+    k_value: float,
+    k_error: Optional[float],
+    r2: Optional[float],
+    chisq: Optional[float],
+    fit_run_id: Optional[int],
+) -> Optional[int]:
+    """
+    Insert or update an NMR kinetic rate measurement.
+    """
+    sql = """
+        INSERT INTO nmr_kinetic_rates (
+            nmr_reaction_id, model, k_value, k_error, r2, chisq, species, fit_run_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(nmr_reaction_id, species) DO UPDATE SET
+            model = excluded.model,
+            k_value = excluded.k_value,
+            k_error = excluded.k_error,
+            r2 = excluded.r2,
+            chisq = excluded.chisq,
+            fit_run_id = excluded.fit_run_id
+    """
+
+    def _op() -> Optional[int]:
+        with conn:
+            conn.execute(
+                sql,
+                (nmr_reaction_id, model, k_value, k_error, r2, chisq, species, fit_run_id),
+            )
+            row = conn.execute(
+                """
+                SELECT id FROM nmr_kinetic_rates
+                WHERE nmr_reaction_id = ? AND species = ?
+                """,
+                (nmr_reaction_id, species),
+            ).fetchone()
+            return int(row["id"]) if row else None
+
+    try:
+        return _run_with_retry(conn, _op, "record_nmr_kinetic_rate")
+    except sqlite3.Error as e:
+        log.exception("Failed to record NMR kinetic rate for reaction_id=%s species=%s: %s", nmr_reaction_id, species, e)
+        return None
+
+
+def upsert_nmr_reaction(conn: sqlite3.Connection, reaction: Dict[str, Any]) -> Optional[int]:
+    """
+    Insert or update an NMR reaction record using kinetic_data_dir as the unique key.
+    Returns the reaction id.
+    """
+    required = [
+        "reaction_type",
+        "temperature",
+        "replicate",
+        "num_scans",
+        "time_per_read",
+        "total_kinetic_reads",
+        "total_kinetic_time",
+        "probe",
+        "probe_conc",
+        "probe_solvent",
+        "substrate",
+        "substrate_conc",
+        "buffer_id",
+        "nmr_machine",
+        "kinetic_data_dir",
+    ]
+    missing = [field for field in required if reaction.get(field) in (None, "")]
+    if missing:
+        raise ValueError(f"Missing required field(s) for nmr_reactions: {', '.join(missing)}")
+
+    sql = """
+        INSERT INTO nmr_reactions (
+            reaction_type, temperature, replicate, num_scans, time_per_read,
+            total_kinetic_reads, total_kinetic_time, probe, probe_conc, probe_solvent,
+            substrate, substrate_conc, buffer_id, nmr_machine, kinetic_data_dir,
+            mnova_analysis_dir, raw_fid_dir
+        ) VALUES (
+            :reaction_type, :temperature, :replicate, :num_scans, :time_per_read,
+            :total_kinetic_reads, :total_kinetic_time, :probe, :probe_conc, :probe_solvent,
+            :substrate, :substrate_conc, :buffer_id, :nmr_machine, :kinetic_data_dir,
+            :mnova_analysis_dir, :raw_fid_dir
+        )
+        ON CONFLICT(kinetic_data_dir) DO UPDATE SET
+            reaction_type = excluded.reaction_type,
+            temperature = excluded.temperature,
+            replicate = excluded.replicate,
+            num_scans = excluded.num_scans,
+            time_per_read = excluded.time_per_read,
+            total_kinetic_reads = excluded.total_kinetic_reads,
+            total_kinetic_time = excluded.total_kinetic_time,
+            probe = excluded.probe,
+            probe_conc = excluded.probe_conc,
+            probe_solvent = excluded.probe_solvent,
+            substrate = excluded.substrate,
+            substrate_conc = excluded.substrate_conc,
+            buffer_id = excluded.buffer_id,
+            nmr_machine = excluded.nmr_machine,
+            mnova_analysis_dir = excluded.mnova_analysis_dir,
+            raw_fid_dir = excluded.raw_fid_dir
+    """
+
+    def _op() -> Optional[int]:
+        with conn:
+            conn.execute(sql, reaction)
+            row = conn.execute(
+                "SELECT id FROM nmr_reactions WHERE kinetic_data_dir = ?",
+                (reaction["kinetic_data_dir"],),
+            ).fetchone()
+            return int(row[0]) if row else None
+
+    try:
+        return _run_with_retry(conn, _op, "upsert_nmr_reaction")
+    except sqlite3.Error as e:
+        log.exception("Failed to upsert nmr_reactions row for %s: %s", reaction.get("kinetic_data_dir"), e)
+        return None
+
+
+def get_nmr_reaction_id_by_dir(conn: sqlite3.Connection, kinetic_data_dir: str) -> Optional[int]:
+    """Resolve an NMR reaction id by kinetic_data_dir."""
+    if kinetic_data_dir in (None, ""):
+        return None
+    sql = "SELECT id FROM nmr_reactions WHERE kinetic_data_dir = ?"
+    try:
+        row = _run_with_retry(conn, lambda: conn.execute(sql, (kinetic_data_dir,)).fetchone(), "get_nmr_reaction_id_by_dir")
+        return int(row[0]) if row else None
+    except sqlite3.Error as e:
+        log.exception("Failed to lookup nmr_reaction by kinetic_data_dir '%s': %s", kinetic_data_dir, e)
+        return None
+
 # --- Domain-specific write operations ---
 
 def insert_fmod_calc_run(conn: sqlite3.Connection, run_data: Dict[str, Any]) -> Optional[int]:
@@ -1040,7 +1322,7 @@ def get_buffer_id_by_name_or_disp(conn: sqlite3.Connection, identifier: str) -> 
     """
     if identifier in (None, ""):
         return None
-    ident = str(identifier)
+    ident = str(identifier).strip()
     queries = [
         "SELECT id FROM buffers WHERE LOWER(disp_name) = LOWER(?) LIMIT 1",
         "SELECT id FROM buffers WHERE LOWER(name) = LOWER(?) LIMIT 1",
