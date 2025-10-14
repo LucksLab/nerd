@@ -951,6 +951,14 @@ class MutCountTask(Task):
             if inserted_for_sample:
                 ingested_runs += 1
 
+        temp_dir = run_dir / "shapemapper_temp"
+        if temp_dir.exists():
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                log.debug("Removed shapemapper_temp directory at %s", temp_dir)
+            except Exception:
+                log.debug("Failed to remove shapemapper_temp directory at %s", temp_dir)
+
         log.info(
             "mut_count completed. Profiles found for %d/%d samples; ingested %d run(s).",
             found_profiles,
