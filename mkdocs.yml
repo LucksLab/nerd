@@ -1,0 +1,20 @@
+site_name: NERD Documentation
+repo_url: https://github.com/<lab>/nerd
+repo_name: nerd
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Create Samples: guides/create-samples.md
+      - NMR Kinetics: guides/nmr-kinetics.md
+      - Probe Timecourse: guides/probe-timecourse.md
+      - Temperature Gradients: guides/tempgrad-fit.md
+  - CLI Reference:
+      - create: cli/create.md
+      - nmr_deg_kinetics: cli/nmr_deg_kinetics.md
+      - nmr_add_kinetics: cli/nmr_add_kinetics.md
+      - probe_timecourse: cli/probe_timecourse.md
+      - tempgrad_fit: cli/tempgrad_fit.md
+markdown_extensions:
+  - toc
+  - admonition
+  - codehilite

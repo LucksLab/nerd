@@ -2,9 +2,9 @@
 
 `nerd create` ingests metadata (constructs, buffers, sequencing runs, samples) into a NERD SQLite database. It is typically the first task you run when setting up a new analysis.
 
-```
+````bash
 nerd create --config PATH/TO/config.yaml --db PATH/TO/nerd.sqlite
-```
+````
 
 If `--db` is omitted, the CLI creates/updates `nerd.sqlite` inside `run.output_dir`.
 
@@ -104,7 +104,7 @@ Because `nerd create` runs inside the CLI’s task framework, you can also suppl
 
 ## Examples
 
-```bash
+````bash
 # Minimal inline config
 nerd create --config examples/create_minimal.yaml --db nerd.sqlite
 
@@ -114,6 +114,6 @@ nerd create --config examples/create_all_samples/create_all.yaml --db nerd.sqlit
 # Separate probing sample import
 nerd create --config examples/create_all_samples/create_probing_samples.yaml \
             --db nerd.sqlite
-```
+````
 
 Once metadata is ingested, you’re ready to run `nmr_*` or `probe_timecourse` tasks on the same database.
