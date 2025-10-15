@@ -49,8 +49,8 @@ coverage.xml
 # Jupyter
 .ipynb_checkpoints/
 
-# Sphinx docs
-/docs/_build/
+# mkdoc deploy
+site/
 
 # Databases
 *.db

@@ -1,0 +1,25 @@
+# .github/workflows/deploy-docs.yml
+name: Deploy MkDocs site
+
+on:
+  push:
+    branches: [ main ]     # adjust if your default branch is 'master' or 'dev'
+  workflow_dispatch:        # allow manual runs from the GitHub UI
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install mkdocs mkdocs-material mkdocstrings[python] mkdocs-jupyter mkdocs-include-markdown-plugin
+
+      - name: Build and deploy
+        run: mkdocs gh-deploy --force

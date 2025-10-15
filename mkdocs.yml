@@ -30,3 +30,4 @@ markdown_extensions:
   - toc
   - admonition
   - codehilite
+  - include-markdown
