@@ -178,7 +178,7 @@ class BaselinePythonEngine(TimecourseEngine):
         rounds_requested = [self._normalize_round(r) for r in rounds_requested]
 
         # Prepare per-nucleotide free fits (used by multiple rounds).
-        single_fit_cache: Dict[int, _SingleFitRecord] = {}
+        single_fit_cache: Dict[Tuple[int, Optional[str]], _SingleFitRecord] = {}
         round_results: List[RoundResult] = []
 
         log_kdeg_initial = self._initial_log_kdeg(request)
@@ -192,13 +192,16 @@ class BaselinePythonEngine(TimecourseEngine):
                         log_kdeg_initial=log_kdeg_initial,
                         fixed_log_kdeg=None,
                     )
-                    single_fit_cache[series.nt_id] = fit_payload
+                    single_fit_cache[self._series_key(series)] = fit_payload
                 except Exception as exc:  # noqa: BLE001
                     diagnostics = {
                         "status": "failed",
                         "reason": str(exc),
                     }
-                    single_fit_cache[series.nt_id] = _SingleFitRecord(params={}, diagnostics=diagnostics)
+                    single_fit_cache[self._series_key(series)] = _SingleFitRecord(
+                        params={},
+                        diagnostics=diagnostics,
+                    )
 
         # Round 1: free fits
         if ROUND_FREE in rounds_requested:
@@ -235,7 +238,7 @@ class BaselinePythonEngine(TimecourseEngine):
                     )
                 )
             else:
-                constrained_records: Dict[int, _SingleFitRecord] = {}
+                constrained_records: Dict[Tuple[int, Optional[str]], _SingleFitRecord] = {}
                 for series in request.nucleotides:
                     try:
                         fit_payload = self._compute_single_fit(
@@ -243,13 +246,16 @@ class BaselinePythonEngine(TimecourseEngine):
                             log_kdeg_initial=constrained_log_kdeg,
                             fixed_log_kdeg=constrained_log_kdeg,
                         )
-                        constrained_records[series.nt_id] = fit_payload
+                        constrained_records[self._series_key(series)] = fit_payload
                     except Exception as exc:  # noqa: BLE001
                         diagnostics = {
                             "status": "failed",
                             "reason": str(exc),
                         }
-                        constrained_records[series.nt_id] = _SingleFitRecord(params={}, diagnostics=diagnostics)
+                        constrained_records[self._series_key(series)] = _SingleFitRecord(
+                            params={},
+                            diagnostics=diagnostics,
+                        )
 
                 round_results.append(
                     self._round_from_single_fits(
@@ -271,6 +277,16 @@ class BaselinePythonEngine(TimecourseEngine):
             rounds=tuple(round_results),
             artifacts={},
         )
+
+    @staticmethod
+    def _series_key(series: NucleotideSeries) -> Tuple[int, Optional[str]]:
+        valtype: Optional[str] = None
+        meta = series.metadata or {}
+        if isinstance(meta, Mapping):
+            raw = meta.get("valtype")
+            if raw not in (None, ""):
+                valtype = str(raw)
+        return (series.nt_id, valtype)
 
     @staticmethod
     def _normalize_round(value: str) -> str:
@@ -320,7 +336,7 @@ class BaselinePythonEngine(TimecourseEngine):
     def _round_from_single_fits(
         self,
         round_id: str,
-        records: Mapping[int, _SingleFitRecord],
+        records: Mapping[Tuple[int, Optional[str]], _SingleFitRecord],
         series_list: Sequence[NucleotideSeries],
         *,
         notes: Optional[str],
@@ -328,7 +344,7 @@ class BaselinePythonEngine(TimecourseEngine):
         fits: List[PerNucleotideFit] = []
         successes = 0
         for series in series_list:
-            record = records.get(series.nt_id)
+            record = records.get(self._series_key(series))
             if record is None:
                 fits.append(PerNucleotideFit(nt_id=series.nt_id, params={}, diagnostics={"status": "missing"}))
                 continue
@@ -366,7 +382,7 @@ class BaselinePythonEngine(TimecourseEngine):
     def _run_global_fit(
         self,
         request: TimecourseRequest,
-        single_fit_cache: Mapping[int, _SingleFitRecord],
+        single_fit_cache: Mapping[Tuple[int, Optional[str]], _SingleFitRecord],
     ) -> RoundResult:
         selected_series = self._filter_series_for_global(request, single_fit_cache)
         if not selected_series:
@@ -386,7 +402,7 @@ class BaselinePythonEngine(TimecourseEngine):
         log_fmods: List[float] = []
 
         for series in selected_series:
-            record = single_fit_cache.get(series.nt_id)
+            record = single_fit_cache.get(self._series_key(series))
             if record is None or not record.params:
                 continue
             params = record.params
@@ -464,7 +480,7 @@ class BaselinePythonEngine(TimecourseEngine):
     def _filter_series_for_global(
         self,
         request: TimecourseRequest,
-        single_fit_cache: Mapping[int, _SingleFitRecord],
+        single_fit_cache: Mapping[Tuple[int, Optional[str]], _SingleFitRecord],
     ) -> List[NucleotideSeries]:
         options = dict(request.options or {})
         filters = dict(options.get("global_filters") or {})
@@ -489,7 +505,7 @@ class BaselinePythonEngine(TimecourseEngine):
                 if base and base not in bases_filter:
                     continue
 
-            record = single_fit_cache.get(series.nt_id)
+            record = single_fit_cache.get(self._series_key(series))
             if record is None or not record.params:
                 continue
             diagnostics = record.diagnostics

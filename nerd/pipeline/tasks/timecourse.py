@@ -80,7 +80,18 @@ class ProbeTimecourseTask(Task):
         block["rg_ids"] = rg_ids
 
         block["overwrite"] = bool(block.get("overwrite", False))
-        block["valtype"] = str(block.get("valtype") or "fmod")
+
+        valtype_cfg = block.get("valtype")
+        if isinstance(valtype_cfg, (list, tuple, set)):
+            valtypes = [str(v) for v in valtype_cfg if v not in (None, "")]
+        elif valtype_cfg in (None, ""):
+            valtypes = ["fmod"]
+        else:
+            valtypes = [str(valtype_cfg)]
+        if not valtypes:
+            raise ValueError("probe_timecourse requires at least one valtype.")
+        block["valtypes"] = valtypes
+        block["valtype"] = valtypes[0] if len(valtypes) == 1 else list(valtypes)
 
         fmod_run_id = block.get("fmod_run_id")
         block["fmod_run_id"] = int(fmod_run_id) if fmod_run_id not in (None, "") else None
@@ -121,7 +132,15 @@ class ProbeTimecourseTask(Task):
         engine_name = inputs["engine"]
         rounds = inputs["rounds"]
         overwrite = bool(inputs.get("overwrite", True))
-        valtype = inputs.get("valtype")
+        valtypes = list(inputs.get("valtypes") or [])
+        if not valtypes:
+            legacy_valtype = inputs.get("valtype")
+            if isinstance(legacy_valtype, str):
+                valtypes = [legacy_valtype]
+            elif isinstance(legacy_valtype, (list, tuple, set)):
+                valtypes = [str(v) for v in legacy_valtype if v not in (None, "")]
+        if not valtypes:
+            valtypes = ["fmod"]
         nt_filter = set(inputs.get("nt_ids") or [])
         min_points = int(inputs.get("min_points", 3))
 
@@ -135,7 +154,7 @@ class ProbeTimecourseTask(Task):
                 series, rg_meta = self._load_rg_dataset(
                     ctx.db,
                     rg_id,
-                    valtype=valtype,
+                    valtypes=valtypes,
                     min_points=min_points,
                     nt_filter=nt_filter,
                     preferred_fmod_run=inputs.get("fmod_run_id"),
@@ -150,6 +169,13 @@ class ProbeTimecourseTask(Task):
 
             global_metadata = dict(inputs.get("global_metadata") or {})
             global_metadata.update(rg_meta)
+            normalized_valtypes = list(dict.fromkeys(rg_meta.get("valtypes") or valtypes))
+            if normalized_valtypes:
+                global_metadata["valtypes"] = normalized_valtypes
+                if len(normalized_valtypes) == 1:
+                    global_metadata["valtype"] = normalized_valtypes[0]
+                else:
+                    global_metadata.pop("valtype", None)
 
             request = TimecourseRequest(
                 rg_id=rg_id,
@@ -159,6 +185,16 @@ class ProbeTimecourseTask(Task):
                 options=dict(inputs.get("engine_options") or {}),
             )
             result = engine.run(request)
+
+            result_meta: Dict[str, Any] = dict(result.metadata or {})
+            result_meta.setdefault("rg_id", rg_id)
+            if normalized_valtypes:
+                result_meta["valtypes"] = list(normalized_valtypes)
+                if len(normalized_valtypes) == 1:
+                    result_meta["valtype"] = normalized_valtypes[0]
+                else:
+                    result_meta.pop("valtype", None)
+            result.metadata = result_meta
 
             self._write_result_artifact(results_dir, rg_id, result)
             if task_id is not None:
@@ -209,19 +245,27 @@ class ProbeTimecourseTask(Task):
         conn,
         rg_id: int,
         *,
-        valtype: str,
+        valtypes: Sequence[str],
         min_points: int,
         nt_filter: Iterable[int],
         preferred_fmod_run: Optional[int],
     ) -> Tuple[List[NucleotideSeries], Dict[str, Any]]:
         nt_filter_set = {int(x) for x in nt_filter or []}
-        fmod_run_id = self._resolve_fmod_run(conn, rg_id, valtype, preferred_fmod_run)
+        normalized_valtypes = [str(v) for v in valtypes if v not in (None, "")]
+        if not normalized_valtypes:
+            raise ValueError("At least one valtype must be provided to load timecourse data.")
 
-        sql = """
+        fmod_run_id = self._resolve_fmod_run(conn, rg_id, normalized_valtypes, preferred_fmod_run)
+
+        valtype_param_names = [f"valtype_{idx}" for idx in range(len(normalized_valtypes))]
+        valtype_clause = ", ".join(f":{name}" for name in valtype_param_names)
+
+        sql = f"""
             SELECT
                 fv.nt_id,
                 fv.fmod_val,
                 fv.fmod_run_id,
+                fv.valtype AS valtype,
                 pr.reaction_time,
                 pr.treated,
                 pr.temperature,
@@ -234,26 +278,27 @@ class ProbeTimecourseTask(Task):
             JOIN meta_nucleotides mn ON mn.id = fv.nt_id
             WHERE pr.rg_id = :rg_id
               AND fv.fmod_val IS NOT NULL
-              AND fv.valtype = :valtype
+              AND fv.valtype IN ({valtype_clause})
               AND (:fmod_run_id IS NULL OR fv.fmod_run_id = :fmod_run_id)
             ORDER BY fv.nt_id, pr.reaction_time, pr.id
         """
-        rows = conn.execute(
-            sql,
-            {"rg_id": rg_id, "valtype": valtype, "fmod_run_id": fmod_run_id},
-        ).fetchall()
+        params: Dict[str, Any] = {"rg_id": rg_id, "fmod_run_id": fmod_run_id}
+        for name, value in zip(valtype_param_names, normalized_valtypes):
+            params[name] = value
+
+        rows = conn.execute(sql, params).fetchall()
         if not rows:
             raise ValueError(f"No timecourse data found for rg_id={rg_id}.")
 
         log.debug(
-            "Loaded %d probe_fmod rows for rg_id=%s (valtype=%s, fmod_run_id=%s).",
+            "Loaded %d probe_fmod rows for rg_id=%s (valtypes=%s, fmod_run_id=%s).",
             len(rows),
             rg_id,
-            valtype,
+            normalized_valtypes,
             fmod_run_id,
         )
 
-        series_map: Dict[int, Dict[str, Any]] = {}
+        series_map: Dict[Tuple[int, Optional[str]], Dict[str, Any]] = {}
         temperatures: List[float] = []
         pH_values: List[float] = []
 
@@ -267,20 +312,32 @@ class ProbeTimecourseTask(Task):
             time_val = float(row["reaction_time"]) if treated_flag else 0.0
             fmod_val = float(row["fmod_val"])
 
+            raw_valtype = None
+            try:
+                raw_valtype = row["valtype"]
+            except (IndexError, KeyError):
+                raw_valtype = None
+            valtype = str(raw_valtype) if raw_valtype not in (None, "") else None
+            fmod_run_id = row["fmod_run_id"] if "fmod_run_id" in row.keys() else None
+
+            key = (nt_id, valtype)
             entry = series_map.setdefault(
-                nt_id,
+                key,
                 {
                     "time": [],
                     "fmod": [],
                     "metadata": {
                         "site": int(row["site"]),
                         "base": str(row["base"]).upper(),
-                        "fmod_run_id": row["fmod_run_id"],
+                        "valtype": valtype,
+                        "fmod_run_ids": set(),
                     },
                 },
             )
             entry["time"].append(time_val)
             entry["fmod"].append(fmod_val)
+            if fmod_run_id not in (None, ""):
+                entry["metadata"]["fmod_run_ids"].add(int(fmod_run_id))
 
             temp = row["temperature"]
             if temp is not None:
@@ -293,25 +350,39 @@ class ProbeTimecourseTask(Task):
             raise ValueError(f"Timecourse data for rg_id={rg_id} did not match nt filter.")
         #print(series_map)
         series_list: List[NucleotideSeries] = []
-        for nt_id, content in series_map.items():
+        for (nt_id, valtype), content in series_map.items():
             paired = sorted(zip(content["time"], content["fmod"]), key=lambda x: x[0])
             times_sorted = [p[0] for p in paired]
             fmods_sorted = [p[1] for p in paired]
             if len(times_sorted) < min_points:
                 log.debug(
-                    "Skipping nt_id=%s for rg_id=%s (points=%d < min_points=%d).",
+                    "Skipping nt_id=%s valtype=%s for rg_id=%s (points=%d < min_points=%d).",
                     nt_id,
+                    valtype,
                     rg_id,
                     len(times_sorted),
                     min_points,
                 )
                 continue
+            metadata = dict(content["metadata"])
+            run_ids = metadata.pop("fmod_run_ids", set())
+            if run_ids:
+                sorted_ids = sorted(run_ids)
+                metadata["fmod_run_ids"] = sorted_ids
+                if len(sorted_ids) == 1:
+                    metadata["fmod_run_id"] = sorted_ids[0]
+            metadata["valtype"] = valtype
+            if valtype is not None:
+                metadata["valtypes"] = [valtype]
+            else:
+                metadata["valtypes"] = []
+
             series_list.append(
                 NucleotideSeries(
                     nt_id=nt_id,
                     timepoints=times_sorted,
                     fmod_values=fmods_sorted,
-                    metadata=content["metadata"],
+                    metadata=metadata,
                 )
             )
 
@@ -324,7 +395,10 @@ class ProbeTimecourseTask(Task):
         metadata = {
             "rg_id": rg_id,
             "fmod_run_id": fmod_run_id,
+            "valtypes": list(normalized_valtypes),
         }
+        if len(normalized_valtypes) == 1:
+            metadata["valtype"] = normalized_valtypes[0]
         if temperature is not None:
             metadata["temperature_c"] = temperature
         if buffer_pH is not None:
@@ -339,7 +413,13 @@ class ProbeTimecourseTask(Task):
 
         return series_list, metadata
 
-    def _resolve_fmod_run(self, conn, rg_id: int, valtype: str, preferred: Optional[int]) -> Optional[int]:
+    def _resolve_fmod_run(
+        self,
+        conn,
+        rg_id: int,
+        valtypes: Sequence[str],
+        preferred: Optional[int],
+    ) -> Optional[int]:
         if preferred not in (None, ""):
             return int(preferred)
         # Default: use all runs for the reaction group so timepoints aggregate correctly.
@@ -354,11 +434,19 @@ class ProbeTimecourseTask(Task):
         overwrite: bool,
     ) -> None:
         rg_id = int(result.metadata.get("rg_id")) if result.metadata.get("rg_id") is not None else None
+        metadata_valtype = result.metadata.get("valtype")
+        metadata_valtypes = result.metadata.get("valtypes")
+        valtype_param = str(metadata_valtype) if metadata_valtype not in (None, "") else None
 
         for round_result in result.rounds:
             round_id = round_result.round_id
             if overwrite:
-                db_api.delete_probe_tc_fit_runs(conn, fit_kind=round_id, rg_id=rg_id, nt_id=None)
+                db_api.delete_probe_tc_fit_runs(
+                    conn,
+                    fit_kind=round_id,
+                    rg_id=rg_id,
+                    nt_id=None,
+                )
 
             # Global parameters (nt_id = None)
             if round_result.global_params or round_result.qc_metrics:
@@ -375,6 +463,15 @@ class ProbeTimecourseTask(Task):
                         {"param_name": "engine", "param_text": result.engine},
                         {"param_name": "engine_version", "param_text": result.engine_version},
                     ]
+                    if valtype_param is not None:
+                        entries.append({"param_name": "valtype", "param_text": valtype_param})
+                    if metadata_valtypes and isinstance(metadata_valtypes, (list, tuple)):
+                        entries.append(
+                            {
+                                "param_name": "valtypes",
+                                "param_text": json.dumps(list(metadata_valtypes), sort_keys=True),
+                            }
+                        )
                     if round_result.notes:
                         entries.append({"param_name": "note", "param_text": str(round_result.notes)})
                     entries.extend(_entries_from_mapping(round_result.global_params))
@@ -385,7 +482,12 @@ class ProbeTimecourseTask(Task):
             for per_nt in round_result.per_nt:
                 nt_id = per_nt.nt_id
                 if overwrite:
-                    db_api.delete_probe_tc_fit_runs(conn, fit_kind=round_id, rg_id=rg_id, nt_id=nt_id)
+                    db_api.delete_probe_tc_fit_runs(
+                        conn,
+                        fit_kind=round_id,
+                        rg_id=rg_id,
+                        nt_id=nt_id,
+                    )
 
                 fit_run_id = db_api.begin_probe_tc_fit_run(
                     conn,
@@ -401,6 +503,15 @@ class ProbeTimecourseTask(Task):
                     {"param_name": "engine", "param_text": result.engine},
                     {"param_name": "engine_version", "param_text": result.engine_version},
                 ]
+                per_nt_valtype = valtype_param
+                meta = per_nt.params.get("metadata") if isinstance(per_nt.params, Mapping) else {}
+                if (
+                    isinstance(meta, Mapping)
+                    and meta.get("valtype") not in (None, "")
+                ):
+                    per_nt_valtype = str(meta["valtype"])
+                if per_nt_valtype is not None:
+                    entries.append({"param_name": "valtype", "param_text": per_nt_valtype})
                 if round_result.notes:
                     entries.append({"param_name": "note", "param_text": str(round_result.notes)})
                 entries.extend(_entries_from_mapping(per_nt.params))

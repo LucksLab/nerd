@@ -2,7 +2,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-
 import pytest
 
 from nerd.pipeline.tasks.derived import FilterSingleHitMaterializer

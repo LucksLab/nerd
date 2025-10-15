@@ -24,7 +24,9 @@ probe_timecourse:
     - round2_global
     - round3_constrained
   rg_ids: [101, 102]
-  valtype: GAmodrate
+  valtype:
+    - modrate
+    - GAmodrate
   min_points: 3
   overwrite: true
 
@@ -42,7 +44,7 @@ probe_timecourse:
 | `engine` | Registered timecourse engine (`python_baseline` is the default). |
 | `rounds` | Subset of the three-stage workflow (free, global, constrained). |
 | `rg_ids` | Reaction-group IDs to process; leave empty to process all. |
-| `valtype` | Which value type to use (`modrate`, `GAmodrate`, etc.). |
+| `valtype` | Which value type(s) to use. Provide a string for one, or a list (e.g., `[modrate, GAmodrate]`) to aggregate multiple. |
 | `min_points` | Minimum points required per nucleotide (default 3). |
 | `overwrite` | When true, existing fits in `probe_tc_fit_runs` are replaced. |
 | `engine_options` | Passed to the engine; e.g., global selection filters, initial guesses. |

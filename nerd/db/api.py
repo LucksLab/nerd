@@ -757,6 +757,7 @@ def delete_probe_tc_fit_runs(
     fit_kind: str,
     rg_id: Optional[int],
     nt_id: Optional[int] = None,
+    valtype: Optional[str] = None,
 ) -> int:
     """
     Remove existing probe timecourse fit runs (and their params via cascade)
@@ -774,6 +775,17 @@ def delete_probe_tc_fit_runs(
     else:
         clauses.append("nt_id = ?")
         params.append(nt_id)
+    if valtype is not None:
+        clauses.append(
+            """
+            id IN (
+                SELECT fit_run_id
+                FROM probe_tc_fit_params
+                WHERE param_name = 'valtype' AND param_text = ?
+            )
+            """.strip()
+        )
+        params.append(valtype)
     sql = f"""
         DELETE FROM probe_tc_fit_runs
         WHERE {' AND '.join(clauses)}
@@ -788,10 +800,11 @@ def delete_probe_tc_fit_runs(
         return _run_with_retry(conn, _op, "delete_probe_tc_fit_runs")
     except sqlite3.Error as e:
         log.exception(
-            "Failed to delete probe_tc_fit_runs for fit_kind=%s, rg_id=%s, nt_id=%s: %s",
+            "Failed to delete probe_tc_fit_runs for fit_kind=%s, rg_id=%s, nt_id=%s, valtype=%s: %s",
             fit_kind,
             rg_id,
             nt_id,
+            valtype,
             e,
         )
         return 0

@@ -1,25 +1,29 @@
-# .github/workflows/deploy-docs.yml
-name: Deploy MkDocs site
-
+name: ci 
 on:
   push:
-    branches: [ main ]     # adjust if your default branch is 'master' or 'dev'
-  workflow_dispatch:        # allow manual runs from the GitHub UI
-
+    branches:
+      - master 
+      - dev
+permissions:
+  contents: write
 jobs:
-  build-deploy:
+  deploy:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
+      - name: Configure Git Credentials
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          pip install mkdocs mkdocs-material mkdocstrings[python] mkdocs-jupyter mkdocs-include-markdown-plugin
-
-      - name: Build and deploy
-        run: mkdocs gh-deploy --force
+          python-version: 3.x
+      - run: echo "cache_id=$(date --utc '+%V')" >> $GITHUB_ENV 
+      - uses: actions/cache@v4
+        with:
+          key: mkdocs-material-${{ env.cache_id }}
+          path: ~/.cache 
+          restore-keys: |
+            mkdocs-material-
+      - run: pip install mkdocs-material 
+      - run: mkdocs gh-deploy --force
