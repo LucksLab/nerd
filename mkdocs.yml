@@ -1,5 +1,5 @@
-site_name: NERD Documentation
-repo_url: https://github.com/<lab>/nerd
+site_name: nerd Documentation
+repo_url: https://github.com/edr-choi/nerd
 repo_name: nerd
 nav:
   - Home: index.md
@@ -10,10 +10,22 @@ nav:
       - Temperature Gradients: guides/tempgrad-fit.md
   - CLI Reference:
       - create: cli/create.md
+      - nmr_create: cli/nmr_create.md
       - nmr_deg_kinetics: cli/nmr_deg_kinetics.md
       - nmr_add_kinetics: cli/nmr_add_kinetics.md
+      - mut_count: cli/mut_count.md
       - probe_timecourse: cli/probe_timecourse.md
       - tempgrad_fit: cli/tempgrad_fit.md
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: white
+      accent: light blue
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - content.code.copy
 markdown_extensions:
   - toc
   - admonition

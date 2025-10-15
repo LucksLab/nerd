@@ -1,6 +1,5 @@
 # NERD: A Reproducible Pipeline for RNA Chemical Probing, Kinetic Modeling, and Energetic Analysis
 
-
 NERD (Nucleic acid Energetics from reactivity data) is a reproducible, modular analysis pipeline for transforming high-dimensional chemical probing datasets, such as kinetic time-courses and temperature-gradient experiments, into quantitative models of RNA energetics. Designed to integrate every stage of analysis, from raw sequencing (FASTQ) or independent kinetic rate measurements to complex multi-parameter fits, NERD provides a unified framework for data curation, model fitting, and visualization.
 
 ---
@@ -124,4 +123,4 @@ The `run` block controls logging, execution backend, and output directories. The
 - **Issues & enhancements**: File GitHub issues or PRs; the maintainers welcome field-specific engines (R, Bayesian) via the plugin registry.
 - **Extending tasks**: New CLI steps simply subclass `Task` and leverage the shared logging, SQLite helpers, and runner infrastructure.
 
-NERD is designed to evolve with your experiments. Start with the examples, keep everything in version control, and you’ll have a reproducible kinetic analysis pipeline ready for the next manuscript.
+nerd is designed to evolve with your experiments. Start with the examples, keep everything in version control, and you’ll have a reproducible kinetic analysis pipeline ready for the next manuscript.
