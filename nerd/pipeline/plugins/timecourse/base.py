@@ -41,6 +41,7 @@ class PerNucleotideFit:
     """
 
     nt_id: int
+    valtype: str
     params: MutableMapping[str, Any] = field(default_factory=dict)
     diagnostics: MutableMapping[str, Any] = field(default_factory=dict)
 

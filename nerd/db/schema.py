@@ -184,6 +184,7 @@ CREATE TABLE IF NOT EXISTS probe_tc_fit_runs (
     fmod_run_id INTEGER,
     rg_id INTEGER,
     nt_id INTEGER,
+    valtype TEXT,
     model TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY(fmod_run_id) REFERENCES probe_fmod_runs(id),

@@ -761,7 +761,7 @@ def delete_probe_tc_fit_runs(
 ) -> int:
     """
     Remove existing probe timecourse fit runs (and their params via cascade)
-    matching the provided criteria.
+    matching the provided criteria. Valtype is now a column in probe_tc_fit_runs.
     """
     clauses = ["fit_kind = ?"]
     params: List[Any] = [fit_kind]
@@ -776,15 +776,7 @@ def delete_probe_tc_fit_runs(
         clauses.append("nt_id = ?")
         params.append(nt_id)
     if valtype is not None:
-        clauses.append(
-            """
-            id IN (
-                SELECT fit_run_id
-                FROM probe_tc_fit_params
-                WHERE param_name = 'valtype' AND param_text = ?
-            )
-            """.strip()
-        )
+        clauses.append("valtype = ?")
         params.append(valtype)
     sql = f"""
         DELETE FROM probe_tc_fit_runs
@@ -818,28 +810,31 @@ def begin_probe_tc_fit_run(
     nt_id: Optional[int],
     model: Optional[str] = None,
     fmod_run_id: Optional[int] = None,
+    valtype: Optional[str] = None,
 ) -> Optional[int]:
     """
     Insert a row into probe_tc_fit_runs and return its primary key.
+    The valtype is stored as a column to uniquely identify fits per (nt_id, valtype).
     """
     sql = """
-        INSERT INTO probe_tc_fit_runs (fit_kind, fmod_run_id, rg_id, nt_id, model)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO probe_tc_fit_runs (fit_kind, fmod_run_id, rg_id, nt_id, valtype, model)
+        VALUES (?, ?, ?, ?, ?, ?)
     """
 
     def _op() -> Optional[int]:
         with conn:
-            cursor = conn.execute(sql, (fit_kind, fmod_run_id, rg_id, nt_id, model))
+            cursor = conn.execute(sql, (fit_kind, fmod_run_id, rg_id, nt_id, valtype, model))
             return cursor.lastrowid
 
     try:
         return _run_with_retry(conn, _op, "begin_probe_tc_fit_run")
     except sqlite3.Error as e:
         log.exception(
-            "Failed to record probe_tc_fit_run for fit_kind=%s, rg_id=%s, nt_id=%s: %s",
+            "Failed to record probe_tc_fit_run for fit_kind=%s, rg_id=%s, nt_id=%s, valtype=%s: %s",
             fit_kind,
             rg_id,
             nt_id,
+            valtype,
             e,
         )
         return None

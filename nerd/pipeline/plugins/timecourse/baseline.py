@@ -79,12 +79,24 @@ def _fit_single_site(
         "r2": _ensure_float(getattr(result, "rsquared", float("nan"))),
         "chisq": _ensure_float(getattr(result, "chisqr", float("nan"))),
         "reduced_chisq": _ensure_float(getattr(result, "redchi", float("nan"))),
+
         "time_min": _ensure_float(time_arr.min()),
         "time_max": _ensure_float(time_arr.max()),
         "ndata": int(result.ndata),
         "nfree": int(result.nfree),
         "success": bool(result.success),
     }
+    # Include covariance matrix if available from lmfit (var_names order)
+    covar = getattr(result, "covar", None)
+    if covar is not None:
+        try:
+            matrix = np.asarray(covar, dtype=float).tolist()
+        except Exception:
+            matrix = None
+        diagnostics["covariance"] = {
+            "params": list(getattr(result, "var_names", []) or []),
+            "matrix": matrix,
+        }
     return result, diagnostics
 
 
@@ -344,14 +356,22 @@ class BaselinePythonEngine(TimecourseEngine):
         fits: List[PerNucleotideFit] = []
         successes = 0
         for series in series_list:
+            # Extract valtype from series metadata
+            valtype_val: str = ""
+            meta = series.metadata or {}
+            if isinstance(meta, Mapping):
+                raw = meta.get("valtype")
+                if raw not in (None, ""):
+                    valtype_val = str(raw)
+            
             record = records.get(self._series_key(series))
             if record is None:
-                fits.append(PerNucleotideFit(nt_id=series.nt_id, params={}, diagnostics={"status": "missing"}))
+                fits.append(PerNucleotideFit(nt_id=series.nt_id, valtype=valtype_val, params={}, diagnostics={"status": "missing"}))
                 continue
             diagnostics = dict(record.diagnostics)
             status = diagnostics.get("status", "completed")
             if status == "failed":
-                fits.append(PerNucleotideFit(nt_id=series.nt_id, params={}, diagnostics=diagnostics))
+                fits.append(PerNucleotideFit(nt_id=series.nt_id, valtype=valtype_val, params={}, diagnostics=diagnostics))
                 continue
             successes += 1
             params = dict(record.params)
@@ -359,6 +379,7 @@ class BaselinePythonEngine(TimecourseEngine):
             fits.append(
                 PerNucleotideFit(
                     nt_id=series.nt_id,
+                    valtype=valtype_val,
                     params=params,
                     diagnostics=diagnostics,
                 )
@@ -425,7 +446,7 @@ class BaselinePythonEngine(TimecourseEngine):
         try:
             params = _create_global_params(log_kappas, log_kdegs, log_fmods)
             x_data, y_dataset = _prepare_global_dataset(time_arrays, fmod_arrays)
-            out = minimize(_global_objective, params, args=(x_data, y_dataset))
+            out: Any = minimize(_global_objective, params, args=(x_data, y_dataset))
         except Exception as exc:  # noqa: BLE001
             return RoundResult(
                 round_id=ROUND_GLOBAL,
@@ -459,21 +480,19 @@ class BaselinePythonEngine(TimecourseEngine):
         }
         if log_kdeg_err is not None:
             global_params["log_kdeg_err"] = log_kdeg_err
-        global_params.update(
-            {
-                "chisq": float(getattr(out, "chisqr", float("nan"))),
-                "r2": r2,
-                "ndata": int(getattr(out, "ndata", len(y_true))),
-                "nfree": int(getattr(out, "nvarys", 0)),
-                "n_sites": int(nrows),
-            }
-        )
+
         return RoundResult(
             round_id=ROUND_GLOBAL,
             status="completed",
             per_nt=tuple(),
             global_params=global_params,
-            qc_metrics={"n_sites": nrows, "r2": r2},
+            qc_metrics=            {
+                "chisq": float(getattr(out, "chisqr", float("nan"))),
+                "r2": r2,
+                "ndata": int(getattr(out, "ndata", len(y_true))),
+                "nfree": int(getattr(out, "nvarys", 0)),
+                "n_sites": int(nrows),
+            },
             notes=None,
         )
 
