@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import json
 import math
+import sqlite3
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 from nerd.db import api as db_api
 from nerd.pipeline.plugins.timecourse import (
@@ -115,6 +116,83 @@ class ProbeTimecourseTask(Task):
         min_points = block.get("min_points")
         block["min_points"] = int(min_points) if min_points not in (None, "") else 3
 
+        include_dropped = block.get("include_dropped_samples")
+        if include_dropped in (None, ""):
+            block["include_dropped_samples"] = False
+        else:
+            block["include_dropped_samples"] = bool(include_dropped)
+
+        done_by_cfg = block.get("done_by")
+        if done_by_cfg in (None, "", False):
+            block["done_by"] = []
+        elif isinstance(done_by_cfg, (list, tuple, set)):
+            done_by_norm = []
+            for raw in done_by_cfg:
+                if raw in (None, ""):
+                    continue
+                done_by_norm.append(str(raw).strip())
+            block["done_by"] = [val for val in done_by_norm if val]
+        else:
+            done_by_val = str(done_by_cfg).strip()
+            block["done_by"] = [done_by_val] if done_by_val else []
+
+        rt_cfg = block.get("rt_protocol") or block.get("RT_protocol")
+        if rt_cfg in (None, "", False):
+            block["rt_protocol"] = []
+        elif isinstance(rt_cfg, (list, tuple, set)):
+            rt_norm: List[str] = []
+            for item in rt_cfg:
+                if item in (None, ""):
+                    continue
+                rt_norm.append(str(item).strip().lower())
+            block["rt_protocol"] = [val for val in rt_norm if val]
+        else:
+            block["rt_protocol"] = [str(rt_cfg).strip().lower()]
+
+        outliers_cfg = block.get("outliers") or []
+        parsed_outliers: List[Dict[str, Any]] = []
+        if isinstance(outliers_cfg, str):
+            outliers_cfg = [outliers_cfg]
+        if isinstance(outliers_cfg, (list, tuple, set)):
+            for raw in outliers_cfg:
+                if raw in (None, ""):
+                    continue
+                parts = str(raw).split(":")
+                if len(parts) != 4:
+                    raise ValueError(
+                        f"Invalid outlier specification '{raw}'. Expected format 'rg_id:sample_name:site_base:valtype'."
+                    )
+                rg_part, sample_name, site_base, valtype = parts
+                try:
+                    rg_value = int(rg_part)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"Invalid rg_id '{rg_part}' in outlier spec '{raw}'.") from exc
+                if "_" not in site_base:
+                    raise ValueError(
+                        f"Invalid site_base '{site_base}' in outlier spec '{raw}'. Expected '<site>_<base>'."
+                    )
+                site_str, base_str = site_base.split("_", 1)
+                try:
+                    site_value = int(site_str)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"Invalid site '{site_str}' in outlier spec '{raw}'.") from exc
+                base_value = base_str.strip().upper()
+                if base_value == "":
+                    raise ValueError(f"Empty base in outlier spec '{raw}'.")
+                parsed_outliers.append(
+                    {
+                        "rg_id": rg_value,
+                        "sample_name": sample_name,
+                        "site": site_value,
+                        "base": base_value,
+                        "valtype": str(valtype).strip(),
+                        "original": str(raw),
+                    }
+                )
+        else:
+            raise TypeError("outliers config must be a list of 'rg_id:sample:site_base:valtype' strings.")
+        block["outliers"] = parsed_outliers
+
         block["_scope_cache"] = None  # placeholder populated in resolve_scope
         return block, {}
 
@@ -138,11 +216,47 @@ class ProbeTimecourseTask(Task):
             valtypes = ["modrate"]
         nt_filter = set(inputs.get("nt_ids") or [])
         min_points = int(inputs.get("min_points", 3))
+        done_by_filter = list(inputs.get("done_by") or [])
+        rt_filter = list(inputs.get("rt_protocol") or [])
+        include_dropped = bool(inputs.get("include_dropped_samples"))
+        outlier_specs: List[Dict[str, Any]] = list(inputs.get("outliers") or [])
 
         results_dir = run_dir / "results"
         results_dir.mkdir(parents=True, exist_ok=True)
 
-        engine = load_timecourse_engine(engine_name, **dict(inputs.get("engine_options") or {}))
+        engine_options_template = dict(inputs.get("engine_options") or {})
+        self._ensure_outlier_column(ctx.db)
+        outlier_report = self._apply_outlier_flags(
+            ctx.db,
+            outlier_specs,
+            target_rg_ids=list(inputs.get("rg_ids") or []),
+        )
+        if hasattr(ctx.db, "commit"):
+            try:
+                ctx.db.commit()
+            except sqlite3.Error:  # noqa: BLE001
+                log.exception("Failed to commit outlier flag updates prior to fitting.")
+
+        if outlier_report["applied"]:
+            log.info(
+                "Marked %d fmod values as outliers across %d reaction group(s).",
+                outlier_report["applied"],
+                len(outlier_report["rg_ids"]),
+            )
+        if outlier_report["missing"]:
+            log.warning(
+                "Outlier specifications did not match any rows: %s",
+                ", ".join(outlier_report["missing"][:10]) + (
+                    "..." if len(outlier_report["missing"]) > 10 else ""
+                ),
+            )
+
+        engine = load_timecourse_engine(engine_name, **dict(engine_options_template))
+
+        arrhenius_target = engine_options_template.get("initialize_kdeg_arrhenius")
+        arrhenius_fit = None
+        if arrhenius_target not in (None, ""):
+            arrhenius_fit = self._fetch_arrhenius_fit(ctx.db, str(arrhenius_target))
 
         for rg_id in inputs["rg_ids"]:
             global_metadata = dict(inputs.get("global_metadata") or {})
@@ -150,6 +264,7 @@ class ProbeTimecourseTask(Task):
             global_metadata["valtypes"] = list(valtypes)
 
             all_series: List[NucleotideSeries] = []
+            last_rg_meta: Dict[str, Any] = {}
 
             for valtype in valtypes:
                 try:
@@ -160,6 +275,9 @@ class ProbeTimecourseTask(Task):
                         min_points=min_points,
                         nt_filter=nt_filter,
                         preferred_fmod_run=inputs.get("fmod_run_id"),
+                        done_by=done_by_filter,
+                        rt_protocols=rt_filter,
+                        include_dropped=include_dropped,
                     )
                 except Exception as exc:  # noqa: BLE001
                     log.exception("Failed to load timecourse data for rg_id=%s valtype=%s: %s", rg_id, valtype, exc)
@@ -169,23 +287,77 @@ class ProbeTimecourseTask(Task):
                     log.warning("No usable nucleotides found for rg_id=%s valtype=%s; skipping engine run.", rg_id, valtype)
                     continue
                 all_series.extend(series)
-            
+                last_rg_meta = dict(rg_meta or {})
+
+            if not all_series:
+                log.warning("No series loaded for rg_id=%s across valtypes %s; skipping.", rg_id, valtypes)
+                continue
+
+            selected_site_bases = sorted(
+                {
+                    f"{series.metadata.get('site')}_{series.metadata.get('base')}"
+                    for series in all_series
+                    if series.metadata.get("site") is not None and series.metadata.get("base")
+                }
+            )
+            if selected_site_bases:
+                global_metadata["selected_site_bases"] = selected_site_bases
+
             # Merge rg-specific metadata (temperature, pH, label) into global_metadata
-            for key in ("temperature_c", "buffer_pH", "rg_label", "fmod_run_id"):
-                if key in rg_meta and key not in global_metadata:
-                    global_metadata[key] = rg_meta[key]
+            for key in ("temperature_c", "buffer_pH", "rg_label", "fmod_run_id", "done_by", "rt_protocol"):
+                if key in last_rg_meta and key not in global_metadata:
+                    global_metadata[key] = last_rg_meta[key]
+            if done_by_filter and "done_by" not in global_metadata:
+                global_metadata["done_by"] = list(done_by_filter)
+            if rt_filter and "rt_protocol" not in global_metadata:
+                global_metadata["rt_protocol"] = list(rt_filter)
+            if outlier_report["rg_counts"]:
+                count_for_rg = outlier_report["rg_counts"].get(rg_id)
+                if count_for_rg:
+                    global_metadata["outliers_applied"] = count_for_rg
+            specs_for_rg = outlier_report["rg_specs"].get(rg_id, [])
+            if specs_for_rg:
+                global_metadata["outlier_specs"] = specs_for_rg
+
+            options_for_rg = dict(engine_options_template)
+            if arrhenius_fit is not None:
+                temperature_c = self._resolve_rg_temperature(ctx.db, rg_id, last_rg_meta.get("temperature_c") if last_rg_meta else None)
+                log_kdeg_init, kdeg_init = self._arrhenius_initial_kdeg(arrhenius_fit, temperature_c, rg_id)
+                options_for_rg["initial_log_kdeg"] = log_kdeg_init
+                options_for_rg["initial_kdeg"] = kdeg_init
+                global_metadata["initial_log_kdeg"] = log_kdeg_init
+                global_metadata["initial_kdeg"] = kdeg_init
+                global_metadata["initial_kdeg_source"] = f"arrhenius:{arrhenius_fit['target_label']}"
 
             request = TimecourseRequest(
                 rg_id=rg_id,
                 rounds=rounds,
                 nucleotides=all_series,
                 global_metadata=global_metadata,
-                options=dict(inputs.get("engine_options") or {}),
+                options=options_for_rg,
             )
             result = engine.run(request)
+            if result.rounds:
+                normalized_requested = {str(r).strip().lower() for r in (inputs.get("rounds") or [])}
+                filtered_rounds = [
+                    round_result
+                    for round_result in result.rounds
+                    if str(round_result.round_id).strip().lower() in normalized_requested
+                ]
+                if len(filtered_rounds) != len(result.rounds):
+                    result = TimecourseResult(
+                        engine=result.engine,
+                        engine_version=result.engine_version,
+                        metadata=dict(result.metadata or {}),
+                        rounds=tuple(filtered_rounds),
+                        artifacts=dict(result.artifacts or {}),
+                    )
 
             result_meta: Dict[str, Any] = dict(result.metadata or {})
             result_meta.setdefault("rg_id", rg_id)
+            for meta_key in ("selected_site_bases", "outliers_applied", "outlier_specs", "done_by", "rt_protocol"):
+                if meta_key in global_metadata and meta_key not in result_meta:
+                    result_meta[meta_key] = global_metadata[meta_key]
             result_meta["valtype"] = valtype
             result_meta.pop("valtype", None)
             result.metadata = result_meta
@@ -198,6 +370,91 @@ class ProbeTimecourseTask(Task):
                     model=engine_name,
                     overwrite=overwrite,
                 )
+
+    def _fetch_arrhenius_fit(self, conn, target_label: str) -> Dict[str, Any]:
+        rows = conn.execute(
+            "SELECT id FROM tempgrad_fit_runs WHERE target_label = ? ORDER BY id DESC",
+            (target_label,),
+        ).fetchall()
+        if not rows:
+            raise ValueError(f"No tempgrad_fit_runs found for target_label='{target_label}'.")
+        if len(rows) > 1:
+            log.info(
+                "Multiple tempgrad_fit_runs found for target_label=%s; using the most recent (id=%s).",
+                target_label,
+                rows[0]["id"],
+            )
+        fit_run_id = int(rows[0]["id"])
+
+        params_rows = conn.execute(
+            "SELECT param_name, param_numeric, param_text FROM tempgrad_fit_params WHERE fit_run_id = ?",
+            (fit_run_id,),
+        ).fetchall()
+        slope = self._extract_numeric_param(params_rows, "slope")
+        intercept = self._extract_numeric_param(params_rows, "intercept")
+        if slope is None or intercept is None:
+            raise ValueError(
+                f"Arrhenius fit run {fit_run_id} (target_label='{target_label}') is missing slope or intercept parameters."
+            )
+        return {
+            "fit_run_id": fit_run_id,
+            "slope": slope,
+            "intercept": intercept,
+            "target_label": target_label,
+        }
+
+    @staticmethod
+    def _extract_numeric_param(rows, param_name: str) -> Optional[float]:
+        for row in rows:
+            if row["param_name"] != param_name:
+                continue
+            if row["param_numeric"] is not None:
+                return float(row["param_numeric"])
+            if row["param_text"] not in (None, ""):
+                try:
+                    return float(row["param_text"])
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    def _resolve_rg_temperature(self, conn, rg_id: int, metadata_value: Optional[float]) -> float:
+        if metadata_value not in (None, ""):
+            return float(metadata_value)
+
+        rows = conn.execute(
+            "SELECT DISTINCT temperature FROM probe_reactions WHERE rg_id = ? AND temperature IS NOT NULL",
+            (rg_id,),
+        ).fetchall()
+        if not rows:
+            raise ValueError(f"No reaction temperature recorded for rg_id={rg_id}.")
+
+        temps = {round(float(row["temperature"]), 6) for row in rows if row["temperature"] is not None}
+        if len(temps) > 1:
+            raise ValueError(f"Multiple reaction temperatures found for rg_id={rg_id}: {sorted(temps)}.")
+        return float(next(iter(temps)))
+
+    def _arrhenius_initial_kdeg(
+        self,
+        arrhenius_fit: Mapping[str, Any],
+        temperature_c: float,
+        rg_id: int,
+    ) -> Tuple[float, float]:
+        slope = float(arrhenius_fit["slope"])
+        intercept = float(arrhenius_fit["intercept"])
+        temp_k = float(temperature_c) + 273.15
+        if temp_k <= 0:
+            raise ValueError(f"Invalid absolute temperature encountered for rg_id={rg_id}: {temperature_c} °C.")
+        log_kdeg = slope * (1.0 / temp_k) + intercept
+        if not math.isfinite(log_kdeg):
+            raise ValueError(
+                f"Non-finite log(kdeg) computed for rg_id={rg_id} using Arrhenius parameters (slope={slope}, intercept={intercept})."
+            )
+        kdeg = math.exp(log_kdeg)
+        if not math.isfinite(kdeg) or kdeg <= 0:
+            raise ValueError(
+                f"Non-positive kdeg computed for rg_id={rg_id} using Arrhenius parameters (slope={slope}, intercept={intercept})."
+            )
+        return log_kdeg, kdeg
 
     def resolve_scope(self, ctx: Optional[TaskContext], inputs: Any) -> TaskScope:
         if ctx is None or inputs is None:
@@ -243,6 +500,9 @@ class ProbeTimecourseTask(Task):
         min_points: int,
         nt_filter: Iterable[int],
         preferred_fmod_run: Optional[int],
+        done_by: Optional[Iterable[str]] = None,
+        rt_protocols: Optional[Iterable[str]] = None,
+        include_dropped: bool = False,
     ) -> Tuple[List[NucleotideSeries], Dict[str, Any]]:
         nt_filter_set = {int(x) for x in nt_filter or []}
         if valtype in (None, ""):
@@ -250,6 +510,30 @@ class ProbeTimecourseTask(Task):
         normalized_valtype = str(valtype)
 
         fmod_run_id = self._resolve_fmod_run(conn, rg_id, [normalized_valtype], preferred_fmod_run)
+
+        done_by_values = [
+            str(item).strip().lower()
+            for item in (done_by or [])
+            if item not in (None, "")
+        ]
+        done_by_values = [value for value in done_by_values if value]
+
+        done_by_clause = ""
+        if done_by_values:
+            placeholders = ", ".join(f":done_by_{idx}" for idx, _ in enumerate(done_by_values))
+            done_by_clause = f" AND LOWER(pr.done_by) IN ({placeholders})"
+
+        rt_values = [
+            str(item).strip().lower()
+            for item in (rt_protocols or [])
+            if item not in (None, "")
+        ]
+        rt_values = [value for value in rt_values if value]
+
+        rt_clause = ""
+        if rt_values:
+            placeholders = ", ".join(f":rt_protocol_{idx}" for idx, _ in enumerate(rt_values))
+            rt_clause = f" AND LOWER(pr.rt_protocol) IN ({placeholders})"
 
         sql = f"""
             SELECT
@@ -260,6 +544,9 @@ class ProbeTimecourseTask(Task):
                 pr.reaction_time,
                 pr.treated,
                 pr.temperature,
+                pr.done_by,
+                pr.rt_protocol,
+                fv.outlier,
                 mb.pH AS buffer_pH,
                 mn.site,
                 mn.base
@@ -272,13 +559,24 @@ class ProbeTimecourseTask(Task):
               AND fv.fmod_val IS NOT NULL
               AND fv.valtype = :valtype
               AND (:fmod_run_id IS NULL OR fv.fmod_run_id = :fmod_run_id)
-              AND ss.to_drop = 0
+              {"AND ss.to_drop = 0" if not include_dropped else ""}
+              AND fv.outlier = 0
+              {done_by_clause}
+              {rt_clause}
             ORDER BY fv.nt_id, pr.reaction_time, pr.id
         """
         params: Dict[str, Any] = {"rg_id": rg_id, "fmod_run_id": fmod_run_id, "valtype": normalized_valtype}
+        for idx, value in enumerate(done_by_values):
+            params[f"done_by_{idx}"] = value
+        for idx, value in enumerate(rt_values):
+            params[f"rt_protocol_{idx}"] = value
 
         rows = conn.execute(sql, params).fetchall()
         if not rows:
+            if done_by_values:
+                raise ValueError(f"No timecourse data found for rg_id={rg_id} with done_by={done_by_values}.")
+            if rt_values:
+                raise ValueError(f"No timecourse data found for rg_id={rg_id} with rt_protocol={rt_values}.")
             raise ValueError(f"No timecourse data found for rg_id={rg_id}.")
 
         log.debug(
@@ -292,6 +590,8 @@ class ProbeTimecourseTask(Task):
         series_map: Dict[Tuple[int, str], Dict[str, Any]] = {}
         temperatures: List[float] = []
         pH_values: List[float] = []
+        done_by_seen: List[str] = []
+        rt_seen: List[str] = []
 
         for row in rows:
             nt_id = int(row["nt_id"])
@@ -332,6 +632,12 @@ class ProbeTimecourseTask(Task):
             ph_val = row["buffer_pH"]
             if ph_val is not None:
                 pH_values.append(float(ph_val))
+            done_by_value = row["done_by"]
+            if done_by_value not in (None, ""):
+                done_by_seen.append(str(done_by_value))
+            rt_value = row["rt_protocol"] if "rt_protocol" in row.keys() else None
+            if rt_value not in (None, ""):
+                rt_seen.append(str(rt_value))
 
         if not series_map:
             raise ValueError(f"Timecourse data for rg_id={rg_id} did not match nt filter.")
@@ -384,6 +690,10 @@ class ProbeTimecourseTask(Task):
             metadata["temperature_c"] = temperature
         if buffer_pH is not None:
             metadata["buffer_pH"] = buffer_pH
+        if done_by_seen:
+            metadata["done_by"] = sorted({value.strip() for value in done_by_seen if value})
+        if rt_seen:
+            metadata["rt_protocol"] = sorted({value.strip() for value in rt_seen if value})
 
         rg_label_row = conn.execute(
             "SELECT rg_label FROM probe_reaction_groups WHERE rg_id = ?",
@@ -393,6 +703,98 @@ class ProbeTimecourseTask(Task):
             metadata["rg_label"] = rg_label_row["rg_label"]
 
         return series_list, metadata
+
+    def _ensure_outlier_column(self, conn) -> None:
+        try:
+            info = conn.execute("PRAGMA table_info(probe_fmod_values)").fetchall()
+        except sqlite3.Error:
+            log.exception("Failed to inspect probe_fmod_values schema for outlier column.")
+            return
+        if any(len(row) > 1 and row[1] == "outlier" for row in info):
+            return
+        try:
+            with conn:
+                conn.execute("ALTER TABLE probe_fmod_values ADD COLUMN outlier INTEGER NOT NULL DEFAULT 0")
+            log.info("Added 'outlier' column to probe_fmod_values table.")
+        except sqlite3.Error as exc:
+            # Column may already exist if added concurrently; ignore duplicate errors.
+            if "duplicate column name" in str(exc).lower():
+                log.debug("'outlier' column already present in probe_fmod_values.")
+            else:
+                log.exception("Failed to add 'outlier' column to probe_fmod_values: %s", exc)
+
+    def _apply_outlier_flags(
+        self,
+        conn,
+        specs: List[Dict[str, Any]],
+        *,
+        target_rg_ids: Optional[Iterable[int]] = None,
+    ) -> Dict[str, Any]:
+        report = {
+            "applied": 0,
+            "missing": [],
+            "rg_ids": set(),
+            "specs": [spec.get("original", "") for spec in specs],
+            "rg_specs": {},
+            "rg_counts": {},
+        }
+
+        reset_rg_ids: Set[int] = set()
+        if target_rg_ids:
+            reset_rg_ids.update(int(rg_id) for rg_id in target_rg_ids)
+        reset_rg_ids.update(int(spec["rg_id"]) for spec in specs if spec.get("rg_id") is not None)
+        ordered_reset_rg_ids: Tuple[int, ...] = tuple(sorted(reset_rg_ids))
+        if not ordered_reset_rg_ids:
+            return report
+
+        try:
+            with conn:
+                placeholders = ",".join("?" for _ in ordered_reset_rg_ids)
+                conn.execute(
+                    f"UPDATE probe_fmod_values SET outlier = 0 WHERE rxn_id IN (SELECT id FROM probe_reactions WHERE rg_id IN ({placeholders}))",
+                    ordered_reset_rg_ids,
+                )
+
+                for spec in specs:
+                    rg_id = spec["rg_id"]
+                    report["rg_ids"].add(rg_id)
+                    cursor = conn.execute(
+                        """
+                        UPDATE probe_fmod_values
+                        SET outlier = 1
+                        WHERE id IN (
+                            SELECT fv.id
+                            FROM probe_fmod_values fv
+                            JOIN probe_reactions pr ON pr.id = fv.rxn_id
+                            JOIN sequencing_samples ss ON ss.id = pr.s_id
+                            JOIN meta_nucleotides mn ON mn.id = fv.nt_id
+                            WHERE pr.rg_id = ?
+                              AND ss.sample_name = ?
+                              AND mn.site = ?
+                              AND UPPER(mn.base) = ?
+                              AND fv.valtype = ?
+                        )
+                        """,
+                        (
+                            rg_id,
+                            spec["sample_name"],
+                            spec["site"],
+                            spec["base"],
+                            spec["valtype"],
+                        ),
+                    )
+                    affected = cursor.rowcount if cursor is not None else 0
+                    if affected:
+                        report["applied"] += affected
+                        report["rg_specs"].setdefault(rg_id, []).append(spec.get("original", ""))
+                        report["rg_counts"][rg_id] = report["rg_counts"].get(rg_id, 0) + affected
+                    else:
+                        report["missing"].append(spec.get("original", ""))
+        except sqlite3.Error:
+            log.exception("Failed to apply outlier flags to probe_fmod_values.")
+
+        report["rg_ids"] = sorted(report["rg_ids"])
+        return report
 
     def _resolve_fmod_run(
         self,
@@ -451,6 +853,28 @@ class ProbeTimecourseTask(Task):
                             {
                                 "param_name": "valtypes",
                                 "param_text": json.dumps(list(metadata_valtypes), sort_keys=True),
+                            }
+                        )
+                    selected_sites = result.metadata.get("selected_site_bases")
+                    if selected_sites:
+                        entries.append(
+                            {
+                                "param_name": "selected_site_bases",
+                                "param_text": json.dumps(list(selected_sites), sort_keys=True),
+                            }
+                        )
+                    outliers_applied = result.metadata.get("outliers_applied")
+                    if outliers_applied not in (None, ""):
+                        try:
+                            entries.append({"param_name": "outliers_applied", "param_numeric": float(outliers_applied)})
+                        except (TypeError, ValueError):
+                            entries.append({"param_name": "outliers_applied", "param_text": str(outliers_applied)})
+                    outlier_specs = result.metadata.get("outlier_specs")
+                    if outlier_specs:
+                        entries.append(
+                            {
+                                "param_name": "outlier_specs",
+                                "param_text": json.dumps(list(outlier_specs), sort_keys=True),
                             }
                         )
                     if round_result.notes:

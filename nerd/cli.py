@@ -39,6 +39,7 @@ class RunStep(str, enum.Enum):
     nmr_create = "nmr_create"
     nmr_deg_kinetics = "nmr_deg_kinetics"
     nmr_add_kinetics = "nmr_add_kinetics"
+    drop = "drop"
     probe_tc_kinetics = "probe_tc_kinetics"
     tempgrad_fit = "tempgrad_fit"
 

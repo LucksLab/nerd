@@ -171,6 +171,7 @@ CREATE TABLE IF NOT EXISTS probe_fmod_values (
     valtype TEXT NOT NULL,
     fmod_val REAL,
     read_depth INTEGER NOT NULL,
+    outlier INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY(nt_id) REFERENCES meta_nucleotides(id),
     FOREIGN KEY(fmod_run_id) REFERENCES probe_fmod_runs(id),
     FOREIGN KEY(rxn_id) REFERENCES probe_reactions(id)

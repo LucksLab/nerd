@@ -443,6 +443,29 @@ class BaselinePythonEngine(TimecourseEngine):
                 notes="Insufficient per-nucleotide fits available for global fitting.",
             )
 
+        kept_indices = self._select_consistent_timepoints(time_arrays)
+        if not kept_indices:
+            return RoundResult(
+                round_id=ROUND_GLOBAL,
+                status="failed",
+                per_nt=tuple(),
+                global_params={},
+                qc_metrics={},
+                notes="Global fit failed: No nucleotides shared a consistent set of timepoints.",
+            )
+        dropped_count = len(time_arrays) - len(kept_indices)
+
+        if dropped_count:
+            note_text = f"Excluded {dropped_count} nucleotides from global fit due to mismatched timepoints."
+        else:
+            note_text = None
+
+        time_arrays = [time_arrays[idx] for idx in kept_indices]
+        fmod_arrays = [fmod_arrays[idx] for idx in kept_indices]
+        log_kappas = [log_kappas[idx] for idx in kept_indices]
+        log_kdegs = [log_kdegs[idx] for idx in kept_indices]
+        log_fmods = [log_fmods[idx] for idx in kept_indices]
+
         try:
             params = _create_global_params(log_kappas, log_kdegs, log_fmods)
             x_data, y_dataset = _prepare_global_dataset(time_arrays, fmod_arrays)
@@ -493,7 +516,7 @@ class BaselinePythonEngine(TimecourseEngine):
                 "nfree": int(getattr(out, "nvarys", 0)),
                 "n_sites": int(nrows),
             },
-            notes=None,
+            notes=note_text,
         )
 
     def _filter_series_for_global(
@@ -536,6 +559,23 @@ class BaselinePythonEngine(TimecourseEngine):
             selected.append(series)
 
         return selected
+
+    @staticmethod
+    def _select_consistent_timepoints(time_arrays: Sequence[np.ndarray]) -> List[int]:
+        best_indices: List[int] = []
+        if not time_arrays:
+            return best_indices
+
+        for idx, candidate in enumerate(time_arrays):
+            matches: List[int] = []
+            for jdx, other in enumerate(time_arrays):
+                if candidate.shape != other.shape:
+                    continue
+                if np.allclose(candidate, other, rtol=1e-5, atol=1e-8):
+                    matches.append(jdx)
+            if len(matches) > len(best_indices):
+                best_indices = matches
+        return best_indices
 
     def _resolve_constrained_log_kdeg(
         self,
