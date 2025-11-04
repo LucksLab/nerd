@@ -13,8 +13,8 @@ from .base import (
     register_tempgrad_engine,
 )
 from .arrhenius import ArrheniusPythonEngine
+from .r_arrhenius import ArrheniusREngine, ArrheniusRBayesianEngine
 from .two_state_melt import TwoStateMeltEngine
-from .r_integration import TempgradRIntegrationEngine
 
 __all__ = [
     "SeriesFitResult",
@@ -26,6 +26,7 @@ __all__ = [
     "load_tempgrad_engine",
     "register_tempgrad_engine",
     "ArrheniusPythonEngine",
+    "ArrheniusREngine",
+    "ArrheniusRBayesianEngine",
     "TwoStateMeltEngine",
-    "TempgradRIntegrationEngine",
 ]

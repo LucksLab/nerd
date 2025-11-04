@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Set, Tuple
 
 import sqlite3
 
@@ -62,7 +63,41 @@ class TempgradFitTask(Task):
         else:
             block["force_run"] = bool(block.get("force_run", False))
 
-        block["data_source"] = str(block.get("data_source") or block["filters"].get("data_source") or "manual")
+        # Allow a simple boolean toggle to select probe timecourse vs. NMR sources.
+        use_probe_tc = block.get("use_probe_tc")
+        if use_probe_tc is not None:
+            if isinstance(use_probe_tc, str):
+                norm_flag = use_probe_tc.strip().lower()
+                flag_value = norm_flag in {"1", "true", "yes", "on"}
+            else:
+                flag_value = bool(use_probe_tc)
+            block["data_source"] = "probe_tc" if flag_value else "nmr"
+        else:
+            block["data_source"] = str(
+                block.get("data_source") or block["filters"].get("data_source") or "manual"
+            )
+
+        fit_name = block.get("fit_name")
+        if fit_name is not None:
+            fit_name_str = str(fit_name).strip()
+            block["fit_name"] = fit_name_str or None
+        else:
+            block["fit_name"] = None
+        if block["fit_name"]:
+            block["metadata"].setdefault("fit_name", block["fit_name"])
+
+        group_by_cfg = block.get("group_by")
+        if not group_by_cfg and "group_by" in block["engine_options"]:
+            group_by_cfg = block["engine_options"].pop("group_by")
+        block["group_by"] = self._normalize_group_by(group_by_cfg)
+
+        outliers_cfg = block.get("outliers")
+        if outliers_cfg is None:
+            block["outliers"] = []
+        elif isinstance(outliers_cfg, (list, tuple, set)):
+            block["outliers"] = list(outliers_cfg)
+        else:
+            block["outliers"] = [outliers_cfg]
 
         return block, {}
 
@@ -355,6 +390,14 @@ class TempgradFitTask(Task):
     def _series_from_db_probe_tc(self, ctx: TaskContext, inputs: Dict[str, Any]) -> List[TempgradSeries]:
         filters = dict(inputs.get("filters") or {})
         options = dict(inputs.get("engine_options") or {})
+        group_fields = tuple(self._normalize_group_by(inputs.get("group_by")))
+        if not group_fields:
+            group_fields = tuple(self._normalize_group_by(options.get("group_by")))
+        outlier_rg_ids, outlier_nt_ids, outlier_pairs = self._parse_outliers(
+            inputs.get("outliers") or options.get("outliers")
+        )
+        outlier_summary = self._summarize_outliers(outlier_rg_ids, outlier_nt_ids, outlier_pairs)
+        fit_name = str(inputs.get("fit_name") or "").strip() or None
 
         fit_kind = str(filters.get("fit_kind") or "round3_constrained").strip()
         weighted = bool(options.get("weighted", False))
@@ -398,6 +441,16 @@ class TempgradFitTask(Task):
         probe_conc_filter = filters.get("probe_conc") or filters.get("probe_concentration")
         rt_protocol_filter = filters.get("rt_protocol")
         rg_label_filter = filters.get("rg_label") or filters.get("reaction_group")
+        valtype_filter = filters.get("valtype")
+        if valtype_filter in (None, ""):
+            valtype_values = ["modrate"]
+        else:
+            if isinstance(valtype_filter, (list, tuple, set)):
+                valtype_values = [str(v).strip() for v in valtype_filter if v not in (None, "")]
+            else:
+                valtype_values = [str(valtype_filter).strip()]
+            if not valtype_values:
+                valtype_values = ["modrate"]
 
         temperature_min = filters.get("temperature_min") or filters.get("temperature_ge")
         temperature_max = filters.get("temperature_max") or filters.get("temperature_le")
@@ -413,6 +466,10 @@ class TempgradFitTask(Task):
             placeholders = ",".join("?" for _ in buffer_ids)
             where.append(f"prd.buffer_id IN ({placeholders})")
             params.extend(buffer_ids)
+        if valtype_values:
+            placeholders = ",".join("?" for _ in valtype_values)
+            where.append(f"r.valtype IN ({placeholders})")
+            params.extend(valtype_values)
         if nt_ids:
             placeholders = ",".join("?" for _ in nt_ids)
             where.append(f"r.nt_id IN ({placeholders})")
@@ -469,6 +526,7 @@ class TempgradFitTask(Task):
                 r.id AS fit_run_id,
                 r.rg_id,
                 r.nt_id,
+                r.valtype,
                 rg.rg_label,
                 prd.temperature,
                 prd.replicate,
@@ -486,10 +544,14 @@ class TempgradFitTask(Task):
                 mn.site AS nt_site,
                 mn.base AS nt_base,
                 k.param_numeric AS kobs,
-                le.param_numeric AS log_kobs_err
+                le.param_numeric AS log_kobs_err,
+                lk.param_numeric AS log_kobs,
+                kd.param_numeric AS log_kdeg
             FROM probe_tc_fit_runs r
             JOIN probe_tc_fit_params k ON k.fit_run_id = r.id AND k.param_name = 'kobs'
             LEFT JOIN probe_tc_fit_params le ON le.fit_run_id = r.id AND le.param_name = 'log_kobs_err'
+            LEFT JOIN probe_tc_fit_params lk ON lk.fit_run_id = r.id AND lk.param_name = 'log_kobs'
+            LEFT JOIN probe_tc_fit_params kd ON kd.fit_run_id = r.id AND kd.param_name = 'log_kdeg'
             JOIN (
                 SELECT
                     rg_id,
@@ -502,6 +564,7 @@ class TempgradFitTask(Task):
                     MAX(buffer_id) AS buffer_id,
                     MAX(construct_id) AS construct_id
                 FROM probe_reactions
+                WHERE treated = 1
                 GROUP BY rg_id
             ) prd ON prd.rg_id = r.rg_id
             JOIN probe_reaction_groups rg ON rg.rg_id = r.rg_id
@@ -520,11 +583,22 @@ class TempgradFitTask(Task):
         series_map: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
 
         for row in rows:
+            rg_id_val = self._safe_int(row["rg_id"])
+            nt_id_val = self._safe_int(row["nt_id"])
+            if (rg_id_val is not None and rg_id_val in outlier_rg_ids) or (
+                nt_id_val is not None and nt_id_val in outlier_nt_ids
+            ) or (
+                rg_id_val is not None
+                and nt_id_val is not None
+                and (rg_id_val, nt_id_val) in outlier_pairs
+            ):
+                continue
+
             temperature = row["temperature"]
             if temperature is None:
                 continue
             temperature = float(temperature)
-            if threshold_c is not None and temperature < threshold_c:
+            if threshold_c is not None and temperature <= threshold_c:
                 continue
 
             kobs = row["kobs"]
@@ -533,6 +607,14 @@ class TempgradFitTask(Task):
             kobs = float(kobs)
             if kobs <= 0:
                 continue
+
+            log_kobs = row["log_kobs"]
+            log_kdeg = row["log_kdeg"]
+            if log_kobs in (None, "") or log_kdeg in (None, ""):
+                continue
+            log_kobs = float(log_kobs)
+            log_kdeg = float(log_kdeg)
+            log_kobs_transformed = log_kobs + log_kdeg
 
             log_err = row["log_kobs_err"]
             if log_err not in (None, ""):
@@ -543,14 +625,11 @@ class TempgradFitTask(Task):
             else:
                 log_err = None
 
-            group_key = (
-                row["construct_id"],
-                row["buffer_id"],
-                row["probe"],
-                row["probe_conc"],
-                row["rt_protocol"],
-            )
-            series_key = group_key + (row["nt_id"],)
+            group_key = self._build_group_key(row, group_fields)
+            if group_fields:
+                series_key = ("group",) + group_key
+            else:
+                series_key = group_key + (row["nt_id"],)
 
             entry = series_map.setdefault(
                 series_key,
@@ -568,19 +647,40 @@ class TempgradFitTask(Task):
                     "nt_id": row["nt_id"],
                     "nt_site": row["nt_site"],
                     "nt_base": row["nt_base"],
+                    "valtype": row["valtype"],
                     "temps": [],
                     "rates": [],
                     "log_errs": [],
                     "rg_ids": set(),
                     "replicates": set(),
                     "done_by": set(),
+                    "nt_ids": set(),
+                    "nt_sites": set(),
+                    "nt_bases": set(),
+                    "construct_ids_set": set(),
+                    "construct_names_set": set(),
+                    "construct_disps_set": set(),
+                    "valtypes": set(),
+                    "log_kobs_raw": [],
+                    "log_kdeg_values": [],
+                    "log_kobs_transformed": [],
+                    "point_metadata": [],
+                    "group_values": {},
+                    "group_labels": {},
+                    "fit_name": fit_name,
                 },
             )
 
             entry["temps"].append(float(temperature))
-            entry["rates"].append(kobs)
+            entry["rates"].append(math.exp(log_kobs_transformed))
             entry["log_errs"].append(log_err)
-            entry["rg_ids"].add(row["rg_id"])
+            entry["log_kobs_raw"].append(log_kobs)
+            entry["log_kdeg_values"].append(log_kdeg)
+            entry["log_kobs_transformed"].append(log_kobs_transformed)
+            if rg_id_val is not None:
+                entry["rg_ids"].add(rg_id_val)
+            elif row["rg_id"] not in (None, ""):
+                entry["rg_ids"].add(row["rg_id"])
             replicate_val = row["replicate"]
             try:
                 replicate_val = int(replicate_val)
@@ -591,6 +691,36 @@ class TempgradFitTask(Task):
             done_by_val = row["done_by"]
             if done_by_val not in (None, ""):
                 entry["done_by"].add(str(done_by_val))
+            entry["point_metadata"].append(
+                {
+                    "rg_id": rg_id_val if rg_id_val is not None else row["rg_id"],
+                    "nt_id": nt_id_val if nt_id_val is not None else row["nt_id"],
+                }
+            )
+            if nt_id_val is not None:
+                entry["nt_ids"].add(nt_id_val)
+            elif row["nt_id"] not in (None, ""):
+                entry["nt_ids"].add(row["nt_id"])
+            if row["nt_site"] not in (None, ""):
+                entry["nt_sites"].add(row["nt_site"])
+            if row["nt_base"] not in (None, ""):
+                entry["nt_bases"].add(str(row["nt_base"]))
+            if row["construct_id"] not in (None, ""):
+                entry["construct_ids_set"].add(row["construct_id"])
+            if row["construct_name"] not in (None, ""):
+                entry["construct_names_set"].add(str(row["construct_name"]))
+            if row["construct_disp_name"] not in (None, ""):
+                entry["construct_disps_set"].add(str(row["construct_disp_name"]))
+            if row["valtype"] not in (None, ""):
+                entry["valtypes"].add(str(row["valtype"]))
+
+            if group_fields:
+                for idx, field in enumerate(group_fields):
+                    value = group_key[idx] if idx < len(group_key) else None
+                    entry["group_values"].setdefault(field, value)
+                    label = self._group_label(field, value, row)
+                    if label is not None:
+                        entry["group_labels"].setdefault(field, label)
 
         series_list: List[TempgradSeries] = []
 
@@ -600,25 +730,80 @@ class TempgradFitTask(Task):
             if len(temps) < min_points:
                 continue
 
-            combined = sorted(zip(temps, rates, entry["log_errs"]), key=lambda x: x[0])
-            sorted_temps = [c[0] for c in combined]
-            sorted_rates = [c[1] for c in combined]
-            sorted_log_errs = [c[2] for c in combined]
+            combined = sorted(
+                zip(
+                    temps,
+                    rates,
+                    entry["log_errs"],
+                    entry["log_kobs_raw"],
+                    entry["log_kdeg_values"],
+                    entry["log_kobs_transformed"],
+                    entry["point_metadata"],
+                ),
+                key=lambda x: x[0],
+            )
+            sorted_temps: List[float] = []
+            sorted_rates: List[float] = []
+            sorted_log_errs: List[Optional[float]] = []
+            sorted_point_records: List[Dict[str, Any]] = []
+            for temp, rate, log_err, log_kobs_raw, log_kdeg_val, log_kobs2_val, meta in combined:
+                sorted_temps.append(float(temp))
+                sorted_rates.append(float(rate))
+                err_val = float(log_err) if log_err is not None else None
+                sorted_log_errs.append(err_val)
+                sorted_point_records.append(
+                    {
+                        "temperature_c": float(temp),
+                        "kobs2": float(rate),
+                        "log_kobs2": float(log_kobs2_val),
+                        "log_kobs2_err": err_val,
+                        "log_kdeg": float(log_kdeg_val),
+                        "rg_id": meta["rg_id"],
+                        "nt_id": meta["nt_id"],
+                    }
+                )
 
             weights = None
             if weighted:
-                weight_values = []
+                sigma_values: List[float] = []
+                has_valid_sigma = False
                 for log_err in sorted_log_errs:
-                    if log_err is None or log_err <= 0:
-                        weight_values.append(0.0)
+                    if log_err is None or not math.isfinite(log_err) or log_err <= 0:
+                        sigma_values.append(float("nan"))
                     else:
-                        weight_values.append(1.0 / float(log_err))
-                if any(w > 0 for w in weight_values):
-                    weights = weight_values
+                        sigma_values.append(float(log_err))
+                        has_valid_sigma = True
+                if has_valid_sigma:
+                    weights = sigma_values
 
             construct_label = entry["construct_disp"] or entry["construct_name"] or entry["construct_id"]
-            nt_id = entry["nt_id"]
-            series_id = f"{construct_label}|nt{nt_id}"
+            nt_ids_sorted = sorted(entry["nt_ids"])
+            nt_sites_sorted = sorted(entry["nt_sites"])
+            nt_bases_sorted = sorted(entry["nt_bases"])
+            valtypes_sorted = sorted(entry["valtypes"])
+            construct_ids_sorted = sorted(entry["construct_ids_set"])
+            construct_names_sorted = sorted(entry["construct_names_set"])
+            construct_disps_sorted = sorted(entry["construct_disps_set"])
+            construct_labels = construct_disps_sorted or construct_names_sorted or [
+                str(v) for v in construct_ids_sorted if v not in (None, "")
+            ]
+
+            if group_fields:
+                label_parts: List[str] = []
+                for field in group_fields:
+                    label = entry["group_labels"].get(field)
+                    if label is None:
+                        value = entry["group_values"].get(field)
+                        label = value if value not in (None, "") else field
+                    label_parts.append(str(label))
+                series_id = "|".join(str(part) for part in label_parts if part not in (None, ""))
+                if not series_id:
+                    series_id = f"{construct_label}|group"
+            else:
+                nt_id = entry["nt_id"]
+                series_id = f"{construct_label}|nt{nt_id}"
+
+            unique_temperatures = sorted({rec["temperature_c"] for rec in sorted_point_records})
 
             metadata: Dict[str, Any] = {
                 "source": "probe_tc",
@@ -632,17 +817,69 @@ class TempgradFitTask(Task):
                 "probe": entry["probe"],
                 "probe_conc": entry["probe_conc"],
                 "rt_protocol": entry["rt_protocol"],
-                "nt_id": nt_id,
-                "nt_site": entry["nt_site"],
-                "nt_base": entry["nt_base"],
+                "valtype": entry["valtype"],
+                "fit_name": fit_name,
                 "rg_ids": sorted(entry["rg_ids"]),
                 "replicates": sorted(entry["replicates"]),
                 "done_by": sorted(entry["done_by"]),
                 "temperature_threshold_c": threshold_c,
-                "temperatures_used_c": sorted_temps,
-                "kobs_values": sorted_rates,
-                "log_kobs_err": sorted_log_errs,
+                "temperatures_used_c": unique_temperatures,
+                "src_kobs_data": sorted_point_records,
             }
+            if outlier_summary:
+                metadata["outliers_removed"] = outlier_summary
+            if construct_labels:
+                metadata["construct"] = construct_labels
+                metadata["constructs_included"] = construct_labels
+            if construct_ids_sorted:
+                metadata["construct_ids"] = construct_ids_sorted
+                if len(construct_ids_sorted) == 1:
+                    metadata["construct_id"] = construct_ids_sorted[0]
+                else:
+                    metadata.pop("construct_id", None)
+            else:
+                metadata.pop("construct_id", None)
+            if construct_names_sorted:
+                metadata["construct_names"] = construct_names_sorted
+                if len(construct_names_sorted) == 1:
+                    metadata["construct_name"] = construct_names_sorted[0]
+                else:
+                    metadata.pop("construct_name", None)
+            else:
+                metadata.pop("construct_name", None)
+            if construct_disps_sorted:
+                metadata["construct_disp_names"] = construct_disps_sorted
+                if len(construct_disps_sorted) == 1:
+                    metadata["construct_disp_name"] = construct_disps_sorted[0]
+                else:
+                    metadata.pop("construct_disp_name", None)
+            else:
+                metadata.pop("construct_disp_name", None)
+            if group_fields:
+                metadata["group_by"] = list(group_fields)
+                metadata["group_values"] = dict(entry["group_values"])
+                if entry["group_labels"]:
+                    metadata["group_labels"] = dict(entry["group_labels"])
+
+            if nt_ids_sorted:
+                metadata["nt_ids"] = nt_ids_sorted
+                if len(nt_ids_sorted) == 1:
+                    metadata["nt_id"] = nt_ids_sorted[0]
+
+            if nt_sites_sorted:
+                if len(nt_sites_sorted) == 1:
+                    metadata["nt_site"] = nt_sites_sorted[0]
+                metadata["nt_sites"] = nt_sites_sorted
+
+            if nt_bases_sorted:
+                if len(nt_bases_sorted) == 1:
+                    metadata["nt_base"] = nt_bases_sorted[0]
+                metadata["nt_bases"] = nt_bases_sorted
+
+            if valtypes_sorted:
+                metadata["valtypes"] = valtypes_sorted
+                if len(valtypes_sorted) == 1:
+                    metadata["valtype"] = valtypes_sorted[0]
 
             series_list.append(
                 TempgradSeries(
@@ -705,6 +942,125 @@ class TempgradFitTask(Task):
                 continue
         return ints or None
 
+    def _parse_outliers(self, value: Any) -> Tuple[Set[int], Set[int], Set[Tuple[int, int]]]:
+        rg_ids: Set[int] = set()
+        nt_ids: Set[int] = set()
+        pairs: Set[Tuple[int, int]] = set()
+        if not value:
+            return rg_ids, nt_ids, pairs
+
+        if isinstance(value, Mapping):
+            items = [value]
+        elif isinstance(value, (list, tuple, set)):
+            items = list(value)
+        else:
+            items = [value]
+
+        for item in items:
+            if item is None:
+                continue
+            if isinstance(item, Mapping):
+                for key, raw in item.items():
+                    self._apply_outlier_token(key, raw, rg_ids, nt_ids, pairs)
+            else:
+                text = str(item)
+                if ":" in text:
+                    key, raw = text.split(":", 1)
+                    self._apply_outlier_token(key, raw, rg_ids, nt_ids, pairs)
+        return rg_ids, nt_ids, pairs
+
+    def _apply_outlier_token(
+        self,
+        key: Any,
+        raw: Any,
+        rg_ids: Set[int],
+        nt_ids: Set[int],
+        pairs: Set[Tuple[int, int]],
+    ) -> None:
+        field = str(key or "").strip().lower()
+        if not field:
+            return
+        if field in {"rg_id", "rg", "reaction_group"}:
+            for value in self._iter_outlier_numbers(raw):
+                if value is not None:
+                    rg_ids.add(value)
+            return
+        if field in {"nt_id", "nt", "nucleotide"}:
+            for value in self._iter_outlier_numbers(raw):
+                if value is not None:
+                    nt_ids.add(value)
+            return
+        if field in {"rg_nt_id", "rg_nt", "rgnt", "rgntid"}:
+            for rg_val, nt_val in self._iter_outlier_pairs(raw):
+                if rg_val is not None and nt_val is not None:
+                    pairs.add((rg_val, nt_val))
+            return
+        # Fallback: if the key encodes both identifiers (e.g., "20:418"), try to parse as pair.
+        for rg_val, nt_val in self._iter_outlier_pairs({field: raw}):
+            if rg_val is not None and nt_val is not None:
+                pairs.add((rg_val, nt_val))
+
+    def _iter_outlier_numbers(self, raw: Any) -> Iterable[Optional[int]]:
+        if raw is None:
+            return
+        if isinstance(raw, (list, tuple, set)):
+            for item in raw:
+                yield from self._iter_outlier_numbers(item)
+            return
+        text = str(raw).strip()
+        if not text:
+            return
+        # Normalize separators to whitespace
+        tokens = re.split(r"[,\s]+", text)
+        for token in tokens:
+            token = token.strip()
+            if not token:
+                continue
+            yield self._safe_int(token)
+
+    def _iter_outlier_pairs(self, raw: Any) -> Iterable[Tuple[Optional[int], Optional[int]]]:
+        if raw is None:
+            return
+        if isinstance(raw, Mapping):
+            rg_val = self._safe_int(raw.get("rg") or raw.get("rg_id") or raw.get("rgid"))
+            nt_val = self._safe_int(raw.get("nt") or raw.get("nt_id") or raw.get("ntid"))
+            yield (rg_val, nt_val)
+            return
+        if isinstance(raw, (list, tuple, set)):
+            for item in raw:
+                yield from self._iter_outlier_pairs(item)
+            return
+        text = str(raw).strip()
+        if not text:
+            return
+        # Try common separators (colon, comma, semicolon, slash, whitespace)
+        for pattern in (r":", r",", r";", r"/"):
+            if re.search(pattern, text):
+                parts = [p.strip() for p in re.split(pattern, text) if p.strip()]
+                if len(parts) >= 2:
+                    yield (self._safe_int(parts[0]), self._safe_int(parts[1]))
+                    return
+        parts = [p.strip() for p in text.split() if p.strip()]
+        if len(parts) >= 2:
+            yield (self._safe_int(parts[0]), self._safe_int(parts[1]))
+
+    @staticmethod
+    def _summarize_outliers(
+        rg_ids: Set[int],
+        nt_ids: Set[int],
+        pairs: Set[Tuple[int, int]],
+    ) -> Optional[Dict[str, Any]]:
+        if not (rg_ids or nt_ids or pairs):
+            return None
+        summary: Dict[str, Any] = {}
+        if rg_ids:
+            summary["rg_ids"] = sorted(rg_ids)
+        if nt_ids:
+            summary["nt_ids"] = sorted(nt_ids)
+        if pairs:
+            summary["rg_nt_ids"] = [f"{rg}:{nt}" for rg, nt in sorted(pairs)]
+        return summary
+
     @staticmethod
     def _resolve_construct_ids(conn: sqlite3.Connection, value: Any) -> Optional[List[int]]:
         if value is None:
@@ -724,6 +1080,106 @@ class TempgradFitTask(Task):
         rows = conn.execute(sql, params).fetchall()
         ids = [int(row[0]) for row in rows]
         return ids or None
+
+    @staticmethod
+    def _normalize_group_by(value: Any) -> List[str]:
+        if not value:
+            return []
+        if isinstance(value, str):
+            value = [value]
+        result: List[str] = []
+        for item in value:
+            if item in (None, ""):
+                continue
+            result.append(str(item).strip().lower())
+        return result
+
+    def _build_group_key(self, row: Mapping[str, Any], fields: Sequence[str]) -> Tuple[Any, ...]:
+        if not fields:
+            return (
+                row["construct_id"],
+                row["buffer_id"],
+                row["probe"],
+                row["probe_conc"],
+                row["rt_protocol"],
+            )
+        key_parts: List[Any] = []
+        for field in fields:
+            key_parts.append(self._group_value(field, row))
+        return tuple(key_parts)
+
+    def _group_value(self, field: str, row: Mapping[str, Any]) -> Any:
+        name = str(field).strip().lower()
+        if name in {"construct", "construct_id"}:
+            return self._row_get(row, "construct_id")
+        if name in {"construct_name", "construct_label"}:
+            return self._row_get(row, "construct_disp_name") or self._row_get(row, "construct_name")
+        if name in {"buffer", "buffer_id"}:
+            return self._row_get(row, "buffer_id")
+        if name in {"buffer_name", "buffer_label"}:
+            return self._row_get(row, "buffer_disp_name") or self._row_get(row, "buffer_name")
+        if name in {"probe"}:
+            return self._row_get(row, "probe")
+        if name in {"probe_conc", "probe_concentration"}:
+            return self._row_get(row, "probe_conc")
+        if name in {"rt_protocol", "protocol"}:
+            return self._row_get(row, "rt_protocol")
+        if name in {"base", "nt_base"}:
+            return self._row_get(row, "nt_base")
+        if name in {"valtype"}:
+            return self._row_get(row, "valtype")
+        if name in {"nt", "nt_id"}:
+            return self._row_get(row, "nt_id")
+        if name in {"rg", "rg_label"}:
+            return self._row_get(row, "rg_label")
+        return self._row_get(row, field)
+
+    def _group_label(self, field: str, value: Any, row: Mapping[str, Any]) -> Optional[str]:
+        name = str(field).strip().lower()
+        if value in (None, ""):
+            return None
+        if name in {"construct", "construct_id", "construct_name", "construct_label"}:
+            label = self._row_get(row, "construct_disp_name") or self._row_get(row, "construct_name") or value
+            return str(label)
+        if name in {"buffer", "buffer_id", "buffer_name", "buffer_label"}:
+            label = self._row_get(row, "buffer_disp_name") or self._row_get(row, "buffer_name") or value
+            return str(label)
+        if name in {"probe"}:
+            return str(self._row_get(row, "probe") or value)
+        if name in {"probe_conc", "probe_concentration"}:
+            try:
+                return f"{float(value):g}"
+            except (TypeError, ValueError):
+                return str(value)
+        if name in {"rt_protocol", "protocol"}:
+            return str(self._row_get(row, "rt_protocol") or value)
+        if name in {"base", "nt_base"}:
+            return str(self._row_get(row, "nt_base") or value)
+        if name in {"valtype"}:
+            return str(self._row_get(row, "valtype") or value)
+        if name in {"nt", "nt_id"}:
+            return f"nt{value}"
+        if name in {"rg", "rg_label"}:
+            return str(self._row_get(row, "rg_label") or value)
+        return str(value)
+
+    @staticmethod
+    def _row_get(row: Mapping[str, Any], key: str, default: Any = None) -> Any:
+        if row is None:
+            return default
+        if isinstance(row, Mapping):
+            return row.get(key, default)
+        if hasattr(row, "keys"):
+            try:
+                if key in row.keys():
+                    return row[key]
+            except Exception:  # pragma: no cover - defensive
+                return default
+            return default
+        try:
+            return row[key]
+        except Exception:
+            return default
 
     @staticmethod
     def _resolve_buffer_ids(conn: sqlite3.Connection, value: Any) -> Optional[List[int]]:

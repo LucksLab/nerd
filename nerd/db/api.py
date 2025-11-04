@@ -12,7 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from nerd.db.schema import ALL_TABLES, ALL_INDEXES
+from nerd.db.schema import ALL_TABLES, ALL_INDEXES, VIEW_DEFINITIONS
+
 from nerd.utils.hashing import config_hash
 from nerd.utils.logging import get_logger
 
@@ -127,6 +128,9 @@ def init_schema(conn: sqlite3.Connection):
                 conn.execute(table_sql)
             for index_sql in ALL_INDEXES:
                 conn.execute(index_sql)
+            for view_name, view_sql in VIEW_DEFINITIONS:
+                conn.execute(f"DROP VIEW IF EXISTS {view_name}")
+                conn.execute(view_sql)
         log.info("Database schema initialized successfully.")
     except sqlite3.Error as e:
         log.exception("Schema initialization failed: %s", e)
@@ -1878,6 +1882,9 @@ def init_schema(conn: sqlite3.Connection):
                 conn.execute(table_sql)
             for index_sql in ALL_INDEXES:
                 conn.execute(index_sql)
+            for view_name, view_sql in VIEW_DEFINITIONS:
+                conn.execute(f"DROP VIEW IF EXISTS {view_name}")
+                conn.execute(view_sql)
         log.info("Database schema initialized successfully.")
     except sqlite3.Error as e:
         log.exception("Schema initialization failed: %s", e)
