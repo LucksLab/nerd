@@ -1,7 +1,6 @@
-# NERD: A Reproducible Pipeline for RNA Chemical Probing, Kinetic Modeling, and Energetic Analysis
+# NERD: Extensible Toolkit for Organization and Kinetic Analysis of Chemical Probing Data
 
-
-NERD (Nucleic acid Energetics from reactivity data) is a reproducible, modular analysis pipeline for transforming high-dimensional chemical probing datasets, such as kinetic time-courses and temperature-gradient experiments, into quantitative models of RNA energetics. Designed to integrate every stage of analysis, from raw sequencing (FASTQ) or independent kinetic rate measurements to complex multi-parameter fits, NERD provides a unified framework for data curation, model fitting, and visualization.
+NERD (**N**ucleic acid **E**nergetics from **R**eactivity **D**ata) is a reproducible, modular analysis pipeline for transforming high-dimensional chemical probing datasets, such as kinetic time-courses and temperature-gradient experiments, into quantitative models with underlying RNA energetics. Designed to integrate every stage of analysis, from raw sequencing (FASTQ) or independent kinetic rate measurements to complex multi-parameter fits, NERD provides a unified framework for data curation, model fitting, and visualization.
 
 ---
 
@@ -9,7 +8,7 @@ NERD (Nucleic acid Energetics from reactivity data) is a reproducible, modular a
 
 - **Integrated data backbone** – every construct, buffer, condition, and fit is tracked within a single SQLite database, enabling reproducible analyses and effortless comparisons across experiments.
 - **Pluggable fit engines** – swap between Python, R, or bespoke models without changing orchestration.
-- **Scientist-friendly inputs** – CSV importers mirror bench sheets; automated QC catches missing references and inconsistent metadata before they propagate.
+- **Scientist-friendly inputs** – CSV importers mirror bench sheets, while YAML configs capture analysis choices (outliers, filters, engine options) so decisions stay versioned and reproducible.
 
 ---
 
@@ -32,70 +31,70 @@ NERD ships with a lightweight dependency set (Typer, SQLite, NumPy, Pandas, lmfi
 
 ---
 
-## CLI Overview
+## Core Nerd CLI Functions
 
-All commands are namespaced under `NERD`. The primary entry points are:
+1. **Sample creation & organization** – `nerd run create` ingests constructs, buffers, reaction conditions, and FASTQ paths into the SQLite backbone. Declare `derived_samples` in the same config to spin up subsampled or filtered sequencing inputs on the fly.
+2. **NMR kinetic analysis** – Pair `nerd run nmr_create` (trace registration) with `nerd run nmr_deg_kinetics` or `nerd run nmr_add_kinetics` to generate degradation and adduction fits.
+3. **Mutational counting pipeline** – `nerd run mut_count` stages the FASTQs, dispatches the selected counter (ShapeMapper supported today), and writes counts plus QC metadata back to the database, including any derived samples.
+4. **Probe time-course fitting** – `nerd run probe_timecourse` executes free, global, and constrained kinetic rounds, centralizing fit metadata so results stay linked to reaction groups and nucleotides.
+5. **Temperature-gradient analysis** – `nerd run tempgrad_fit` consumes NMR or probe outputs to fit melted Arrhenius or two-state models across constructs, buffers, and bases.
 
-| Level | Purpose | Example |
-|-------|---------|---------|
-| `NERD create` | Populate metadata tables (constructs, buffers, reactions, samples). | `NERD create examples/create.yaml` |
-| `NERD nmr_deg_kinetics` / `NERD nmr_add_kinetics` | Fit NMR degradation or adduction kinetics using registered trace files. | `NERD nmr_deg_kinetics configs/deg.yaml` |
-| `NERD probe_timecourse` | Run free / global / constrained probing fits with Arrhenius hooks. | `NERD probe_timecourse configs/probe_tc.yaml` |
-| `NERD tempgrad_fit` | Arrhenius or melt fits from NMR runs or probe timecourse outputs. | `NERD tempgrad_fit configs/tempgrad.yaml` |
+Every command follows the same pattern:
 
-All tasks share a standard YAML schema:
+```bash
+nerd run <step> path/to/config.yaml
+```
+
+Each config shares a small `run` header for bookkeeping:
 
 ```yaml
 run:
   label: my_analysis
   output_dir: results
   backend: local  # or slurm / ssh / custom
-
-tempgrad_fit:
-  mode: arrhenius
-  data_source: probe_tc
-  filters:
-    construct: 4U_wt
-    base: A
-  engine_options:
-    melt_threshold_c: 60
-    weighted: true
 ```
 
-The `run` block controls logging, execution backend, and output directories. The task block (here `tempgrad_fit`) defines domain-specific options.
+Add a task-specific block (e.g., `create`, `mut_count`, `probe_timecourse`) to declare inputs and engine options, and NERD handles staging, logging, and database updates.
 
 ---
 
 ## Quick Start Workflow
 
-1. **Create metadata**  
+1. **Create and organize samples**  
 
    ```bash
-   NERD create --config manuscript_pipeline/01_create_samples/create_meta.yaml \
-     --db manuscript_pipeline/NERD.sqlite
+   nerd run create manuscript_pipeline/01_create_samples/create_meta.yaml
    ```
 
-   Optional follow-up configs (`create_probing_samples.yaml`, `create_nmr_add_samples.yaml`, etc.) add domain-specific rows.
+   The config can point from reaction conditions to FASTQ files and define `derived_samples` (subsampling, filtering) that downstream steps reuse automatically.
 
-2. **Register NMR traces**  
-   Use `nmr_create` with `trace_files` entries so each reaction knows where its CSV traces live.
+2. **Run NMR kinetics**  
+   Use `nerd run nmr_create configs/nmr_traces.yaml` to link reactions with trace CSVs, then:
+   - `nerd run nmr_deg_kinetics configs/deg.yaml` for degradation rates  
+   - `nerd run nmr_add_kinetics configs/add.yaml` for adduction kinetics
 
-3. **Run fits**  
-   - `NERD nmr_deg_kinetics …` for degradation rates.  
-   - `NERD nmr_add_kinetics …` for NTP adduction curves (species like `ATP_C8` derived from trace metadata).
-   - `NERD probe_timecourse …` for free / global / constrained kinetic parameters per nucleotide.
+3. **Count mutations**  
+   ```bash
+   nerd run mut_count configs/mut_count_shapemapper.yaml
+   ```
+   ShapeMapper is supported out of the box; swap runners or parameters in the config as needed.
 
-4. **Temperature-gradient analysis**  
+4. **Analyze probe time-courses**  
+   Run free, global, and constrained rounds with:
 
    ```bash
-   NERD tempgrad_fit --config examples/probe_tempgrad_arrhenius/config.yaml \
-     --db manuscript_pipeline/NERD.sqlite
+   nerd run probe_timecourse configs/probe_tc.yaml
+   ```
+
+5. **Fit temperature gradients**  
+
+   ```bash
+   nerd run tempgrad_fit examples/probe_tempgrad_arrhenius/config.yaml
    ```
 
    This groups probe timecourse fits on the fly, filters by melt temperature, and performs weighted Arrhenius fits per nucleotide.
 
-5. **Inspect results**  
-   Every task writes JSON artifacts under `output_dir/label/<task>/latest/results` and logs insertions in `created_objects.log`. Explore the SQLite database with your favorite viewer (e.g., `sqlitebrowser` or `datasette`).
+Every task writes JSON artifacts under `output_dir/label/<task>/latest/results` and logs insertions in `created_objects.log`. Explore the SQLite database with your favorite viewer (e.g., `sqlitebrowser` or `datasette`).
 
 ---
 
@@ -120,8 +119,6 @@ The `run` block controls logging, execution backend, and output directories. The
 
 ## Getting Help & Contributing
 
-- **Examples**: `examples/` contains ready-to-run configs for NMR degradation, adduction, probe timecourse, and temperature-gradient fits.
+- **Examples**: `demo_folder/` contains ready-to-run configs for NMR degradation, adduction, probe timecourse, and temperature-gradient fits.
 - **Issues & enhancements**: File GitHub issues or PRs; the maintainers welcome field-specific engines (R, Bayesian) via the plugin registry.
 - **Extending tasks**: New CLI steps simply subclass `Task` and leverage the shared logging, SQLite helpers, and runner infrastructure.
-
-NERD is designed to evolve with your experiments. Start with the examples, keep everything in version control, and you’ll have a reproducible kinetic analysis pipeline ready for the next manuscript.

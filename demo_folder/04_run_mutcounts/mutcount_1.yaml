@@ -1,0 +1,23 @@
+run:
+  output_dir: examples
+  label: all_mutcounts
+  backend: local
+  threads: 8
+  mem_gb: 16
+  time: "01:22:00"
+
+mut_count:
+  # Choose plugin/tool
+  plugin: shapemapper
+  tool:
+    bin: /projects/b1044/Software/shapemapper2-2.3/shapemapper   # or omit to rely on PATH/conda env
+    version: "2.3"
+  reaction_group: "1"
+
+  # Optional plugin-specific args (passed through)
+  params:
+    dms_mode: True
+    amplicon: True
+    n_proc: 8
+    output_N7: True
+    per_read_histograms: True         # --per-read-histograms

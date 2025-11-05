@@ -10,18 +10,23 @@ license = { text = "MIT" }
 requires-python = ">=3.8"
 
 dependencies = [
-    "typer[all] >=0.7",         # CLI tool
-    "rich",                     # Logging, CLI formatting
-    "pandas",                   # Data handling
-    "numpy",                    # Math operations
-    "matplotlib",               # Plotting
-    "lmfit",                    # Fitting models
-    "sqlalchemy",              # Optional: for more robust db handling
-    # Add more as needed
+    "typer>=0.9",         # CLI framework
+    "rich>=13.0",         # Logging, CLI formatting
+    "numpy>=1.23",        # Numeric operations
+    "pandas>=1.5",        # Data handling
+    "scipy>=1.9",         # Optimization backend for lmfit
+    "lmfit>=1.2",         # Fitting models
+    "pyyaml>=6.0",        # YAML config parsing
 ]
 
 [project.scripts]
 nerd = "nerd.cli:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
