@@ -1,0 +1,19 @@
+run:
+  label: arrhenius_atp_c8
+  output_dir: examples
+  backend: local
+
+tempgrad_fit:
+  mode: arrhenius
+  engine: arrhenius_python
+  overwrite: true
+  data_source: nmr
+  filters:
+    reaction_type: add
+    substrate: ATP
+    species: ATP_C8
+  engine_options:
+    temperature_unit: c
+    weighted: false
+  metadata:
+    description: "Arrhenius fit for NMR adduction ATP_C8"

@@ -1,0 +1,20 @@
+run:
+  label: nmr_fit_deg
+  output_dir: examples
+  backend: local
+
+nmr_deg_kinetics:
+  # Limit to the reactions imported by examples/nmr_create_deg/config.yaml.
+  # If you skip this key, all available 'deg' reactions in the DB will be fitted.
+  # reaction_ids: [1, 2]
+
+  # Resolve trace paths relative to the original data location used during nmr_create.
+  search_roots:
+    - ../../test_data
+
+  plugin: lmfit_deg
+  plugin_options:
+    kdeg_init: 0.003
+  fit_params:
+    weight_scheme: uniform
+  species: dms

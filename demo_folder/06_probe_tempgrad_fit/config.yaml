@@ -1,0 +1,33 @@
+run:
+  label: probe_tempgrad_arrhenius
+  output_dir: examples
+  backend: local
+
+# Arrhenius fit on probe timecourse kinetics (melted temps only)
+tempgrad_fit:
+  mode: arrhenius
+  data_source: probe_tc
+  overwrite: true
+
+  filters:
+    construct: 4U_wt
+    buffer: pH6.5_A
+    probe: dms
+    rt_protocol: SSIII
+    base: A
+    fit_kind: round3_constrained
+
+  engine_options:
+    temperature_unit: c
+    melt_threshold_c: 60
+    weighted: true
+    # future aggregations can be enabled via group_by / aggregate keys
+
+    - construct
+    - buffer
+    - probe
+    - probe_conc
+    - rt_protocol
+
+  metadata:
+    description: "Probe arrhenius example: 4U_wt, A-base nucleotides above melt threshold"

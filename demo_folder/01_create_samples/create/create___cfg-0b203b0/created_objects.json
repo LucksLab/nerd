@@ -1,0 +1,54 @@
+{
+  "meta_buffers": [
+    {
+      "disp_name": "pH6.5_A",
+      "id": 1,
+      "name": "Schwalbe_bistris",
+      "pH": 6.5,
+      "status": "created"
+    }
+  ],
+  "meta_constructs": [
+    {
+      "disp_name": "4U_wt",
+      "family": "Salm_4U_thermometer",
+      "id": 1,
+      "name": "WT",
+      "status": "created",
+      "version": 2
+    }
+  ],
+  "samples": [],
+  "sequencing_runs": [
+    {
+      "date": "230607",
+      "id": 1,
+      "run_manager": "EKC",
+      "run_name": "230607_M05164_0144_000000000-L3FLD",
+      "sequencer": "MiSeq",
+      "status": "updated"
+    },
+    {
+      "date": "240405",
+      "id": 2,
+      "run_manager": "EKC",
+      "run_name": "240405_M05164_0164_000000000-LH62L",
+      "sequencer": "MiSeq",
+      "status": "updated"
+    },
+    {
+      "date": "240424",
+      "id": 3,
+      "run_manager": "EKC",
+      "run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "sequencer": "NovaSeq",
+      "status": "updated"
+    }
+  ],
+  "summary": {
+    "meta_buffers": 1,
+    "meta_constructs": 1,
+    "samples": 0,
+    "sequencing_runs": 3
+  }
+}

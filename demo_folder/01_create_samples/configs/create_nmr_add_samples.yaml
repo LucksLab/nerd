@@ -1,0 +1,427 @@
+run:
+  label: nmr_create_ntp_add
+  output_dir: examples
+  backend: local
+
+nmr_create:
+  search_roots:
+    - ../../test_data
+  reactions:
+    - reaction_type: add
+      temperature: 20.0
+      replicate: 1
+      num_scans: 152
+      time_per_read: 10.0
+      total_kinetic_reads: 60
+      total_kinetic_time: 36000.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: ATP
+      substrate_conc: 0.0080045
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_ntp_adduction_data/ATP_20C_rep1
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/ATP_peak_percentages/20_1_peak8.csv
+          species: ATP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/ATP_peak_percentages/20_1_peakDMS.csv
+          species: ATP_DMS
+    - reaction_type: add
+      temperature: 37.0
+      replicate: 1
+      num_scans: 32
+      time_per_read: 2.5
+      total_kinetic_reads: 36
+      total_kinetic_time: 5400.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: ATP
+      substrate_conc: 0.0080045
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_ntp_adduction_data/ATP_37C_rep1
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/ATP_peak_percentages/37_1_peak8.csv
+          species: ATP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/ATP_peak_percentages/37_1_peakDMS.csv
+          species: ATP_DMS
+    - reaction_type: add
+      temperature: 37.0
+      replicate: 2
+      num_scans: 32
+      time_per_read: 2.5
+      total_kinetic_reads: 36
+      total_kinetic_time: 5400.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: ATP
+      substrate_conc: 0.0080045
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_ntp_adduction_data/ATP_37C_rep2
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/ATP_peak_percentages/37_2_peak8.csv
+          species: ATP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/ATP_peak_percentages/37_2_peakDMS.csv
+          species: ATP_DMS
+    - reaction_type: add
+      temperature: 42.0
+      replicate: 1
+      num_scans: 22
+      time_per_read: 2.0
+      total_kinetic_reads: 24
+      total_kinetic_time: 2880.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: ATP
+      substrate_conc: 0.0080045
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_ntp_adduction_data/ATP_42C_rep1
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/ATP_peak_percentages/42_1_peak8.csv
+          species: ATP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/ATP_peak_percentages/42_1_peakDMS.csv
+          species: ATP_DMS
+    - reaction_type: add
+      temperature: 42.0
+      replicate: 2
+      num_scans: 22
+      time_per_read: 2.0
+      total_kinetic_reads: 24
+      total_kinetic_time: 2880.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: ATP
+      substrate_conc: 0.0080045
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_ntp_adduction_data/ATP_42C_rep2
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/ATP_peak_percentages/42_2_peak8.csv
+          species: ATP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/ATP_peak_percentages/42_2_peakDMS.csv
+          species: ATP_DMS
+    - reaction_type: add
+      temperature: 48.0
+      replicate: 1
+      num_scans: 16
+      time_per_read: 1.5
+      total_kinetic_reads: 20
+      total_kinetic_time: 1800.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: ATP
+      substrate_conc: 0.0080045
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_ntp_adduction_data/ATP_48C_rep1
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/ATP_peak_percentages/48_1_peak8.csv
+          species: ATP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/ATP_peak_percentages/48_1_peakDMS.csv
+          species: ATP_DMS
+    - reaction_type: add
+      temperature: 48.0
+      replicate: 2
+      num_scans: 16
+      time_per_read: 1.5
+      total_kinetic_reads: 20
+      total_kinetic_time: 1800.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: ATP
+      substrate_conc: 0.0080045
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_ntp_adduction_data/ATP_48C_rep2
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/ATP_peak_percentages/48_2_peak6.csv
+          species: ATP_C6
+        dms_trace:
+          path: nmr_ntp_adduction_data/ATP_peak_percentages/48_2_peakDMS.csv
+          species: ATP_DMS
+    - reaction_type: add
+      temperature: 25.0
+      replicate: 1
+      num_scans: 152
+      time_per_read: 10.0
+      total_kinetic_reads: 60
+      total_kinetic_time: 36000.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: CTP
+      substrate_conc: 0.0073565
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_ntp_adduction_data/CTP_25C_rep1
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/CTP_peak_percentages/25_1_peak8.csv
+          species: CTP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/CTP_peak_percentages/25_1_peakDMS.csv
+          species: CTP_DMS
+    - reaction_type: add
+      temperature: 37.0
+      replicate: 1
+      num_scans: 32
+      time_per_read: 2.5
+      total_kinetic_reads: 36
+      total_kinetic_time: 5400.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: CTP
+      substrate_conc: 0.0073565
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_ntp_adduction_data/CTP_37C_rep1
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/CTP_peak_percentages/37_1_peak8.csv
+          species: CTP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/CTP_peak_percentages/37_1_peakDMS.csv
+          species: CTP_DMS
+    - reaction_type: add
+      temperature: 37.0
+      replicate: 2
+      num_scans: 32
+      time_per_read: 2.5
+      total_kinetic_reads: 36
+      total_kinetic_time: 5400.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: CTP
+      substrate_conc: 0.0073565
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_ntp_adduction_data/CTP_37C_rep2
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/CTP_peak_percentages/37_2_peak8.csv
+          species: CTP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/CTP_peak_percentages/37_2_peakDMS.csv
+          species: CTP_DMS
+    - reaction_type: add
+      temperature: 42.0
+      replicate: 1
+      num_scans: 22
+      time_per_read: 2.0
+      total_kinetic_reads: 24
+      total_kinetic_time: 2880.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: CTP
+      substrate_conc: 0.0073565
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_ntp_adduction_data/CTP_42C_rep1
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/CTP_peak_percentages/42_1_peak8.csv
+          species: CTP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/CTP_peak_percentages/42_1_peakDMS.csv
+          species: CTP_DMS
+    - reaction_type: add
+      temperature: 42.0
+      replicate: 2
+      num_scans: 22
+      time_per_read: 2.0
+      total_kinetic_reads: 24
+      total_kinetic_time: 2880.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: CTP
+      substrate_conc: 0.0073565
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_ntp_adduction_data/CTP_42C_rep2
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/CTP_peak_percentages/42_2_peak8.csv
+          species: CTP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/CTP_peak_percentages/42_2_peakDMS.csv
+          species: CTP_DMS
+    - reaction_type: add
+      temperature: 48.0
+      replicate: 1
+      num_scans: 16
+      time_per_read: 1.5
+      total_kinetic_reads: 20
+      total_kinetic_time: 1800.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: CTP
+      substrate_conc: 0.0073565
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_ntp_adduction_data/CTP_48C_rep1
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/CTP_peak_percentages/48_1_peak8.csv
+          species: CTP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/CTP_peak_percentages/48_1_peakDMS.csv
+          species: CTP_DMS
+    - reaction_type: add
+      temperature: 48.0
+      replicate: 2
+      num_scans: 16
+      time_per_read: 1.5
+      total_kinetic_reads: 20
+      total_kinetic_time: 1800.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: CTP
+      substrate_conc: 0.0073565
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_ntp_adduction_data/CTP_48C_rep2
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/CTP_peak_percentages/48_2_peak8.csv
+          species: CTP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/CTP_peak_percentages/48_2_peakDMS.csv
+          species: CTP_DMS
+    - reaction_type: add
+      temperature: 25.0
+      replicate: 1
+      num_scans: 80
+      time_per_read: 10.0
+      total_kinetic_reads: 60
+      total_kinetic_time: 36000.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: GTP
+      substrate_conc: 0.006252
+      buffer: Schwalbe_bistris
+      nmr_machine: HFCN600
+      kinetic_data_dir: nmr_ntp_adduction_data/GTP_25C_rep1
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/GTP_peak_percentages/25_1_peak8.csv
+          species: GTP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/GTP_peak_percentages/25_1_peakDMS.csv
+          species: GTP_DMS
+    - reaction_type: add
+      temperature: 33.0
+      replicate: 1
+      num_scans: 36
+      time_per_read: 5.0
+      total_kinetic_reads: 24
+      total_kinetic_time: 7200.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: GTP
+      substrate_conc: 0.006252
+      buffer: Schwalbe_bistris
+      nmr_machine: HFCN600
+      kinetic_data_dir: nmr_ntp_adduction_data/GTP_33C_rep1
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/GTP_peak_percentages/33_1_peak8.csv
+          species: GTP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/GTP_peak_percentages/33_1_peakDMS.csv
+          species: GTP_DMS
+    - reaction_type: add
+      temperature: 42.0
+      replicate: 1
+      num_scans: 12
+      time_per_read: 2.0
+      total_kinetic_reads: 24
+      total_kinetic_time: 2880.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: GTP
+      substrate_conc: 0.006252
+      buffer: Schwalbe_bistris
+      nmr_machine: HFCN600
+      kinetic_data_dir: nmr_ntp_adduction_data/GTP_42C_rep1
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/GTP_peak_percentages/42_1_peak8.csv
+          species: GTP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/GTP_peak_percentages/42_1_peakDMS.csv
+          species: GTP_DMS
+    - reaction_type: add
+      temperature: 48.0
+      replicate: 1
+      num_scans: 16
+      time_per_read: 1.5
+      total_kinetic_reads: 20
+      total_kinetic_time: 1800.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: GTP
+      substrate_conc: 0.006252
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_ntp_adduction_data/GTP_48C_rep1
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/GTP_peak_percentages/48_1_peak8.csv
+          species: GTP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/GTP_peak_percentages/48_1_peakDMS.csv
+          species: GTP_DMS
+    - reaction_type: add
+      temperature: 20.0
+      replicate: 1
+      num_scans: 32
+      time_per_read: 5.0
+      total_kinetic_reads: 120
+      total_kinetic_time: 36000.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: UTP
+      substrate_conc: 0.007127
+      buffer: Schwalbe_bistris
+      nmr_machine: HFCN600
+      kinetic_data_dir: nmr_ntp_adduction_data/UTP_20C_rep1
+      trace_files:
+        peak_trace:
+          path: nmr_ntp_adduction_data/UTP_peak_percentages/20_1_peak8_raw.csv
+          species: UTP_C8
+        dms_trace:
+          path: nmr_ntp_adduction_data/UTP_peak_percentages/20_1_peakDMS.csv
+          species: UTP_DMS

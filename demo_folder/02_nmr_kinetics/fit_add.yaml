@@ -1,0 +1,18 @@
+run:
+  label: nmr_fit_add_demo
+  output_dir: examples
+  backend: local
+
+# Select species or substrates with matching experimental conditions (buffer, temp, etc.).
+nmr_add_kinetics:
+  search_roots:
+    - ../../test_data
+
+  plugin: ode_lsq_ntp_add
+  plugin_options:
+    k_add_init: 0.002
+    k_deg_init: 0.001
+  fit_params:
+    S_factor: 1.0
+  species:
+    - ATP_C8

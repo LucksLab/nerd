@@ -1,0 +1,34 @@
+run:
+  output_dir: demo_folder
+  label: 01_create_samples
+  backend: local
+  threads: 4
+  mem_gb: 8
+  time: "00:11:00"
+
+create:
+  buffers: 
+    - name: Schwalbe_bistris
+      disp_name: pH6.5_A
+      pH: 6.5
+      composition: 150 mM bis-tris, 15 mM Kx(HPO4)y, 25 mM KCl
+  constructs:
+    - family: Salm_4U_thermometer
+      name: WT
+      version: 2
+      sequence: ggtgtaagggtgaagtgtaAGGTTGAACTTTTGAATAGTGATTCAGGAGGTTAATGGAAgtaaaggtaatgaaggtgaag
+      disp_name: 4U_wt
+      nt_info: nt_info/fourU_WT.csv
+  sequencing_runs:
+    - run_name: 230607_M05164_0144_000000000-L3FLD
+      date: "230607"
+      sequencer: MiSeq
+      run_manager: EKC
+    - run_name: 240405_M05164_0164_000000000-LH62L
+      date: "240405"
+      sequencer: MiSeq
+      run_manager: EKC
+    - run_name: 240424_Lucks24_fourU_DMS_BATCH5-6
+      date: "240424"
+      sequencer: NovaSeq
+      run_manager: EKC

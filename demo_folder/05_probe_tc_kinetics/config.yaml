@@ -1,0 +1,39 @@
+run:
+  label: probing_timecourse_fits
+  output_dir: examples
+  backend: local
+  threads: 4
+  time: "00:30:00"
+
+# Demonstrates the migrated probe timecourse fitting engine.
+probe_timecourse:
+  engine: python_baseline
+  rounds:
+    - round1_free
+    - round2_global
+    - round3_constrained
+
+  # Reaction groups pulled from examples/nerd.sqlite
+  rg_ids:
+    - 26
+
+  # The example database stores probing timecourse amplitudes under "modrate".
+  valtype: modrate
+  min_points: 3
+  overwrite: true
+
+  # Optional nucleotide filter. Uncomment to focus on specific sites.
+  # nt_ids:
+  #   - 390  # site indexing comes from meta_nucleotides.id
+
+  # Forward knobs into the engine to tune selection and initial guesses.
+  engine_options:
+    global_selection: ac_only  # acceptable values: ac_only, acg_only, all
+    global_filters:
+      r2_threshold: 0.75
+    initial_kdeg: 0.0025  # s^-1; translated to log space internally
+
+  # Metadata mirrored into result artifacts for provenance.
+  global_metadata:
+    analyst: demo_user
+    notes: "Baseline python engine demo using examples/nerd.sqlite"

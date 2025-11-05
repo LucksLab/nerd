@@ -1,0 +1,198 @@
+run:
+  label: nmr_create_deg
+  output_dir: examples
+  backend: local
+
+nmr_create:
+  # Relative paths below are resolved against the label directory; these entries
+  # step back to the repository's test_data folder.
+  search_roots:
+    - ../../test_data
+  reactions:
+    - reaction_type: deg
+      temperature: 25.0
+      replicate: 1
+      num_scans: 64
+      time_per_read: 5.0
+      total_kinetic_reads: 96
+      total_kinetic_time: 28800.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: none
+      substrate_conc: 0.0
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_degradation_data/dms_schwalbe_25C_rep1
+      trace_files:
+        decay_trace: nmr_degradation_data/dms_schwalbe_25C_rep1.csv
+    - reaction_type: deg
+      temperature: 25.0
+      replicate: 2
+      num_scans: 64
+      time_per_read: 5.0
+      total_kinetic_reads: 96
+      total_kinetic_time: 28800.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: none
+      substrate_conc: 0.0
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_degradation_data/dms_schwalbe_25C_rep2
+      trace_files:
+        decay_trace: nmr_degradation_data/dms_schwalbe_25C_rep2.csv
+    - reaction_type: deg
+      temperature: 30.0
+      replicate: 1
+      num_scans: 64
+      time_per_read: 5.0
+      total_kinetic_reads: 60
+      total_kinetic_time: 18000.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: none
+      substrate_conc: 0.0
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_degradation_data/dms_schwalbe_30C_rep1
+      trace_files:
+        decay_trace: nmr_degradation_data/dms_schwalbe_30C_rep1.csv
+    - reaction_type: deg
+      temperature: 37.0
+      replicate: 1
+      num_scans: 32
+      time_per_read: 2.5
+      total_kinetic_reads: 36
+      total_kinetic_time: 5400.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: none
+      substrate_conc: 0.0
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_degradation_data/dms_schwalbe_37C_rep1
+      trace_files:
+        decay_trace: nmr_degradation_data/dms_schwalbe_37C_rep1.csv
+    - reaction_type: deg
+      temperature: 37.0
+      replicate: 2
+      num_scans: 32
+      time_per_read: 2.5
+      total_kinetic_reads: 36
+      total_kinetic_time: 5400.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: none
+      substrate_conc: 0.0
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_degradation_data/dms_schwalbe_37C_rep2
+      trace_files:
+        decay_trace: nmr_degradation_data/dms_schwalbe_37C_rep2.csv
+    - reaction_type: deg
+      temperature: 45.0
+      replicate: 1
+      num_scans: 16
+      time_per_read: 1.5
+      total_kinetic_reads: 30
+      total_kinetic_time: 2700.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: none
+      substrate_conc: 0.0
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_degradation_data/dms_schwalbe_45C_rep1
+      trace_files:
+        decay_trace: nmr_degradation_data/dms_schwalbe_45C_rep1.csv
+    - reaction_type: deg
+      temperature: 45.0
+      replicate: 2
+      num_scans: 16
+      time_per_read: 1.5
+      total_kinetic_reads: 30
+      total_kinetic_time: 2700.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: none
+      substrate_conc: 0.0
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_degradation_data/dms_schwalbe_45C_rep2
+      trace_files:
+        decay_trace: nmr_degradation_data/dms_schwalbe_45C_rep2.csv
+    - reaction_type: deg
+      temperature: 52.0
+      replicate: 1
+      num_scans: 16
+      time_per_read: 1.5
+      total_kinetic_reads: 20
+      total_kinetic_time: 1800.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: none
+      substrate_conc: 0.0
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_degradation_data/dms_schwalbe_52C_rep1
+      trace_files:
+        decay_trace: nmr_degradation_data/dms_schwalbe_52C_rep1.csv
+    - reaction_type: deg
+      temperature: 52.0
+      replicate: 2
+      num_scans: 16
+      time_per_read: 1.5
+      total_kinetic_reads: 20
+      total_kinetic_time: 1800.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: none
+      substrate_conc: 0.0
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_degradation_data/dms_schwalbe_52C_rep2
+      trace_files:
+        decay_trace: nmr_degradation_data/dms_schwalbe_52C_rep2.csv
+    - reaction_type: deg
+      temperature: 60.0
+      replicate: 1
+      num_scans: 16
+      time_per_read: 1.5
+      total_kinetic_reads: 10
+      total_kinetic_time: 900.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: none
+      substrate_conc: 0.0
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_degradation_data/dms_schwalbe_60C_rep1
+      trace_files:
+        decay_trace: nmr_degradation_data/dms_schwalbe_60C_rep1.csv
+    - reaction_type: deg
+      temperature: 60.0
+      replicate: 2
+      num_scans: 16
+      time_per_read: 1.5
+      total_kinetic_reads: 10
+      total_kinetic_time: 900.0
+      probe: dms
+      probe_conc: 0.01585
+      probe_solvent: etoh
+      substrate: none
+      substrate_conc: 0.0
+      buffer: Schwalbe_bistris
+      nmr_machine: A600
+      kinetic_data_dir: nmr_degradation_data/dms_schwalbe_60C_rep2
+      trace_files:
+        decay_trace: nmr_degradation_data/dms_schwalbe_60C_rep2.csv
