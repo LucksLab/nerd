@@ -77,6 +77,15 @@ class TempgradFitTask(Task):
                 block.get("data_source") or block["filters"].get("data_source") or "manual"
             )
 
+        model_value = block.get("model")
+        if model_value is None:
+            model_value = block["engine_options"].get("model")
+        model_str = str(model_value or "").strip().lower()
+        block["model"] = model_str or None
+        if block["model"]:
+            block["engine_options"]["model"] = block["model"]
+            block["metadata"].setdefault("model", block["model"])
+
         fit_name = block.get("fit_name")
         if fit_name is not None:
             fit_name_str = str(fit_name).strip()
@@ -384,8 +393,404 @@ class TempgradFitTask(Task):
         ]
 
     def _series_from_db_melt(self, ctx: TaskContext, inputs: Dict[str, Any]) -> List[TempgradSeries]:
-        log.info("No database loader implemented for two_state_melt; supply 'series' entries in config.")
-        return []
+        filters = dict(inputs.get("filters") or {})
+        options = dict(inputs.get("engine_options") or {})
+        group_fields = tuple(self._normalize_group_by(inputs.get("group_by")))
+        if not group_fields:
+            group_fields = tuple(self._normalize_group_by(options.get("group_by")))
+
+        model = str(inputs.get("model") or options.get("model") or "free_kadd").strip().lower()
+
+        outlier_rg_ids, outlier_nt_ids, outlier_pairs = self._parse_outliers(
+            inputs.get("outliers") or options.get("outliers")
+        )
+        outlier_summary = self._summarize_outliers(outlier_rg_ids, outlier_nt_ids, outlier_pairs)
+        fit_name = str(inputs.get("fit_name") or "").strip() or None
+
+        fit_kind = str(filters.get("fit_kind") or "round3_constrained").strip()
+
+        min_points = int(filters.get("min_points") or options.get("min_points") or 3)
+
+        construct_ids = None
+        if "construct_id" in filters:
+            construct_ids = self._coerce_int_list(filters.get("construct_id"))
+        elif "construct" in filters:
+            construct_ids = self._resolve_construct_ids(ctx.db, filters["construct"])
+
+        buffer_ids = None
+        if "buffer_id" in filters:
+            buffer_ids = self._coerce_int_list(filters.get("buffer_id"))
+        elif "buffer" in filters:
+            buffer_ids = self._resolve_buffer_ids(ctx.db, filters["buffer"])
+
+        nt_ids = self._coerce_int_list(filters.get("nt_id")) if "nt_id" in filters else None
+        bases = None
+        if "base" in filters:
+            value = filters["base"]
+            if isinstance(value, (list, tuple, set)):
+                bases = [str(v).upper() for v in value if v not in (None, "")]
+            else:
+                bases = [str(value).upper()]
+
+        probe_filter = filters.get("probe")
+        probe_conc_filter = filters.get("probe_conc") or filters.get("probe_concentration")
+        rt_protocol_filter = filters.get("rt_protocol")
+        rg_label_filter = filters.get("rg_label") or filters.get("reaction_group")
+        valtype_filter = filters.get("valtype")
+
+        temperature_min = filters.get("temperature_min") or filters.get("temperature_ge")
+        temperature_max = filters.get("temperature_max") or filters.get("temperature_le")
+
+        where: List[str] = ["r.fit_kind = ?"]
+        params: List[Any] = [fit_kind]
+
+        if construct_ids:
+            placeholders = ",".join("?" for _ in construct_ids)
+            where.append(f"prd.construct_id IN ({placeholders})")
+            params.extend(construct_ids)
+        if buffer_ids:
+            placeholders = ",".join("?" for _ in buffer_ids)
+            where.append(f"prd.buffer_id IN ({placeholders})")
+            params.extend(buffer_ids)
+        if nt_ids:
+            placeholders = ",".join("?" for _ in nt_ids)
+            where.append(f"r.nt_id IN ({placeholders})")
+            params.extend(nt_ids)
+        if bases:
+            placeholders = ",".join("?" for _ in bases)
+            where.append(f"UPPER(mn.base) IN ({placeholders})")
+            params.extend(bases)
+        if probe_filter:
+            values = probe_filter if isinstance(probe_filter, (list, tuple, set)) else [probe_filter]
+            values = [str(v).strip() for v in values if v not in (None, "")]
+            if values:
+                placeholders = ",".join("?" for _ in values)
+                where.append(f"prd.probe IN ({placeholders})")
+                params.extend(values)
+        if probe_conc_filter not in (None, ""):
+            try:
+                conc_val = float(probe_conc_filter)
+                where.append("prd.probe_conc = ?")
+                params.append(conc_val)
+            except (TypeError, ValueError):
+                log.warning("Invalid probe_concentration filter '%s'; ignoring.", probe_conc_filter)
+        if rt_protocol_filter:
+            values = rt_protocol_filter if isinstance(rt_protocol_filter, (list, tuple, set)) else [rt_protocol_filter]
+            values = [str(v).strip() for v in values if v not in (None, "")]
+            if values:
+                placeholders = ",".join("?" for _ in values)
+                where.append(f"prd.rt_protocol IN ({placeholders})")
+                params.extend(values)
+        if rg_label_filter:
+            values = rg_label_filter if isinstance(rg_label_filter, (list, tuple, set)) else [rg_label_filter]
+            values = [str(v).strip() for v in values if v not in (None, "")]
+            if values:
+                placeholders = ",".join("?" for _ in values)
+                where.append(f"rg.rg_label IN ({placeholders})")
+                params.extend(values)
+        if valtype_filter not in (None, ""):
+            values = valtype_filter if isinstance(valtype_filter, (list, tuple, set)) else [valtype_filter]
+            values = [str(v).strip() for v in values if v not in (None, "")]
+            if values:
+                placeholders = ",".join("?" for _ in values)
+                where.append(f"r.valtype IN ({placeholders})")
+                params.extend(values)
+        if temperature_min not in (None, ""):
+            try:
+                tmin = float(temperature_min)
+                where.append("prd.temperature >= ?")
+                params.append(tmin)
+            except (TypeError, ValueError):
+                log.warning("Invalid temperature_min filter '%s'; ignoring.", temperature_min)
+        if temperature_max not in (None, ""):
+            try:
+                tmax = float(temperature_max)
+                where.append("prd.temperature <= ?")
+                params.append(tmax)
+            except (TypeError, ValueError):
+                log.warning("Invalid temperature_max filter '%s'; ignoring.", temperature_max)
+
+        sql = """
+            SELECT
+                r.id AS fit_run_id,
+                r.rg_id,
+                r.nt_id,
+                r.valtype,
+                rg.rg_label,
+                prd.temperature,
+                prd.probe,
+                prd.probe_conc,
+                prd.rt_protocol,
+                prd.buffer_id,
+                prd.construct_id,
+                mc.name AS construct_name,
+                mc.disp_name AS construct_disp_name,
+                mc.version AS construct_version,
+                mb.name AS buffer_name,
+                mb.disp_name AS buffer_disp_name,
+                mn.site AS nt_site,
+                mn.base AS nt_base,
+                k.param_numeric AS kobs,
+                lk.param_numeric AS log_kobs,
+                le.param_numeric AS log_kobs_err,
+                kd.param_numeric AS log_kdeg
+            FROM probe_tc_fit_runs r
+            JOIN probe_tc_fit_params k ON k.fit_run_id = r.id AND k.param_name = 'kobs'
+            JOIN probe_tc_fit_params lk ON lk.fit_run_id = r.id AND lk.param_name = 'log_kobs'
+            LEFT JOIN probe_tc_fit_params le ON le.fit_run_id = r.id AND le.param_name = 'log_kobs_err'
+            LEFT JOIN probe_tc_fit_params kd ON kd.fit_run_id = r.id AND kd.param_name = 'log_kdeg'
+            JOIN (
+                SELECT
+                    rg_id,
+                    MAX(temperature) AS temperature,
+                    MAX(probe) AS probe,
+                    MAX(probe_concentration) AS probe_conc,
+                    MAX(rt_protocol) AS rt_protocol,
+                    MAX(buffer_id) AS buffer_id,
+                    MAX(construct_id) AS construct_id
+                FROM probe_reactions
+                WHERE treated = 1
+                GROUP BY rg_id
+            ) prd ON prd.rg_id = r.rg_id
+            JOIN probe_reaction_groups rg ON rg.rg_id = r.rg_id
+            LEFT JOIN meta_constructs mc ON mc.id = prd.construct_id
+            LEFT JOIN meta_buffers mb ON mb.id = prd.buffer_id
+            LEFT JOIN meta_nucleotides mn ON mn.id = r.nt_id
+        """
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+
+        rows = ctx.db.execute(sql, params).fetchall()
+        if not rows:
+            log.info("No probe timecourse fits matched the requested filters.")
+            return []
+
+        series_map: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+
+        for row in rows:
+            rg_id_val = self._safe_int(row["rg_id"])
+            nt_id_val = self._safe_int(row["nt_id"])
+            if (rg_id_val is not None and rg_id_val in outlier_rg_ids) or (
+                nt_id_val is not None and nt_id_val in outlier_nt_ids
+            ) or (
+                rg_id_val is not None
+                and nt_id_val is not None
+                and (rg_id_val, nt_id_val) in outlier_pairs
+            ):
+                continue
+
+            log_kobs = row["log_kobs"]
+            if log_kobs in (None, ""):
+                continue
+            try:
+                log_kobs = float(log_kobs)
+            except (TypeError, ValueError):
+                continue
+
+            temperature = row["temperature"]
+            if temperature in (None, ""):
+                continue
+            try:
+                temperature = float(temperature)
+            except (TypeError, ValueError):
+                continue
+
+            log_err = row["log_kobs_err"]
+            if log_err in (None, ""):
+                log_err = None
+            else:
+                try:
+                    log_err = float(log_err)
+                except (TypeError, ValueError):
+                    log_err = None
+
+            group_components = []
+            row_keys = set(row.keys()) if hasattr(row, "keys") else set()
+            for field in group_fields:
+                name = str(field).strip().lower()
+                if name == "construct":
+                    group_components.append(row["construct_disp_name"] or row["construct_name"] or row["construct_id"])
+                elif name == "buffer":
+                    group_components.append(row["buffer_disp_name"] or row["buffer_name"] or row["buffer_id"])
+                elif name == "base":
+                    group_components.append(row["nt_base"])
+                elif name == "probe":
+                    group_components.append(row["probe"])
+                elif name == "valtype":
+                    group_components.append(row["valtype"])
+                else:
+                    value = row[field] if field in row_keys else None
+                    group_components.append(value)
+            group_key = tuple(group_components) if group_components else tuple()
+            group_label = "|".join([str(comp) for comp in group_components if comp not in (None, "")]) or "default"
+
+            series_key = group_key + (row["nt_id"],)
+
+            entry = series_map.setdefault(
+                series_key,
+                {
+                    "construct_id": row["construct_id"],
+                    "construct_name": row["construct_name"],
+                    "construct_disp": row["construct_disp_name"],
+                    "construct_version": row["construct_version"],
+                    "buffer_id": row["buffer_id"],
+                    "buffer_name": row["buffer_name"],
+                    "buffer_disp": row["buffer_disp_name"],
+                    "probe": row["probe"],
+                    "probe_conc": row["probe_conc"],
+                    "rt_protocol": row["rt_protocol"],
+                    "nt_id": row["nt_id"],
+                    "nt_site": row["nt_site"],
+                    "nt_base": row["nt_base"],
+                    "valtype": row["valtype"],
+                    "temps": [],
+                    "log_kobs": [],
+                    "log_errs": [],
+                    "log_kdeg_values": [],
+                    "kobs_values": [],
+                    "point_rg_ids": [],
+                    "point_nt_ids": [],
+                    "rg_ids": set(),
+                    "group_key": group_key,
+                    "group_label": group_label,
+                },
+            )
+
+            entry["temps"].append(temperature)
+            entry["log_kobs"].append(log_kobs)
+            entry["log_errs"].append(log_err)
+            log_kdeg = row["log_kdeg"]
+            if log_kdeg in (None, ""):
+                log_kdeg_val = None
+            else:
+                try:
+                    log_kdeg_val = float(log_kdeg)
+                except (TypeError, ValueError):
+                    log_kdeg_val = None
+            kobs_val = row["kobs"]
+            if kobs_val in (None, ""):
+                kobs_numeric = math.exp(log_kobs)
+            else:
+                try:
+                    kobs_numeric = float(kobs_val)
+                except (TypeError, ValueError):
+                    kobs_numeric = math.exp(log_kobs)
+            entry["log_kdeg_values"].append(log_kdeg_val)
+            entry["kobs_values"].append(kobs_numeric)
+            entry["point_rg_ids"].append(rg_id_val if rg_id_val is not None else row["rg_id"])
+            entry["point_nt_ids"].append(nt_id_val if nt_id_val is not None else row["nt_id"])
+            if rg_id_val is not None:
+                entry["rg_ids"].add(rg_id_val)
+            elif row["rg_id"] not in (None, ""):
+                entry["rg_ids"].add(row["rg_id"])
+
+        series_list: List[TempgradSeries] = []
+
+        for entry in series_map.values():
+            temps = entry["temps"]
+            log_values = entry["log_kobs"]
+            if len(temps) < min_points:
+                continue
+
+            combined = sorted(
+                zip(
+                    temps,
+                    log_values,
+                    entry["log_errs"],
+                    entry["log_kdeg_values"],
+                    entry["kobs_values"],
+                    entry["point_rg_ids"],
+                    entry["point_nt_ids"],
+                ),
+                key=lambda x: x[0],
+                reverse=True,
+            )
+            sorted_temps: List[float] = []
+            sorted_log: List[float] = []
+            sorted_point_records: List[Dict[str, Any]] = []
+            for temp, log_val, log_err_val, log_kdeg_val, kobs_val, rg_point, nt_point in combined:
+                temp_f = float(temp)
+                log_f = float(log_val)
+                sorted_temps.append(temp_f)
+                sorted_log.append(log_f)
+                if log_err_val is None:
+                    err_val = None
+                else:
+                    try:
+                        err_val = float(log_err_val)
+                    except (TypeError, ValueError):
+                        err_val = None
+                if log_kdeg_val is None:
+                    log_kdeg_out = None
+                else:
+                    log_kdeg_out = float(log_kdeg_val)
+                log_kobs2_val = log_f
+                if log_kdeg_out is not None and math.isfinite(log_kdeg_out):
+                    log_kobs2_val = log_f + log_kdeg_out
+                if kobs_val is None or not math.isfinite(kobs_val) or kobs_val <= 0:
+                    kobs2_val = math.exp(log_kobs2_val)
+                else:
+                    kobs2_val = float(kobs_val)
+                sorted_point_records.append(
+                    {
+                        "temperature_c": temp_f,
+                        "kobs2": kobs2_val,
+                        "log_kobs2": float(log_kobs2_val),
+                        "log_kobs2_err": err_val,
+                        "log_kdeg": log_kdeg_out,
+                        "rg_id": rg_point,
+                        "nt_id": nt_point,
+                    }
+                )
+
+            construct_label = entry["construct_disp"] or entry["construct_name"] or entry["construct_id"]
+            nt_id = entry["nt_id"]
+            series_id = f"{construct_label}|nt{nt_id}"
+
+            unique_temps: List[float] = []
+            for temp in sorted_temps:
+                if not unique_temps or temp != unique_temps[-1]:
+                    unique_temps.append(temp)
+
+            metadata: Dict[str, Any] = {
+                "source": "probe_tc",
+                "construct_id": entry["construct_id"],
+                "construct_name": entry["construct_name"],
+                "construct_disp_name": entry["construct_disp"],
+                "construct_version": entry["construct_version"],
+                "buffer_id": entry["buffer_id"],
+                "buffer_name": entry["buffer_name"],
+                "buffer_disp_name": entry["buffer_disp"],
+                "probe": entry["probe"],
+                "probe_conc": entry["probe_conc"],
+                "rt_protocol": entry["rt_protocol"],
+                "valtype": entry["valtype"],
+                "nt_id": nt_id,
+                "nt_site": entry["nt_site"],
+                "nt_base": entry["nt_base"],
+                "rg_ids": sorted(entry["rg_ids"]),
+                "temperatures_used_c": unique_temps,
+                "src_kobs_data": sorted_point_records,
+                "group_key": list(entry["group_key"]),
+                "group_label": entry["group_label"],
+                "model": model,
+            }
+            if outlier_summary:
+                metadata["outliers_removed"] = outlier_summary
+            if fit_name:
+                metadata["fit_seed_ab"] = None
+
+            series_list.append(
+                TempgradSeries(
+                    series_id=series_id,
+                    x_values=sorted_temps,
+                    y_values=sorted_log,
+                    weights=None,
+                    metadata=metadata,
+                )
+            )
+
+        return series_list
 
     def _series_from_db_probe_tc(self, ctx: TaskContext, inputs: Dict[str, Any]) -> List[TempgradSeries]:
         filters = dict(inputs.get("filters") or {})
@@ -672,7 +1077,7 @@ class TempgradFitTask(Task):
             )
 
             entry["temps"].append(float(temperature))
-            entry["rates"].append(math.exp(log_kobs_transformed))
+            entry["rates"].append(float(log_kobs_transformed))
             entry["log_errs"].append(log_err)
             entry["log_kobs_raw"].append(log_kobs)
             entry["log_kdeg_values"].append(log_kdeg)
@@ -743,18 +1148,24 @@ class TempgradFitTask(Task):
                 key=lambda x: x[0],
             )
             sorted_temps: List[float] = []
-            sorted_rates: List[float] = []
+            sorted_log_rates: List[float] = []
             sorted_log_errs: List[Optional[float]] = []
             sorted_point_records: List[Dict[str, Any]] = []
-            for temp, rate, log_err, log_kobs_raw, log_kdeg_val, log_kobs2_val, meta in combined:
+            for temp, log_rate, log_err, log_kobs_raw, log_kdeg_val, log_kobs2_val, meta in combined:
                 sorted_temps.append(float(temp))
-                sorted_rates.append(float(rate))
+                sorted_log_rates.append(float(log_rate))
                 err_val = float(log_err) if log_err is not None else None
                 sorted_log_errs.append(err_val)
+                try:
+                    kobs2_calc = math.exp(log_kobs2_val)
+                except (TypeError, ValueError, OverflowError):
+                    kobs2_value = float("nan")
+                else:
+                    kobs2_value = float(kobs2_calc) if math.isfinite(kobs2_calc) else float("nan")
                 sorted_point_records.append(
                     {
                         "temperature_c": float(temp),
-                        "kobs2": float(rate),
+                        "kobs2": kobs2_value,
                         "log_kobs2": float(log_kobs2_val),
                         "log_kobs2_err": err_val,
                         "log_kdeg": float(log_kdeg_val),
@@ -885,7 +1296,7 @@ class TempgradFitTask(Task):
                 TempgradSeries(
                     series_id=series_id,
                     x_values=sorted_temps,
-                    y_values=sorted_rates,
+                    y_values=sorted_log_rates,
                     weights=weights,
                     metadata=metadata,
                 )
