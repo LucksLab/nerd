@@ -1,6 +1,6 @@
 # Probe Mutational Counting
 
-Time-course kinetics and temperature-gradient fits rely on accurate per-nucleotide reactivities. NERD’s `mut_count` task turns raw FASTQ files into modification rates by orchestrating an RT-MaP pipeline (ShapeMapper today, additional engines in the future).
+Time‑course kinetics and temperature‑gradient fits rely on accurate per‑nucleotide reactivities. NERD’s `mut_count` task quantifies chemical modifications on RNA. Today this is predominantly achieved through reverse‑transcription–based readouts (RT‑stop or RT‑MaP), where chemical adducts cause truncations or mutations during cDNA synthesis. NERD orchestrates external tools (e.g., ShapeMapper) to convert raw sequencing reads into modification rates, and is designed to extend to direct RNA detection approaches (e.g., Nanopore) in the future.
 
 ---
 
@@ -16,16 +16,19 @@ Time-course kinetics and temperature-gradient fits rely on accurate per-nucleoti
 
    The config specifies which samples to process, ShapeMapper arguments, and staging options.
 
+NERD does not compute reactivities itself; instead, it coordinates established software packages to ensure reproducible and metadata‑tracked modification quantification.
+
 ---
 
 ## RT-Stop vs RT-MaP
 
-Two broad strategies exist for chemical probing readouts:
+Two broad RT‑based strategies exist for detecting RNA chemical modifications:
 
 - **RT-stop**: quantify cDNA truncations (not yet implemented in NERD).
 - **RT-MaP (Mutation Profiling)**: quantify mismatches and deletions introduced during reverse transcription. NERD currently supports this via ShapeMapper, enabling reactivity calculation for each nucleotide.
+- **Direct RNA detection (e.g., Nanopore)**: future support for base‑calling/modified‑base detection engines will enable modification calling directly from RNA reads without reverse transcription.
 
-The abstraction keeps room for alternate tools—swap engines in future configs without rewriting the orchestrator.
+This abstraction allows NERD to remain engine‑agnostic—swap external tools or add new detection backends without rewriting pipelines.
 
 ---
 

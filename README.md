@@ -1,8 +1,8 @@
 # NERD: Extensible Toolkit for Organization and Kinetic Analysis of Chemical Probing Data
 
-NERD (**N**ucleic acid **E**nergetics from **R**eactivity **D**ata) is a reproducible, modular analysis pipeline for transforming high-dimensional chemical probing datasets, such as kinetic time-courses and temperature-gradient experiments, into quantitative models with underlying RNA energetics. Designed to integrate every stage of analysis, from raw sequencing (FASTQ) or independent kinetic rate measurements to complex multi-parameter fits, NERD provides a unified framework for data curation, model fitting, and visualization.
+NERD (**N**ucleic acid **E**nergetics from **R**eactivity **D**ata) is a reproducible, extensible analysis pipeline for transforming high-dimensional chemical probing datasets, such as kinetic time-courses and temperature-gradient experiments, into quantitative models with underlying RNA energetics. Designed to integrate every stage of analysis, from raw sequencing (FASTQ) or independent kinetic rate measurements to complex multi-parameter fits, NERD provides a unified framework for data curation, model fitting, and visualization.
 
-Check out https://luckslab.github.io/nerd/ for detailed CLI documentation and high-level description of key components.
+Check out <https://luckslab.github.io/nerd/> for detailed CLI documentation and high-level description of key components.
 
 ---
 

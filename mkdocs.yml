@@ -3,9 +3,10 @@ repo_url: https://github.com/edr-choi/nerd
 repo_name: nerd
 nav:
   - Home: index.md
-  - Getting Started:
-      - Create Samples: guides/create-samples.md
+  - Guides:
+      - Create Samples: guides/sample-organization.md
       - NMR Kinetics: guides/nmr-kinetics.md
+      - Modification Counting: guides/probe-mutcount.md
       - Probe Timecourse: guides/probe-timecourse.md
       - Temperature Gradients: guides/tempgrad-fit.md
   - CLI Reference:
