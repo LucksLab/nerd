@@ -406,6 +406,12 @@ class TempgradFitTask(Task):
         )
         outlier_summary = self._summarize_outliers(outlier_rg_ids, outlier_nt_ids, outlier_pairs)
         fit_name = str(inputs.get("fit_name") or "").strip() or None
+        seed_fit_name_raw = options.get("seed_from_fit") or inputs.get("seed_from_fit")
+        seed_fit_name = None
+        if seed_fit_name_raw not in (None, ""):
+            seed_fit_name = str(seed_fit_name_raw).strip()
+            if not seed_fit_name:
+                seed_fit_name = None
 
         fit_kind = str(filters.get("fit_kind") or "round3_constrained").strip()
 
@@ -706,13 +712,12 @@ class TempgradFitTask(Task):
                 reverse=True,
             )
             sorted_temps: List[float] = []
-            sorted_log: List[float] = []
+            sorted_log_rates: List[float] = []
             sorted_point_records: List[Dict[str, Any]] = []
             for temp, log_val, log_err_val, log_kdeg_val, kobs_val, rg_point, nt_point in combined:
                 temp_f = float(temp)
                 log_f = float(log_val)
                 sorted_temps.append(temp_f)
-                sorted_log.append(log_f)
                 if log_err_val is None:
                     err_val = None
                 else:
@@ -727,6 +732,7 @@ class TempgradFitTask(Task):
                 log_kobs2_val = log_f
                 if log_kdeg_out is not None and math.isfinite(log_kdeg_out):
                     log_kobs2_val = log_f + log_kdeg_out
+                sorted_log_rates.append(float(log_kobs2_val))
                 if kobs_val is None or not math.isfinite(kobs_val) or kobs_val <= 0:
                     kobs2_val = math.exp(log_kobs2_val)
                 else:
@@ -737,6 +743,7 @@ class TempgradFitTask(Task):
                         "kobs2": kobs2_val,
                         "log_kobs2": float(log_kobs2_val),
                         "log_kobs2_err": err_val,
+                        "log_kobs_raw": log_f,
                         "log_kdeg": log_kdeg_out,
                         "rg_id": rg_point,
                         "nt_id": nt_point,
@@ -777,14 +784,29 @@ class TempgradFitTask(Task):
             }
             if outlier_summary:
                 metadata["outliers_removed"] = outlier_summary
-            if fit_name:
-                metadata["fit_seed_ab"] = None
+
+            if seed_fit_name:
+                seed_params = self._load_tempgrad_seed_params(
+                    ctx.db,
+                    target_label=series_id,
+                    seed_fit_name=seed_fit_name,
+                )
+                if seed_params:
+                    metadata["fit_seed_params"] = seed_params
+                    if "a" in seed_params and "b" in seed_params:
+                        metadata["fit_seed_ab"] = [
+                            float(seed_params["a"]),
+                            float(seed_params["b"]),
+                        ]
+                    metadata.setdefault("seed_from_fit", seed_fit_name)
+                else:
+                    metadata.setdefault("fit_seed_ab", None)
 
             series_list.append(
                 TempgradSeries(
                     series_id=series_id,
                     x_values=sorted_temps,
-                    y_values=sorted_log,
+                    y_values=sorted_log_rates,
                     weights=None,
                     metadata=metadata,
                 )
@@ -1291,7 +1313,6 @@ class TempgradFitTask(Task):
                 metadata["valtypes"] = valtypes_sorted
                 if len(valtypes_sorted) == 1:
                     metadata["valtype"] = valtypes_sorted[0]
-
             series_list.append(
                 TempgradSeries(
                     series_id=series_id,
@@ -1303,6 +1324,60 @@ class TempgradFitTask(Task):
             )
 
         return series_list
+
+    def _load_tempgrad_seed_params(
+        self,
+        conn,
+        *,
+        target_label: str,
+        seed_fit_name: Optional[str],
+    ) -> Optional[Dict[str, float]]:
+        if seed_fit_name in (None, "") or target_label in (None, ""):
+            return None
+        row = conn.execute(
+            """
+            SELECT r.id
+            FROM tempgrad_fit_runs r
+            WHERE r.fit_kind = 'two_state_melt'
+              AND r.target_label = ?
+              AND EXISTS (
+                  SELECT 1
+                  FROM tempgrad_fit_params p
+                  WHERE p.fit_run_id = r.id
+                    AND p.param_name IN ('request:fit_name', 'meta:fit_name')
+                    AND p.param_text = ?
+              )
+            ORDER BY r.id DESC
+            LIMIT 1
+            """,
+            (target_label, seed_fit_name),
+        ).fetchone()
+        if not row:
+            return None
+        fit_run_id = int(row[0])
+        params_rows = conn.execute(
+            """
+            SELECT param_name, param_numeric, param_text
+            FROM tempgrad_fit_params
+            WHERE fit_run_id = ?
+            """,
+            (fit_run_id,),
+        ).fetchall()
+        seed_params: Dict[str, float] = {}
+        for item in params_rows:
+            name = item["param_name"]
+            if name not in {"a", "b", "c", "d", "f", "g"}:
+                continue
+            value = item["param_numeric"]
+            if value is None and item["param_text"] not in (None, ""):
+                try:
+                    value = float(item["param_text"])
+                except (TypeError, ValueError):
+                    value = None
+            if value is None:
+                continue
+            seed_params[name] = float(value)
+        return seed_params or None
 
     def _write_artifact(self, run_dir: Path, result) -> None:
         out_dir = run_dir / "results"

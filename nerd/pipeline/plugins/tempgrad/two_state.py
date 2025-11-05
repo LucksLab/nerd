@@ -114,10 +114,39 @@ def _build_global_params(
         top_slopes.append(slope_top)
         top_inters.append(intercept_top)
 
-        params.add(f"c_{site_id}", value=slope_bot, vary=True)
-        params.add(f"d_{site_id}", value=intercept_bot, vary=True)
-        params.add(f"f_{site_id}", value=-400.0, min=-1e5, max=0.0)
-        params.add(f"g_{site_id}", value=40.0, min=30.0, max=60.0)
+        seed_params = payload.get("seed_params") if isinstance(payload, Mapping) else None
+
+        def _seed_value(name: str, default: float) -> float:
+            if not isinstance(seed_params, Mapping):
+                return default
+            raw = seed_params.get(name)
+            if raw in (None, ""):
+                return default
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                return default
+            if not np.isfinite(value):
+                return default
+            return value
+
+        params.add(f"c_{site_id}", value=_seed_value("c", slope_bot), vary=True)
+        default_d = intercept_bot if np.isfinite(intercept_bot) else intercept_top
+        if default_d is None or not np.isfinite(default_d):
+            default_d = 0.0
+        params.add(f"d_{site_id}", value=_seed_value("d", default_d), vary=True)
+        params.add(
+            f"f_{site_id}",
+            value=_seed_value("f", -400.0),
+            min=-1e5,
+            max=0.0,
+        )
+        params.add(
+            f"g_{site_id}",
+            value=np.clip(_seed_value("g", 40.0), 30.0, 60.0),
+            min=30.0,
+            max=60.0,
+        )
     if init_ab is None:
         if top_slopes:
             params[f"a_{shared_label}"].set(value=float(np.median(top_slopes)))
@@ -206,12 +235,28 @@ def _series_payload(series) -> Dict[str, np.ndarray]:
                         sigma_values.append(float("nan"))
             if sigma_values:
                 sigma = _safe_array(sigma_values, dtype=float)
-    return {
+    payload: Dict[str, Any] = {
         "inv_t": 1.0 / (temps_c + 273.15),
         "log_k": logk,
         "sigma": sigma,
         "temps_c": temps_c,
     }
+    seed_params = series.metadata.get("fit_seed_params")
+    if isinstance(seed_params, Mapping):
+        try:
+            payload["seed_params"] = {str(k): float(v) for k, v in seed_params.items() if v not in (None, "")}
+        except (TypeError, ValueError):
+            normalized: Dict[str, float] = {}
+            for key, value in seed_params.items():
+                try:
+                    if value in (None, ""):
+                        continue
+                    normalized[str(key)] = float(value)
+                except (TypeError, ValueError):
+                    continue
+            if normalized:
+                payload["seed_params"] = normalized
+    return payload
 
 
 def _param_stderr(result: Any, param_name: str) -> Optional[float]:
@@ -378,10 +423,22 @@ class TwoStateMeltEngine(TempgradEngine):
                 site_data[site_id] = payload
 
             init_ab = None
-            if fit_name:
-                ab_meta = series_list[indices[0]].metadata.get("fit_seed_ab")
-                if isinstance(ab_meta, (list, tuple)) and len(ab_meta) == 2:
+            ab_meta = series_list[indices[0]].metadata.get("fit_seed_ab")
+            if isinstance(ab_meta, (list, tuple)) and len(ab_meta) == 2:
+                try:
                     init_ab = (float(ab_meta[0]), float(ab_meta[1]))
+                except (TypeError, ValueError):
+                    init_ab = None
+            if init_ab is None:
+                seed_params_first = series_list[indices[0]].metadata.get("fit_seed_params")
+                if isinstance(seed_params_first, Mapping):
+                    seed_a = seed_params_first.get("a")
+                    seed_b = seed_params_first.get("b")
+                    try:
+                        if seed_a not in (None, "") and seed_b not in (None, ""):
+                            init_ab = (float(seed_a), float(seed_b))
+                    except (TypeError, ValueError):
+                        init_ab = None
 
             result = _fit_global(site_data, shared_label, init_ab, weighted)
 

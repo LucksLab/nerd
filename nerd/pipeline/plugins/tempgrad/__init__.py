@@ -14,7 +14,7 @@ from .base import (
 )
 from .arrhenius import ArrheniusPythonEngine
 from .r_arrhenius import ArrheniusREngine, ArrheniusRBayesianEngine
-from .two_state_melt import TwoStateMeltEngine
+from .two_state import TwoStateMeltEngine
 
 __all__ = [
     "SeriesFitResult",
