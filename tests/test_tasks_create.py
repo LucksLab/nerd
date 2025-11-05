@@ -82,13 +82,13 @@ def test_create_task_inserts_core_entities(tmp_path):
 
     # Assertions: constructs, buffers, seq run, samples
     cur = ctx.db.cursor()
-    assert cur.execute("SELECT COUNT(*) FROM constructs").fetchone()[0] == 1
-    assert cur.execute("SELECT COUNT(*) FROM buffers").fetchone()[0] == 1
+    assert cur.execute("SELECT COUNT(*) FROM meta_constructs").fetchone()[0] == 1
+    assert cur.execute("SELECT COUNT(*) FROM meta_buffers").fetchone()[0] == 1
     assert cur.execute("SELECT COUNT(*) FROM sequencing_runs").fetchone()[0] == 1
     assert cur.execute("SELECT COUNT(*) FROM sequencing_samples").fetchone()[0] == 1
 
     # reaction_groups row exists with correct label
-    rg = cur.execute("SELECT rg_id, rg_label FROM reaction_groups").fetchone()
+    rg = cur.execute("SELECT rg_id, rg_label FROM probe_reaction_groups").fetchone()
     assert rg is not None
     assert rg[1] == "65_1"
 
@@ -96,8 +96,8 @@ def test_create_task_inserts_core_entities(tmp_path):
     row = cur.execute(
         """
         SELECT pr.rg_id, rg.rg_label, pr.s_id
-        FROM probing_reactions pr
-        JOIN reaction_groups rg ON rg.rg_id = pr.rg_id
+        FROM probe_reactions pr
+        JOIN probe_reaction_groups rg ON rg.rg_id = pr.rg_id
         """
     ).fetchone()
     assert row is not None
@@ -114,15 +114,15 @@ def test_reaction_group_label_reuse(tmp_path):
     # First insertion
     task.consume_outputs(ctx, inputs, {}, run_dir)
     cur = ctx.db.cursor()
-    rg1 = cur.execute("SELECT rg_id FROM reaction_groups WHERE rg_label=?", ("65_1",)).fetchone()[0]
+    rg1 = cur.execute("SELECT rg_id FROM probe_reaction_groups WHERE rg_label=?", ("65_1",)).fetchone()[0]
 
     # Second insertion with same label should reuse rg_id
     task.consume_outputs(ctx, inputs, {}, run_dir)
-    rg2 = cur.execute("SELECT rg_id FROM reaction_groups WHERE rg_label=?", ("65_1",)).fetchone()[0]
+    rg2 = cur.execute("SELECT rg_id FROM probe_reaction_groups WHERE rg_label=?", ("65_1",)).fetchone()[0]
     assert rg1 == rg2
 
     # There may be multiple probing_reactions now; ensure at least 2 after two runs
-    count_rxn = cur.execute("SELECT COUNT(*) FROM probing_reactions").fetchone()[0]
+    count_rxn = cur.execute("SELECT COUNT(*) FROM probe_reactions").fetchone()[0]
     assert count_rxn >= 2
 
     # Cleanup
@@ -171,7 +171,10 @@ def test_derived_sample_inserts_with_parent(tmp_path):
     # Assert one derived_sample row exists and links to the parent
     cur = ctx.db.cursor()
     row = cur.execute(
-        "SELECT parent_sample_id, child_name, kind, tool, cmd_template, params_json, cache_key FROM derived_samples"
+        """
+        SELECT parent_sample_id, child_name, kind, tool, cmd_template, params_json, cache_key
+        FROM sequencing_derived_samples
+        """
     ).fetchone()
     assert row is not None
     parent_sample_id = cur.execute(

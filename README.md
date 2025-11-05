@@ -60,41 +60,57 @@ Add a task-specific block (e.g., `create`, `mut_count`, `probe_timecourse`) to d
 
 ## Quick Start Workflow
 
-1. **Create and organize samples**  
+1. **Register samples and metadata**
+
+   Sequence-probing and NMR inputs are declared via YAML configs. Each run logs to SQLite and creates a reproducible record of constructs, buffers, and raw inputs.
 
    ```bash
-   nerd run create manuscript_pipeline/01_create_samples/create_meta.yaml
+   # chemical probing samples
+   nerd run create demo_folder/01_create_samples/configs/create_meta.yaml
+
+   # NMR samples (adduction & degradation)
+   nerd run create demo_folder/01_create_samples/configs/create_nmr_add_samples.yaml
+   nerd run create demo_folder/01_create_samples/configs/create_nmr_deg_samples.yaml
    ```
 
-   The config can point from reaction conditions to FASTQ files and define `derived_samples` (subsampling, filtering) that downstream steps reuse automatically.
+2. **Fit independent kinetic measurements (NMR)**
 
-2. **Run NMR kinetics**  
-   Use `nerd run nmr_create configs/nmr_traces.yaml` to link reactions with trace CSVs, then:
-   - `nerd run nmr_deg_kinetics configs/deg.yaml` for degradation rates  
-   - `nerd run nmr_add_kinetics configs/add.yaml` for adduction kinetics
-
-3. **Count mutations**  
-   ```bash
-   nerd run mut_count configs/mut_count_shapemapper.yaml
-   ```
-   ShapeMapper is supported out of the box; swap runners or parameters in the config as needed.
-
-4. **Analyze probe time-courses**  
-   Run free, global, and constrained rounds with:
+   Estimate degradation and adduction rate constants, then perform Arrhenius fits across temperatures:
 
    ```bash
-   nerd run probe_timecourse configs/probe_tc.yaml
+   nerd run nmr_deg_kinetics demo_folder/02_nmr_kinetics/fit_deg.yaml
+   nerd run nmr_deg_kinetics demo_folder/02_nmr_kinetics/fit_add.yaml
+
+   # temperature dependence
+   nerd run nmr_deg_kinetics demo_folder/03_nmr_arrhenius/tempgrad_deg.yaml
+   nerd run nmr_deg_kinetics demo_folder/03_nmr_arrhenius/tempgrad_atp_c8.yaml
    ```
 
-5. **Fit temperature gradients**  
+3. **Count mutations from sequencing data**
 
    ```bash
-   nerd run tempgrad_fit examples/probe_tempgrad_arrhenius/config.yaml
+   nerd run mut_count demo_folder/04_run_mutcounts/configs/mut_count_shapemapper.yaml
    ```
 
-   This groups probe timecourse fits on the fly, filters by melt temperature, and performs weighted Arrhenius fits per nucleotide.
+   ShapeMapper runs out‑of‑the‑box; configs can swap counters or tweak QC rules.
 
-Every task writes JSON artifacts under `output_dir/label/<task>/latest/results` and logs insertions in `created_objects.log`. Explore the SQLite database with your favorite viewer (e.g., `sqlitebrowser` or `datasette`).
+4. **Fit chemical‑probe time‑courses**
+
+   ```bash
+   nerd run probe_timecourse demo_folder/05_probe_tc_kinetics/configs/probe_tc.yaml
+   ```
+
+   Executes free, global, and constrained fits; all metadata is written to SQLite.
+
+5. **Fit temperature gradients for probe data**
+
+   ```bash
+   nerd run tempgrad_fit demo_folder/06_probe_tempgrad_fit/configs/config.yaml
+   ```
+
+   Groups time‑course fits, filters by melt temperature, and performs weighted Arrhenius analysis per nucleotide.
+
+Outputs are written to `output_dir/label/<task>/latest/results`, and all database insertions are tracked in `created_objects.log`. Browse the SQLite file with `sqlitebrowser`, `datasette`, or the built‑in CLI tooling.
 
 ---
 

@@ -147,11 +147,24 @@ def test_nmr_deg_task_records_rate(tmp_path, monkeypatch):
                 }
                 return FitResult(k_value=0.5, k_error=0.05, r2=0.9, chisq=0.01)
 
+            def options(self_inner):
+                return {}
+
         return StubPlugin()
 
-    monkeypatch.setattr("nerd.pipeline.plugins.nmr_fit_kinetics.load_nmr_fit_plugin", fake_loader)
+    monkeypatch.setattr("nerd.pipeline.tasks._nmr_common.load_nmr_fit_plugin", fake_loader)
 
     task = NmrDegKineticsTask()
+    task_id = db_api.begin_task(
+        ctx.db,
+        task.name,
+        task.scope_kind,
+        scope_id=None,
+        backend=ctx.backend,
+        output_dir=str(ctx.output_dir),
+        label=ctx.label,
+        cache_key=None,
+    )
     inputs, _ = task.prepare(
         {
             "nmr_deg_kinetics": {
@@ -162,13 +175,21 @@ def test_nmr_deg_task_records_rate(tmp_path, monkeypatch):
         }
     )
 
-    task.consume_outputs(ctx, inputs, {}, run_dir, task_id=None)
+    task.consume_outputs(ctx, inputs, {}, run_dir, task_id=task_id)
 
-    row = ctx.db.execute("SELECT nmr_reaction_id, species, k_value FROM nmr_kinetic_rates").fetchone()
-    assert row is not None
-    assert row["nmr_reaction_id"] == reaction_id
-    assert row["species"] == "dms"
-    assert pytest.approx(row["k_value"], rel=1e-6) == 0.5
+    fit_run = ctx.db.execute("SELECT id, status, nmr_reaction_id FROM nmr_fit_runs").fetchone()
+    assert fit_run is not None
+    assert fit_run["status"] == "completed"
+    assert fit_run["nmr_reaction_id"] == reaction_id
+    params = ctx.db.execute(
+        "SELECT param_name, param_numeric, param_text FROM nmr_fit_params WHERE fit_run_id = ?",
+        (fit_run["id"],),
+    ).fetchall()
+    param_map = {row["param_name"]: row for row in params}
+    assert pytest.approx(param_map["k_value"]["param_numeric"], rel=1e-6) == 0.5
+    species_row = param_map.get("species")
+    assert species_row is not None
+    assert species_row["param_text"] == "dms"
 
     assert "decay" in captured
     copied_path = Path(captured["decay"]["files"]["decay_trace"])
@@ -212,12 +233,14 @@ def test_nmr_add_task_uses_substrate_metadata(tmp_path, monkeypatch):
         nmr_reaction_id=reaction_id,
         role="peak_trace",
         path=str(peak_rel),
+        species="ATP_C8",
     )
     db_api.register_nmr_trace_file(
         ctx.db,
         nmr_reaction_id=reaction_id,
         role="dms_trace",
         path=str(dms_rel),
+        species="ATP_DMS",
     )
 
     captured = {}
@@ -228,11 +251,24 @@ def test_nmr_add_task_uses_substrate_metadata(tmp_path, monkeypatch):
                 captured["meta"] = dict(request.metadata)
                 return FitResult(k_value=1.1, k_error=None, r2=None, chisq=None)
 
+            def options(self_inner):
+                return {}
+
         return StubPlugin()
 
-    monkeypatch.setattr("nerd.pipeline.plugins.nmr_fit_kinetics.load_nmr_fit_plugin", fake_loader)
+    monkeypatch.setattr("nerd.pipeline.tasks._nmr_common.load_nmr_fit_plugin", fake_loader)
 
     task = NmrAddKineticsTask()
+    task_id = db_api.begin_task(
+        ctx.db,
+        task.name,
+        task.scope_kind,
+        scope_id=None,
+        backend=ctx.backend,
+        output_dir=str(ctx.output_dir),
+        label=ctx.label,
+        cache_key=None,
+    )
     inputs, _ = task.prepare(
         {
             "nmr_add_kinetics": {
@@ -242,13 +278,20 @@ def test_nmr_add_task_uses_substrate_metadata(tmp_path, monkeypatch):
         }
     )
 
-    task.consume_outputs(ctx, inputs, {}, run_dir, task_id=None)
+    task.consume_outputs(ctx, inputs, {}, run_dir, task_id=task_id)
 
-    row = ctx.db.execute(
-        "SELECT nmr_reaction_id, species, k_value FROM nmr_kinetic_rates"
-    ).fetchone()
-    assert row is not None
-    assert row["species"] == "ATP"
-    assert pytest.approx(row["k_value"], rel=1e-6) == 1.1
+    fit_run = ctx.db.execute("SELECT id, status, nmr_reaction_id FROM nmr_fit_runs").fetchone()
+    assert fit_run is not None
+    assert fit_run["status"] == "completed"
+    assert fit_run["nmr_reaction_id"] == reaction_id
+    params = ctx.db.execute(
+        "SELECT param_name, param_numeric, param_text FROM nmr_fit_params WHERE fit_run_id = ?",
+        (fit_run["id"],),
+    ).fetchall()
+    param_map = {row["param_name"]: row for row in params}
+    assert pytest.approx(param_map["k_value"]["param_numeric"], rel=1e-6) == 1.1
+    species_row = param_map.get("species")
+    assert species_row is not None
+    assert species_row["param_text"] == "ATP_C8"
     assert captured["meta"]["ntp_conc"] == 0.25
     assert captured["meta"]["substrate"] == "ATP"
