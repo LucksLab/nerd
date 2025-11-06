@@ -1,7 +1,7 @@
 run:
   label: 04_run_mutcounts
   output_dir: demo_folder
-  backend: slurm                  # use RemoteRunner in slurm mode
+  backend: ssh                  # use RemoteRunner in slurm mode
   threads: 4
   mem_gb: 32
   time: "02:00:00"

@@ -357,7 +357,7 @@ class MutCountTask(Task):
         if not sample_names:
             return None
 
-        label_dir = Path(ctx.output_dir) / ctx.label
+        label_dir = (Path(ctx.output_dir) / ctx.label).resolve()
 
         def _nt_rows_for_construct(cid: int) -> List[Dict[str, Any]]:
             rows = ctx.db.execute(
@@ -424,8 +424,9 @@ class MutCountTask(Task):
                 fq_dir = Path(str(parent_srow["fq_dir"]))
                 if not fq_dir.is_absolute():
                     fq_dir = label_dir / fq_dir
-                r1 = fq_dir / str(parent_srow["r1_file"])
-                r2 = fq_dir / str(parent_srow["r2_file"])
+                fq_dir = fq_dir.resolve()
+                r1 = (fq_dir / str(parent_srow["r1_file"])).resolve()
+                r2 = (fq_dir / str(parent_srow["r2_file"])).resolve()
 
                 cid = _construct_id_for_sample_id(sid)
                 if cid is None:
@@ -583,12 +584,13 @@ class MutCountTask(Task):
         return list(dict.fromkeys(self._stage_out_extra)) if self._stage_out_extra else []
 
     def _resolve_fastqs(self, ctx: TaskContext, row) -> Tuple[Path, Path]:
-        label_dir = Path(ctx.output_dir) / ctx.label
+        label_dir = (Path(ctx.output_dir) / ctx.label).resolve()
         fq_dir = Path(row["fq_dir"]) if isinstance(row["fq_dir"], str) else Path(str(row["fq_dir"]))
         if not fq_dir.is_absolute():
             fq_dir = label_dir / fq_dir
-        r1 = fq_dir / row["r1_file"]
-        r2 = fq_dir / row["r2_file"]
+        fq_dir = fq_dir.resolve()
+        r1 = (fq_dir / row["r1_file"]).resolve()
+        r2 = (fq_dir / row["r2_file"]).resolve()
         return r1, r2
 
     def scope_id(self, ctx: Optional[TaskContext], inputs: Any) -> Optional[int]:
