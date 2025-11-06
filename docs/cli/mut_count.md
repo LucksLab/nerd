@@ -1,6 +1,6 @@
 # `nerd mut_count`
 
-`nerd mut_count` orchestrates mutation counting on sequencing samples (e.g., SHAPE-Seq). It stages FASTQs, runs the configured plugin (default SHAPEMapper), and records per-nucleotide mutation rates into `probe_fmod_values`.
+`nerd mut_count` orchestrates mutation counting on sequencing samples (e.g., FASTQ files). It stages FASTQs, runs the configured plugin (default SHAPEMapper), and records per-nucleotide mutation rates into `probe_fmod_values`.
 
 ```
 nerd mut_count --config PATH/TO/config.yaml --db PATH/TO/nerd.sqlite

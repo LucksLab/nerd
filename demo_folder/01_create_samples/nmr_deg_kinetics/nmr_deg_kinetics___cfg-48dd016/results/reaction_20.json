@@ -1,0 +1,43 @@
+{
+  "files": {
+    "decay_trace": "demo_folder/01_create_samples/nmr_deg_kinetics/nmr_deg_kinetics___cfg-48dd016/inputs/reaction_20/decay_trace.csv"
+  },
+  "metadata": {
+    "buffer_id": 1,
+    "id": 20,
+    "kinetic_data_dir": "nmr_degradation_data/dms_schwalbe_25C_rep1",
+    "mnova_analysis_dir": null,
+    "nmr_machine": "A600",
+    "num_scans": 64,
+    "probe": "dms",
+    "probe_conc": 0.01585,
+    "probe_solvent": "etoh",
+    "raw_fid_dir": null,
+    "reaction_type": "deg",
+    "replicate": 1,
+    "species": "dms",
+    "substrate": "none",
+    "substrate_conc": 0.0,
+    "temperature": 25.0,
+    "time_per_read": 5.0,
+    "total_kinetic_reads": 96,
+    "total_kinetic_time": 28800,
+    "trace_species": {
+      "decay_trace": null
+    }
+  },
+  "reaction_id": 20,
+  "result": {
+    "chisq": 5064853.513135399,
+    "diagnostics": {
+      "aic": 1047.8548079088703,
+      "amplitude": 200383.5381991484,
+      "bic": 1052.983504291806,
+      "decay_stderr": 4.490229889172564,
+      "tau": 4993.212068691641
+    },
+    "k_error": 1.8009786040133413e-07,
+    "k_value": 0.00020027188636152348,
+    "r2": 0.9999711395538816
+  }
+}

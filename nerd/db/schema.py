@@ -320,40 +320,6 @@ CREATE TABLE IF NOT EXISTS nmr_fit_params (
 """
 
 # ---------------------------------------------------------------------------
-# Temperature-gradient fits
-# ---------------------------------------------------------------------------
-
-CREATE_TEMPGRAD_FIT_RUNS = """
-CREATE TABLE IF NOT EXISTS tempgrad_fit_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fit_kind TEXT NOT NULL,
-    data_source TEXT NOT NULL,
-    buffer_id INTEGER,
-    tg_id INTEGER,
-    nt_id INTEGER,
-    model TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY(buffer_id) REFERENCES meta_buffers(id),
-    FOREIGN KEY(tg_id) REFERENCES probe_tempgrad_groups(tg_id),
-    FOREIGN KEY(nt_id) REFERENCES meta_nucleotides(id)
-);
-"""
-
-CREATE_TEMPGRAD_FIT_PARAMS = """
-CREATE TABLE IF NOT EXISTS tempgrad_fit_params (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fit_run_id INTEGER NOT NULL,
-    param_name TEXT NOT NULL,
-    param_numeric REAL,
-    param_text TEXT,
-    units TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY(fit_run_id) REFERENCES tempgrad_fit_runs(id) ON DELETE CASCADE,
-    UNIQUE(fit_run_id, param_name)
-);
-"""
-
-# ---------------------------------------------------------------------------
 # Core task tables
 # ---------------------------------------------------------------------------
 

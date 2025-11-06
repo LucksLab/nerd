@@ -1,6 +1,6 @@
 run:
-  label: nmr_fit_deg
-  output_dir: examples
+  output_dir: demo_folder
+  label: 02_nmr_kinetics
   backend: local
 
 nmr_deg_kinetics:
@@ -10,7 +10,7 @@ nmr_deg_kinetics:
 
   # Resolve trace paths relative to the original data location used during nmr_create.
   search_roots:
-    - ../../test_data
+    - ../demo_data
 
   plugin: lmfit_deg
   plugin_options:

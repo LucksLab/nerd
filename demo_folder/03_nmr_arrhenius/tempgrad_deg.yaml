@@ -1,6 +1,6 @@
 run:
-  label: nmr_deg_arrhenius_demo
-  output_dir: examples
+  output_dir: demo_folder
+  label: 03_nmr_arrhenius
   backend: local
 
 tempgrad_fit:

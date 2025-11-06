@@ -7,4 +7,4 @@ run:
   time: "00:11:00"
 
 create:
-  samples: to_import/probing_samples.csv
+  samples: to_import/filtered.csv

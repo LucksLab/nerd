@@ -1,0 +1,56 @@
+{
+  "artifacts": {},
+  "engine": "arrhenius_python",
+  "engine_version": "0.1.0",
+  "global_params": {},
+  "metadata": {
+    "description": "Arrhenius test on NMR degradation rates",
+    "mode": "arrhenius"
+  },
+  "series_results": [
+    {
+      "artifacts": {
+        "covariance_matrix": [
+          [
+            121220963648.97957,
+            -382161186.50340414
+          ],
+          [
+            -382161186.50340414,
+            1206793.039505485
+          ]
+        ],
+        "parameter_stderr": {
+          "intercept": 1098.541323531111,
+          "slope": 348168.0106629263
+        }
+      },
+      "diagnostics": {
+        "buffer_disp_name": "pH6.5_A",
+        "buffer_id": 1,
+        "buffer_name": "Schwalbe_bistris",
+        "chisq": 1.0290647129392826e-06,
+        "data_source": "nmr",
+        "model": null,
+        "ndata": 11,
+        "nfree": 9,
+        "plugin": null,
+        "r2": 0.9981986383903828,
+        "reaction_type": "deg",
+        "rmse_log_k": 0.05514012609186735,
+        "species": "dms",
+        "substrate": "dms",
+        "temperature_unit": "c"
+      },
+      "params": {
+        "activation_energy_cal_per_mol": 21233.337848245992,
+        "activation_energy_err_cal_per_mol": 691880.953511873,
+        "intercept": 27.224371932404274,
+        "intercept_err": 1098.541323531111,
+        "slope": -10685.030366616043,
+        "slope_err": 348168.0106629263
+      },
+      "series_id": "nmr:deg:dms:Schwalbe_bistris"
+    }
+  ]
+}

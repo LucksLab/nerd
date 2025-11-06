@@ -1,6 +1,6 @@
 run:
-  label: arrhenius_atp_c8
-  output_dir: examples
+  output_dir: demo_folder
+  label: 03_nmr_arrhenius
   backend: local
 
 tempgrad_fit:

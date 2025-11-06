@@ -1,11 +1,11 @@
 run:
-  label: nmr_create_ntp_add
-  output_dir: examples
+  output_dir: demo_folder
+  label: 01_create_samples
   backend: local
 
 nmr_create:
   search_roots:
-    - ../../test_data
+    - ../demo_data
   reactions:
     - reaction_type: add
       temperature: 20.0

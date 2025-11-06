@@ -1,0 +1,46 @@
+{
+  "files": {
+    "dms_trace": "demo_folder/02_nmr_kinetics/nmr_add_kinetics/nmr_add_kinetics___cfg-9442fd5/inputs/reaction_1/dms_trace.csv",
+    "peak_trace": "demo_folder/02_nmr_kinetics/nmr_add_kinetics/nmr_add_kinetics___cfg-9442fd5/inputs/reaction_1/peak_trace.csv"
+  },
+  "metadata": {
+    "buffer_id": 1,
+    "dms_conc": 0.01585,
+    "id": 1,
+    "kinetic_data_dir": "nmr_ntp_adduction_data/ATP_20C_rep1",
+    "mnova_analysis_dir": null,
+    "nmr_machine": "A600",
+    "ntp_conc": 0.0080045,
+    "num_scans": 152,
+    "probe": "dms",
+    "probe_conc": 0.01585,
+    "probe_solvent": "etoh",
+    "raw_fid_dir": null,
+    "reaction_type": "add",
+    "replicate": 1,
+    "species": "ATP_C8",
+    "substrate": "ATP",
+    "substrate_conc": 0.0080045,
+    "temperature": 20.0,
+    "time_per_read": 10.0,
+    "total_kinetic_reads": 60,
+    "total_kinetic_time": 36000,
+    "trace_species": {
+      "dms_trace": "ATP_DMS",
+      "peak_trace": "ATP_C8"
+    }
+  },
+  "reaction_id": 1,
+  "result": {
+    "chisq": 2.3322554851599776e-07,
+    "diagnostics": {
+      "S_factor": 1.0,
+      "k_deg": 0.00018370478440110638,
+      "message": "Fit succeeded.",
+      "success": true
+    },
+    "k_error": 62.15829511006044,
+    "k_value": 0.0008566099465625587,
+    "r2": 0.9936714730947399
+  }
+}

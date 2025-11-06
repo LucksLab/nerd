@@ -1,0 +1,42 @@
+run:
+  label: 04_run_mutcounts
+  output_dir: demo_folder
+  backend: slurm                  # use RemoteRunner in slurm mode
+  threads: 4
+  mem_gb: 32
+  time: "02:00:00"
+
+  remote:
+    ssh:
+      host: login.quest.northwestern.edu
+      user: ekc5108
+      port: 22
+      # options: "-o BatchMode=yes"          # optional extra ssh flags
+    remote_base_dir: /scratch/ekc5108/nerd_runs
+
+    slurm_config:
+      partition: buyin
+      account: b1044
+      time: "02:00:00"
+      cpus: 4
+      memory: 32G
+      # preamble:
+      #   - "module load shapemapper/2.3"
+        # - "source ~/miniconda3/etc/profile.d/conda.sh && conda activate nerd"
+      stage_out:
+        - "mut_count_latest/**/*.log"
+        - "mut_count_latest/**/*.json"
+
+mut_count:
+  plugin: shapemapper
+  tool:
+    bin: /projects/b1044/Software/shapemapper2-2.3/shapemapper
+    version: "2.3"
+  reaction_group: "1"
+
+  params:
+    dms_mode: True
+    amplicon: True
+    n_proc: 4
+    output_N7: True
+    per_read_histograms: True
