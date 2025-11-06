@@ -1,0 +1,53 @@
+{
+  "artifacts": {},
+  "engine": "arrhenius_python",
+  "engine_version": "0.1.0",
+  "global_params": {},
+  "metadata": {
+    "description": "Arrhenius fit for NMR adduction ATP_C8",
+    "mode": "arrhenius"
+  },
+  "series_results": [
+    {
+      "artifacts": {
+        "covariance_matrix": [
+          [
+            16.4271431128202,
+            -0.05603574257620488
+          ],
+          [
+            -0.05603574257620488,
+            0.00019114751381261015
+          ]
+        ],
+        "parameter_stderr": {
+          "intercept": 0.013825610793473471,
+          "slope": 4.0530412177549096
+        }
+      },
+      "diagnostics": {
+        "chisq": 18754.77083626837,
+        "data_source": "nmr",
+        "model": null,
+        "ndata": 6,
+        "nfree": 4,
+        "plugin": null,
+        "r2": 0.9507974868687632,
+        "reaction_type": "add",
+        "rmse_log_k": 0.1674577017487024,
+        "species": "ATP",
+        "substrate": "ATP",
+        "temperature_unit": "c"
+      },
+      "params": {
+        "activation_energy_cal_per_mol": 14406.946265901362,
+        "activation_energy_err_cal_per_mol": 8.054220768369373,
+        "intercept": 17.668349878427378,
+        "intercept_err": 0.013825610793473471,
+        "slope": -7249.856779068675,
+        "slope_err": 4.0530412177549096
+      },
+      "series_id": "nmr:add:ATP"
+    }
+  ]
+}

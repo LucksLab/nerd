@@ -1,13 +1,12 @@
 run:
-  label: nmr_create_deg
-  output_dir: examples
+  label: 01_create_samples
+  output_dir: demo_folder
   backend: local
-
 nmr_create:
   # Relative paths below are resolved against the label directory; these entries
   # step back to the repository's test_data folder.
   search_roots:
-    - ../../test_data
+    - ../demo_data
   reactions:
     - reaction_type: deg
       temperature: 25.0

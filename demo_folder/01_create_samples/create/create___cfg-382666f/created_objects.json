@@ -1,0 +1,637 @@
+{
+  "meta_buffers": [],
+  "meta_constructs": [],
+  "samples": [
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 1,
+      "sample_name": "033-EKC-WT-45c-b-6-m",
+      "seqrun_id": 1,
+      "sequencing_run_name": "230607_M05164_0144_000000000-L3FLD",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 2,
+      "sample_name": "034-EKC-WT-52c-a-6-m",
+      "seqrun_id": 1,
+      "sequencing_run_name": "230607_M05164_0144_000000000-L3FLD",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 3,
+      "sample_name": "037-EKC-WT-52c-a-6-m",
+      "seqrun_id": 1,
+      "sequencing_run_name": "230607_M05164_0144_000000000-L3FLD",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 4,
+      "sample_name": "073-EKC-WT-45c-b-1-p",
+      "seqrun_id": 1,
+      "sequencing_run_name": "230607_M05164_0144_000000000-L3FLD",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 5,
+      "sample_name": "074-EKC-WT-45c-b-2-p",
+      "seqrun_id": 1,
+      "sequencing_run_name": "230607_M05164_0144_000000000-L3FLD",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 6,
+      "sample_name": "075-EKC-WT-45c-b-3-p",
+      "seqrun_id": 1,
+      "sequencing_run_name": "230607_M05164_0144_000000000-L3FLD",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 7,
+      "sample_name": "076-EKC-WT-45c-b-4-p",
+      "seqrun_id": 1,
+      "sequencing_run_name": "230607_M05164_0144_000000000-L3FLD",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 8,
+      "sample_name": "077-EKC-WT-45c-b-5-p",
+      "seqrun_id": 1,
+      "sequencing_run_name": "230607_M05164_0144_000000000-L3FLD",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 9,
+      "sample_name": "078-EKC-WT-45c-b-6-p",
+      "seqrun_id": 1,
+      "sequencing_run_name": "230607_M05164_0144_000000000-L3FLD",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 10,
+      "sample_name": "079-EKC-WT-50c-a-1-p",
+      "seqrun_id": 1,
+      "sequencing_run_name": "230607_M05164_0144_000000000-L3FLD",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 11,
+      "sample_name": "080-EKC-WT-50c-a-2-p",
+      "seqrun_id": 1,
+      "sequencing_run_name": "230607_M05164_0144_000000000-L3FLD",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 12,
+      "sample_name": "081-EKC-WT-50c-a-3-p",
+      "seqrun_id": 1,
+      "sequencing_run_name": "230607_M05164_0144_000000000-L3FLD",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 13,
+      "sample_name": "082-EKC-WT-50c-a-4-p",
+      "seqrun_id": 1,
+      "sequencing_run_name": "230607_M05164_0144_000000000-L3FLD",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 14,
+      "sample_name": "083-EKC-WT-50c-a-5-p",
+      "seqrun_id": 1,
+      "sequencing_run_name": "230607_M05164_0144_000000000-L3FLD",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 15,
+      "sample_name": "084-EKC-WT-50c-a-6-p",
+      "seqrun_id": 1,
+      "sequencing_run_name": "230607_M05164_0144_000000000-L3FLD",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 16,
+      "sample_name": "013-fourU-WT-70c-a-1-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 17,
+      "sample_name": "014-fourU-WT-70c-a-2-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 18,
+      "sample_name": "015-fourU-WT-70c-a-3-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 19,
+      "sample_name": "016-fourU-WT-70c-a-4-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 20,
+      "sample_name": "017-fourU-WT-70c-a-5-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 21,
+      "sample_name": "018-fourU-WT-70c-a-6-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 22,
+      "sample_name": "025-fourU-WT-75c-a-1-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 23,
+      "sample_name": "026-fourU-WT-75c-a-2-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 24,
+      "sample_name": "027-fourU-WT-75c-a-3-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 25,
+      "sample_name": "028-fourU-WT-75c-a-4-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 26,
+      "sample_name": "029-fourU-WT-75c-a-5-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 27,
+      "sample_name": "030-fourU-WT-75c-a-6-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 28,
+      "sample_name": "037-fourU-WT-80c-a-1-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 29,
+      "sample_name": "038-fourU-WT-80c-a-2-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 30,
+      "sample_name": "039-fourU-WT-80c-a-3-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 31,
+      "sample_name": "040-fourU-WT-80c-a-4-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 32,
+      "sample_name": "041-fourU-WT-80c-a-5-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 33,
+      "sample_name": "042-fourU-WT-80c-a-6-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 34,
+      "sample_name": "049-fourU-WT-10c-a-1-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 35,
+      "sample_name": "050-fourU-WT-10c-a-2-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 36,
+      "sample_name": "051-fourU-WT-10c-a-3-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 37,
+      "sample_name": "052-fourU-WT-10c-a-4-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 38,
+      "sample_name": "053-fourU-WT-10c-a-5-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 39,
+      "sample_name": "054-fourU-WT-10c-a-6-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 40,
+      "sample_name": "061-fourU-WT-15c-a-1-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 41,
+      "sample_name": "062-fourU-WT-15c-a-2-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 42,
+      "sample_name": "063-fourU-WT-15c-a-3-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 43,
+      "sample_name": "064-fourU-WT-15c-a-4-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 44,
+      "sample_name": "065-fourU-WT-15c-a-5-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 45,
+      "sample_name": "066-fourU-WT-15c-a-6-p",
+      "seqrun_id": 2,
+      "sequencing_run_name": "240405_M05164_0164_000000000-LH62L",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 46,
+      "sample_name": "001_fourU_WT_18c_a_1_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 47,
+      "sample_name": "002_fourU_WT_18c_a_2_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 48,
+      "sample_name": "003_fourU_WT_18c_a_3_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 49,
+      "sample_name": "004_fourU_WT_18c_a_4_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 50,
+      "sample_name": "005_fourU_WT_18c_a_5_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 51,
+      "sample_name": "006_fourU_WT_18c_a_6_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 52,
+      "sample_name": "013_fourU_WT_20c_a_1_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 53,
+      "sample_name": "014_fourU_WT_20c_a_2_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 54,
+      "sample_name": "015_fourU_WT_20c_a_3_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 55,
+      "sample_name": "016_fourU_WT_20c_a_4_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 56,
+      "sample_name": "017_fourU_WT_20c_a_5_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 57,
+      "sample_name": "018_fourU_WT_20c_a_6_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 58,
+      "sample_name": "025_fourU_WT_25c_a_1_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 59,
+      "sample_name": "026_fourU_WT_25c_a_2_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 60,
+      "sample_name": "027_fourU_WT_25c_a_3_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 61,
+      "sample_name": "028_fourU_WT_25c_a_4_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 62,
+      "sample_name": "029_fourU_WT_25c_a_5_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 63,
+      "sample_name": "030_fourU_WT_25c_a_6_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 64,
+      "sample_name": "037_fourU_WT_37c_b_1_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 65,
+      "sample_name": "038_fourU_WT_37c_b_2_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 66,
+      "sample_name": "039_fourU_WT_37c_b_3_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 67,
+      "sample_name": "040_fourU_WT_37c_b_4_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 68,
+      "sample_name": "041_fourU_WT_37c_b_5_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 69,
+      "sample_name": "042_fourU_WT_37c_b_6_p",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 70,
+      "sample_name": "050_fourU_WT18c_a_6_m",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 71,
+      "sample_name": "053_fourU_WT10c_a_6_m",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 72,
+      "sample_name": "062_fourU_WT20c_a_6_m",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 73,
+      "sample_name": "065_fourU_WT15c_a_6_m",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 74,
+      "sample_name": "066_fourU_WT70c_a_6_m",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 75,
+      "sample_name": "074_fourU_WT25c_a_6_m",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 76,
+      "sample_name": "078_fourU_WT75c_a_6_m",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 77,
+      "sample_name": "086_fourU_WT37c_a_6_m",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    },
+    {
+      "fq_dir": "../demo_data/probe_data",
+      "id": 78,
+      "sample_name": "090_fourU_WT80c_a_6_m",
+      "seqrun_id": 3,
+      "sequencing_run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
+      "status": "created"
+    }
+  ],
+  "sequencing_runs": [],
+  "summary": {
+    "meta_buffers": 0,
+    "meta_constructs": 0,
+    "samples": 78,
+    "sequencing_runs": 0
+  }
+}

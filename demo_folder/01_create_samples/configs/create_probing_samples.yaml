@@ -2,9 +2,5 @@ run:
   output_dir: demo_folder
   label: 01_create_samples
   backend: local
-  threads: 4
-  mem_gb: 8
-  time: "00:11:00"
-
 create:
-  samples: to_import/probing_samples.csv
+  samples: to_import/filtered.csv

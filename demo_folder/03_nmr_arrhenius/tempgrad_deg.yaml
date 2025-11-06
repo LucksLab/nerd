@@ -1,6 +1,6 @@
 run:
-  label: nmr_deg_arrhenius_demo
-  output_dir: examples
+  label: 03_nmr_arrhenius
+  output_dir: demo_folder
   backend: local
 
 tempgrad_fit:
@@ -9,7 +9,7 @@ tempgrad_fit:
   data_source: nmr
   overwrite: true
   metadata:
-    description: "Arrhenius test on NMR degradation rates"
+    description: "Arrhenius fit on NMR degradation rates"
 
   filters:
     reaction_type: deg

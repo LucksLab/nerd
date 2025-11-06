@@ -1,12 +1,12 @@
 run:
-  label: nmr_fit_add_demo
-  output_dir: examples
+  label: 02_nmr_kinetics
+  output_dir: demo_folder
   backend: local
 
 # Select species or substrates with matching experimental conditions (buffer, temp, etc.).
 nmr_add_kinetics:
   search_roots:
-    - ../../test_data
+    - ../demo_data
 
   plugin: ode_lsq_ntp_add
   plugin_options:

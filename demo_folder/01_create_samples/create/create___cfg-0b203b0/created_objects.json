@@ -26,7 +26,7 @@
       "run_manager": "EKC",
       "run_name": "230607_M05164_0144_000000000-L3FLD",
       "sequencer": "MiSeq",
-      "status": "updated"
+      "status": "created"
     },
     {
       "date": "240405",
@@ -34,7 +34,7 @@
       "run_manager": "EKC",
       "run_name": "240405_M05164_0164_000000000-LH62L",
       "sequencer": "MiSeq",
-      "status": "updated"
+      "status": "created"
     },
     {
       "date": "240424",
@@ -42,7 +42,7 @@
       "run_manager": "EKC",
       "run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
       "sequencer": "NovaSeq",
-      "status": "updated"
+      "status": "created"
     }
   ],
   "summary": {

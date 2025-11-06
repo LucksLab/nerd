@@ -1,6 +1,6 @@
 run:
-  output_dir: examples
-  label: all_mutcounts
+  output_dir: demo_folder
+  label: 04_run_mutcounts
   backend: local
   threads: 8
   mem_gb: 16
