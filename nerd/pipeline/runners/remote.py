@@ -217,21 +217,43 @@ class RemoteRunner(Runner):
         return int(cp.returncode)
 
     def _stage_out(self, ssh_base: list, ssh_dest: str, remote_dir: str, workdir: Path, env: Dict[str, str]) -> None:
+        log = get_logger(__name__)
         patterns = ["command.log"]
         stage_out = env.get("SLURM_STAGE_OUT")
         if stage_out:
             patterns += [p.strip() for p in stage_out.split(",") if p.strip()]
         for pat in patterns:
             try:
-                subprocess.run(
+                log.info("Stage-out: attempting pattern '%s'", pat)
+                cp = subprocess.run(
                     [
                         "rsync", "-az", "--relative", "--prune-empty-dirs",
                         f"{ssh_dest}:{remote_dir}/./{pat}",
                         f"{str(workdir)}/",
                     ],
-                    check=False, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                    check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                 )
+                if cp.returncode != 0:
+                    log.warning(
+                        "Stage-out failed for pattern '%s' (rc=%s): %s",
+                        pat,
+                        cp.returncode,
+                        (cp.stderr or "").strip(),
+                    )
+                else:
+                    transferred = (cp.stdout or "").strip()
+                    if transferred:
+                        log.info("Stage-out succeeded for pattern '%s': %s", pat, transferred)
+                    else:
+                        log.info("Stage-out succeeded for pattern '%s'", pat)
+                    if cp.stderr:
+                        log.debug(
+                            "Stage-out stderr for pattern '%s': %s",
+                            pat,
+                            cp.stderr.strip(),
+                        )
             except Exception:
+                log.exception("Stage-out raised unexpected exception for pattern '%s'", pat)
                 pass
 
     def _final_exit_code(self, cp: subprocess.CompletedProcess, env: Dict[str, str], ssh: Optional[tuple] = None) -> int:
