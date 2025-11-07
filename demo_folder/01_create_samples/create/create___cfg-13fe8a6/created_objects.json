@@ -5,7 +5,7 @@
       "id": 1,
       "name": "Schwalbe_bistris",
       "pH": 6.5,
-      "status": "created"
+      "status": "updated"
     }
   ],
   "meta_constructs": [
@@ -14,7 +14,7 @@
       "family": "Salm_4U_thermometer",
       "id": 1,
       "name": "WT",
-      "status": "created",
+      "status": "updated",
       "version": 2
     }
   ],
@@ -26,7 +26,7 @@
       "run_manager": "EKC",
       "run_name": "230607_M05164_0144_000000000-L3FLD",
       "sequencer": "MiSeq",
-      "status": "created"
+      "status": "updated"
     },
     {
       "date": "240405",
@@ -34,7 +34,7 @@
       "run_manager": "EKC",
       "run_name": "240405_M05164_0164_000000000-LH62L",
       "sequencer": "MiSeq",
-      "status": "created"
+      "status": "updated"
     },
     {
       "date": "240424",
@@ -42,7 +42,7 @@
       "run_manager": "EKC",
       "run_name": "240424_Lucks24_fourU_DMS_BATCH5-6",
       "sequencer": "NovaSeq",
-      "status": "created"
+      "status": "updated"
     }
   ],
   "summary": {
