@@ -3,14 +3,13 @@ run:
   output_dir: demo_folder
   backend: ssh                  # use RemoteRunner in slurm mode
   threads: 4
-  mem_gb: 32
-  time: "02:00:00"
+  mem_gb: 16
+  time: "02:11:00"
 
   remote:
     ssh:
       host: login.quest.northwestern.edu
       user: ekc5108
-      port: 22
       # options: "-o BatchMode=yes"          # optional extra ssh flags
     remote_base_dir: /scratch/ekc5108/nerd_runs
 
@@ -19,7 +18,7 @@ run:
       account: b1044
       time: "02:00:00"
       cpus: 4
-      memory: 32G
+      memory: 16G
       # preamble:
       #   - "module load shapemapper/2.3"
         # - "source ~/miniconda3/etc/profile.d/conda.sh && conda activate nerd"

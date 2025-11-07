@@ -1,6 +1,6 @@
 run:
-  label: probing_timecourse_fits
-  output_dir: examples
+  label: 05_probe_tc_kinetics
+  output_dir: demo_folder
   backend: local
   threads: 4
   time: "00:30:00"
@@ -15,7 +15,8 @@ probe_timecourse:
 
   # Reaction groups pulled from examples/nerd.sqlite
   rg_ids:
-    - 26
+    - 3
+
 
   # The example database stores probing timecourse amplitudes under "modrate".
   valtype: modrate

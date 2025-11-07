@@ -4,7 +4,7 @@ run:
   backend: local
   threads: 8
   mem_gb: 16
-  time: "01:22:00"
+  time: "01:21:00"
 
 mut_count:
   # Choose plugin/tool

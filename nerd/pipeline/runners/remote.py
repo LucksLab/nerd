@@ -86,6 +86,13 @@ class RemoteRunner(Runner):
                     dst_rel = str(it.get("dst") or "")
                     if not src or not dst_rel:
                         continue
+                    src_path = Path(src)
+                    if not src_path.exists():
+                        log.error("Stage-in source missing: %s", src)
+                        continue
+                    if not src_path.is_file():
+                        log.error("Stage-in source is not a regular file: %s", src)
+                        continue
                     remote_path = str(Path(remote_dir) / dst_rel)
                     parent = str(Path(remote_path).parent)
                     subprocess.run(
