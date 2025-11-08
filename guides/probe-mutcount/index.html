@@ -1,0 +1,1223 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="../nmr-kinetics/">
+      
+      
+        <link rel="next" href="../probe-timecourse/">
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.23">
+    
+    
+      
+        <title>Modification Counting - nerd Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.84d31ad4.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="white" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#probe-mutational-counting" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="nerd Documentation" class="md-header__button md-logo" aria-label="nerd Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            nerd Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Modification Counting
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="white" data-md-color-accent="light-blue"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/edr-choi/nerd" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    nerd
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sample-organization/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../cli/create/" class="md-tabs__link">
+          
+  
+  
+  CLI Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="nerd Documentation" class="md-nav__button md-logo" aria-label="nerd Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    nerd Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/edr-choi/nerd" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    nerd
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Guides
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Guides
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sample-organization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Create Samples
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../nmr-kinetics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    NMR Kinetics
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Modification Counting
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    Modification Counting
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#from-fastq-to-reactivity" class="md-nav__link">
+    <span class="md-ellipsis">
+      From FASTQ to Reactivity
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rt-stop-vs-rt-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      RT-Stop vs RT-MaP
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      Deployment Options
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#derived-samples" class="md-nav__link">
+    <span class="md-ellipsis">
+      Derived Samples
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-skeleton" class="md-nav__link">
+    <span class="md-ellipsis">
+      Configuration Skeleton
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#database-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Database Storage
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Database Storage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#probe_fmod_runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      probe_fmod_runs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#probe_fmod_values" class="md-nav__link">
+    <span class="md-ellipsis">
+      probe_fmod_values
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="probe_fmod_values">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#example-query" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example Query
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#best-practices" class="md-nav__link">
+    <span class="md-ellipsis">
+      Best Practices
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../probe-timecourse/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Probe Timecourse
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tempgrad-fit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Temperature Gradients
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    CLI Reference
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            CLI Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/create/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    create
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/nmr_create/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    nmr_create
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/nmr_deg_kinetics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    nmr_deg_kinetics
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/nmr_add_kinetics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    nmr_add_kinetics
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/mut_count/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    mut_count
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/probe_timecourse/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    probe_timecourse
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/tempgrad_fit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    tempgrad_fit
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#from-fastq-to-reactivity" class="md-nav__link">
+    <span class="md-ellipsis">
+      From FASTQ to Reactivity
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rt-stop-vs-rt-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      RT-Stop vs RT-MaP
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      Deployment Options
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#derived-samples" class="md-nav__link">
+    <span class="md-ellipsis">
+      Derived Samples
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-skeleton" class="md-nav__link">
+    <span class="md-ellipsis">
+      Configuration Skeleton
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#database-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Database Storage
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Database Storage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#probe_fmod_runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      probe_fmod_runs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#probe_fmod_values" class="md-nav__link">
+    <span class="md-ellipsis">
+      probe_fmod_values
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="probe_fmod_values">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#example-query" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example Query
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#best-practices" class="md-nav__link">
+    <span class="md-ellipsis">
+      Best Practices
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="probe-mutational-counting">Probe Mutational Counting</h1>
+<p>Time‑course kinetics and temperature‑gradient fits rely on accurate per‑nucleotide reactivities. NERD’s <code>mut_count</code> task quantifies chemical modifications on RNA. Today this is predominantly achieved through reverse‑transcription–based readouts (RT‑stop or RT‑MaP), where chemical adducts cause truncations or mutations during cDNA synthesis. NERD orchestrates external tools (e.g., ShapeMapper) to convert raw sequencing reads into modification rates, and is designed to extend to direct RNA detection approaches (e.g., Nanopore) in the future.</p>
+<hr />
+<h2 id="from-fastq-to-reactivity">From FASTQ to Reactivity</h2>
+<ol>
+<li><strong>Start with parent sequencing samples</strong> registered via <code>nerd run create</code>. Each sample knows where its paired FASTQs live and which reaction group it belongs to.</li>
+<li><strong>Optionally define derived samples</strong> (e.g., subsampled reads or single-hit filters) in the same config. The CLI will materialize these derivatives before counting.</li>
+<li><strong>Run mutational counting</strong> with ShapeMapper through:</li>
+</ol>
+<p><code>bash
+   nerd run mut_count path/to/mutcount.yaml</code></p>
+<p>The config specifies which samples to process, ShapeMapper arguments, and staging options.</p>
+<p>NERD does not compute reactivities itself; instead, it coordinates established software packages to ensure reproducible and metadata‑tracked modification quantification.</p>
+<hr />
+<h2 id="rt-stop-vs-rt-map">RT-Stop vs RT-MaP</h2>
+<p>Two broad RT‑based strategies exist for detecting RNA chemical modifications:</p>
+<ul>
+<li><strong>RT-stop</strong>: quantify cDNA truncations (not yet implemented in NERD).</li>
+<li><strong>RT-MaP (Mutation Profiling)</strong>: quantify mismatches and deletions introduced during reverse transcription. NERD currently supports this via ShapeMapper, enabling reactivity calculation for each nucleotide.</li>
+<li><strong>Direct RNA detection (e.g., Nanopore)</strong>: future support for base‑calling/modified‑base detection engines will enable modification calling directly from RNA reads without reverse transcription.</li>
+</ul>
+<p>This abstraction allows NERD to remain engine‑agnostic—swap external tools or add new detection backends without rewriting pipelines.</p>
+<hr />
+<h2 id="deployment-options">Deployment Options</h2>
+<p>Mutational counting jobs can run:</p>
+<ul>
+<li><strong>Locally</strong> (default): stage FASTQs into a temporary working directory and execute ShapeMapper on the same machine.</li>
+<li><strong>HPC (SLURM)</strong>: leverage the shared task runner to dispatch jobs to a SLURM cluster. Configure submission scripts in the <code>run</code> block or runner settings.</li>
+</ul>
+<p>Regardless of execution backend, the CLI collects outputs, logs provenance, and imports results into SQLite.</p>
+<hr />
+<h2 id="derived-samples">Derived Samples</h2>
+<p>Derived samples help control read depth or enforce per-read quality constraints before counting:</p>
+<ul>
+<li><strong>Subsampled</strong>: use <code>seqtk sample</code> under the hood to create downsampled FASTQs (<code>kind: subsample</code>).</li>
+<li><strong>Single-hit filters</strong>: call ShapeMapper once to identify reads with ≤1 modification, then use <code>seqtk subseq</code> to retain only those reads (<code>kind: filter_singlehit</code>).</li>
+</ul>
+<p>Derived definitions live in the <code>derived_samples</code> section of the <code>create</code> config. Once defined, they can be referenced just like parent sample names in the <code>mut_count</code> config.</p>
+<hr />
+<h2 id="configuration-skeleton">Configuration Skeleton</h2>
+<div class="codehilite"><pre><span></span><code><span class="nt">run</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">label</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mutcount_run</span>
+<span class="w">  </span><span class="nt">output_dir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">outputs</span>
+
+<span class="nt">mut_count</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">samples</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fourU_WT_65c_rep1_tp1</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">fourU_WT_65c_rep1_tp1__subsample-n10000-s42</span>
+<span class="w">  </span><span class="nt">engine</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shapemapper</span>
+<span class="w">  </span><span class="nt">engine_options</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">shapemapper_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/opt/shapemapper/bin/ShapeMapper.py</span>
+<span class="w">    </span><span class="nt">threads</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8</span>
+<span class="w">  </span><span class="nt">stage</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">include_traces</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">  </span><span class="nt">filters</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">reaction_groups</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">65_1</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+
+<p><em>Key fields</em>:</p>
+<ul>
+<li><code>samples</code>: parent or derived sample names.</li>
+<li><code>engine</code>: currently <code>shapemapper</code>; future values can point to other RT-MaP implementations.</li>
+<li><code>engine_options</code>: forwarded to the runner (binary path, threads, etc.).</li>
+<li><code>stage</code>: optional staging tweaks (e.g., include or skip trace outputs).</li>
+<li><code>filters</code>: constrain by reaction group, sample metadata, or derived-sample attributes.</li>
+</ul>
+<hr />
+<h2 id="database-storage">Database Storage</h2>
+<p>Mutational counting results land in two tables documented in the sample-organization guide:</p>
+<h3 id="probe_fmod_runs"><code>probe_fmod_runs</code></h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>Primary key.</td>
+</tr>
+<tr>
+<td><code>software_name</code>, <code>software_version</code></td>
+<td>Engine metadata (ShapeMapper version).</td>
+</tr>
+<tr>
+<td><code>output_dir</code></td>
+<td>Directory where raw tool outputs were staged.</td>
+</tr>
+<tr>
+<td><code>s_id</code></td>
+<td>Foreign key to <code>sequencing_samples</code> (parent sample).</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>Timestamp for the run.</td>
+</tr>
+</tbody>
+</table>
+<p>Each entry represents a single execution of the counting tool for a sample (parent or derived).</p>
+<h3 id="probe_fmod_values"><code>probe_fmod_values</code></h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nt_id</code></td>
+<td>Foreign key to <code>meta_nucleotides</code> (construct + position).</td>
+</tr>
+<tr>
+<td><code>fmod_run_id</code></td>
+<td>Links back to <code>probe_fmod_runs</code>.</td>
+</tr>
+<tr>
+<td><code>rxn_id</code></td>
+<td>Optional foreign key to <code>probe_reactions</code> (for cross-referencing reaction conditions).</td>
+</tr>
+<tr>
+<td><code>valtype</code></td>
+<td>Type of value stored (<code>modrate</code>, <code>fmod</code>, etc.).</td>
+</tr>
+<tr>
+<td><code>fmod_val</code></td>
+<td>Reactivity or modification metric.</td>
+</tr>
+<tr>
+<td><code>read_depth</code></td>
+<td>Effective depth for that nucleotide.</td>
+</tr>
+<tr>
+<td><code>outlier</code></td>
+<td>Boolean flag for outlier handling.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="example-query">Example Query</h4>
+<div class="codehilite"><pre><span></span><code><span class="k">SELECT</span>
+<span class="w">  </span><span class="n">m</span><span class="p">.</span><span class="n">construct_id</span><span class="p">,</span>
+<span class="w">  </span><span class="n">m</span><span class="p">.</span><span class="n">site</span><span class="p">,</span>
+<span class="w">  </span><span class="n">v</span><span class="p">.</span><span class="n">fmod_val</span><span class="p">,</span>
+<span class="w">  </span><span class="n">v</span><span class="p">.</span><span class="n">read_depth</span><span class="p">,</span>
+<span class="w">  </span><span class="n">v</span><span class="p">.</span><span class="n">outlier</span>
+<span class="k">FROM</span><span class="w"> </span><span class="n">probe_fmod_values</span><span class="w"> </span><span class="n">v</span>
+<span class="k">JOIN</span><span class="w"> </span><span class="n">meta_nucleotides</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">m</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">v</span><span class="p">.</span><span class="n">nt_id</span>
+<span class="k">JOIN</span><span class="w"> </span><span class="n">probe_fmod_runs</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">v</span><span class="p">.</span><span class="n">fmod_run_id</span>
+<span class="k">WHERE</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">software_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;ShapeMapper&#39;</span>
+<span class="w">  </span><span class="k">AND</span><span class="w"> </span><span class="n">v</span><span class="p">.</span><span class="n">valtype</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;modrate&#39;</span>
+<span class="w">  </span><span class="k">AND</span><span class="w"> </span><span class="n">r</span><span class="p">.</span><span class="n">s_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="k">SELECT</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">sequencing_samples</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">sample_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;fourU_WT_65c_rep1_tp1&#39;</span>
+<span class="w">  </span><span class="p">);</span>
+</code></pre></div>
+
+<p>This query pulls the per-nucleotide <code>modrate</code> series for a given sample, alongside read depth and outlier flags.</p>
+<hr />
+<h2 id="best-practices">Best Practices</h2>
+<ul>
+<li><strong>Keep FASTQs organized</strong> under the run-label directory (<code>outputs/&lt;label&gt;/fastqs</code>) for faster staging.</li>
+<li><strong>Validate derived sample definitions</strong>—ensure parent sample names match those inserted by the <code>create</code> task.</li>
+<li><strong>Monitor log files</strong> in <code>outputs/&lt;label&gt;/run_logs</code> for ShapeMapper warnings or read filtering summaries.</li>
+<li><strong>Re-run selectively</strong> by filtering on reaction groups or sample subsets to avoid redundant processing.</li>
+<li><strong>Version bump</strong>: include ShapeMapper version in configs so <code>probe_fmod_runs</code> records remain traceable.</li>
+</ul>
+<p>Once mutation rates are in SQLite, you can pivot directly into probe timecourse fitting, temperature gradients, or custom analysis notebooks, confident that raw reads, derived samples, and reactivities are linked by shared identifiers.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.tabs", "navigation.sections", "content.code.copy"], "search": "../../assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.f55a23d4.min.js"></script>
+      
+    
+  </body>
+</html>
