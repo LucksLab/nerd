@@ -31,6 +31,7 @@ Please credit this work as:
 ### License Summary
 
 This license allows others to use and adapt your work for **non-commercial** purposes, provided they:
+
 1. **Attribute** you properly, and  
 2. **Share alike** any derivative works under the same terms.  
 

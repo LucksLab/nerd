@@ -140,3 +140,8 @@ Outputs are written to `output_dir/label/<task>/latest/results`, and all databas
 - **Examples**: `demo_folder/` contains ready-to-run configs for NMR degradation, adduction, probe timecourse, and temperature-gradient fits.
 - **Issues & enhancements**: File GitHub issues or PRs; the maintainers welcome field-specific engines (R, Bayesian) via the plugin registry.
 - **Extending tasks**: New CLI steps simply subclass `Task` and leverage the shared logging, SQLite helpers, and runner infrastructure.
+
+## License & Copyright
+
+NERD is released under the [Creative Commons Attribution–NonCommercial–ShareAlike 4.0 International License](LICENSE.md).  
+© Lucks Lab, 2025. For attribution details and allowed uses, see `LICENSE.md`.
