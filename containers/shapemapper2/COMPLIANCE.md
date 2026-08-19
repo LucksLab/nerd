@@ -32,8 +32,10 @@ Azul Zulu and historical Conda source gaps described later in this document.
   command name, especially Debian's BBMerge launcher.
 - [ ] Record the final image digest, CI run, package inventory, SBOM, and source
   bundle checksums together.
-- [ ] Obtain explicit owner approval before the first GHCR push or public
-  visibility change.
+- [x] Obtain explicit owner approval before pushing a uniquely tagged private
+  development image for NERD integration testing.
+- [ ] Obtain explicit owner approval before creating a release tag or changing
+  GHCR visibility to public.
 
 The first local source build produced a 508,942,308-byte amd64 image. Runtime
 inspection was interrupted by host disk exhaustion immediately after the

@@ -100,15 +100,20 @@ This is an infrastructure failure, not a ShapeMapper compile or test failure.
 
 ## Publication gate
 
-Do not push either image or change GHCR visibility until the public candidate's
-built-in tests, image-size report, Debian package inventory, SBOM, and source
-availability record have been presented to and approved by the project owner.
-Release tags must never be overwritten; NERD should consume a published image
-by OCI digest.
+Do not create a release tag or change GHCR visibility until the public
+candidate's built-in tests, image-size report, Debian package inventory, SBOM,
+and source-availability record have been presented to and approved by the
+project owner. Release tags must never be overwritten; NERD should consume an
+image by OCI digest.
 
-The manual GitHub Actions workflow builds, runs both test levels, and retains
-an SPDX SBOM. It has no package-write permission, registry login, or push step.
-All third-party actions are pinned to immutable commits.
+The GitHub Actions workflow uses only built-in Git and Docker commands because
+LucksLab's organization policy disallows third-party actions. Pull requests
+build and test without registry access. A manual run can, after all tests pass,
+push a uniquely tagged private development image using the repository secret
+`EDR_CHOI_GHCR_TOKEN`. It verifies that the GHCR package remains private and
+prints the immutable digest for NERD testing. This private development image is
+not a public release; generating and retaining a fresh SPDX SBOM remains part
+of the public-release gate.
 
 ## Licensing status
 

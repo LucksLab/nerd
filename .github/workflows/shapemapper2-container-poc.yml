@@ -1,4 +1,4 @@
-name: ShapeMapper2 public candidate validation
+name: ShapeMapper2 candidate build and private publish
 
 on:
   pull_request:
@@ -6,57 +6,137 @@ on:
       - .github/workflows/shapemapper2-container-poc.yml
       - containers/shapemapper2/**
   workflow_dispatch:
+    inputs:
+      publish_private:
+        description: Push a uniquely tagged private development image after tests pass
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+
+env:
+  LOCAL_IMAGE: nerd-shapemapper2:2.3-public-candidate
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - name: Check out NERD
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      # LucksLab permits only LucksLab-owned actions. Check out the exact event
+      # ref directly instead of using actions/checkout.
+      - name: Check out the exact revision
+        env:
+          CHECKOUT_REF: ${{ github.ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          git init .
+          git remote add origin "https://github.com/${REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "${CHECKOUT_REF}"
+          git checkout --detach FETCH_HEAD
 
       - name: Build amd64 image without publishing
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: containers/shapemapper2
-          platforms: linux/amd64
-          load: true
-          push: false
-          tags: nerd-shapemapper2:2.3-public-candidate
+        run: |
+          docker build \
+            --platform linux/amd64 \
+            --tag "${LOCAL_IMAGE}" \
+            containers/shapemapper2
+
+      - name: Confirm required runtime commands
+        run: |
+          docker run --rm \
+            --platform linux/amd64 \
+            --entrypoint bash \
+            "${LOCAL_IMAGE}" \
+            -lc '
+              set -e
+              for tool in bbmerge.sh bowtie2 bowtie2-build STAR dot gs pv; do
+                command -v "${tool}"
+              done
+              python3 -c "import matplotlib, numpy, scipy, sklearn"
+            '
 
       - name: Run upstream example smoke test
-        run: containers/shapemapper2/test-container.sh nerd-shapemapper2:2.3-public-candidate
+        run: containers/shapemapper2/test-container.sh "${LOCAL_IMAGE}"
 
       - name: Run complete upstream test suite
-        run: containers/shapemapper2/test-upstream.sh nerd-shapemapper2:2.3-public-candidate
+        run: containers/shapemapper2/test-upstream.sh "${LOCAL_IMAGE}"
 
-      - name: Capture exact Debian binary and source package inventory
+      - name: Record image size and Debian package inventory
         run: |
           docker run --rm --entrypoint dpkg-query \
-            nerd-shapemapper2:2.3-public-candidate \
+            "${LOCAL_IMAGE}" \
             -W '-f=${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\n' \
-            | LC_ALL=C sort > shapemapper2-2.3-r0.debian-packages.tsv
+            | LC_ALL=C sort \
+            | tee shapemapper2-2.3-r0.debian-packages.tsv
 
-      - name: Upload Debian package inventory
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: shapemapper2-2.3-r0-debian-packages
-          path: shapemapper2-2.3-r0.debian-packages.tsv
-          retention-days: 30
-          if-no-files-found: error
+          image_size_bytes="$(docker image inspect "${LOCAL_IMAGE}" --format '{{.Size}}')"
+          package_count="$(wc -l < shapemapper2-2.3-r0.debian-packages.tsv | tr -d ' ')"
+          {
+            echo '### ShapeMapper2 candidate'
+            echo "- Image size: ${image_size_bytes} bytes"
+            echo "- Installed Debian packages: ${package_count}"
+            echo "- Source revision: ${GITHUB_SHA}"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Generate SPDX SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
-        with:
-          image: nerd-shapemapper2:2.3-public-candidate
-          format: spdx-json
-          output-file: shapemapper2-2.3-r0.spdx.json
-          artifact-name: shapemapper2-2.3-r0.spdx.json
-          upload-artifact-retention: 30
-          upload-release-assets: false
+      - name: Push uniquely tagged private development image
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_private }}
+        env:
+          GHCR_TOKEN: ${{ secrets.EDR_CHOI_GHCR_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${GHCR_TOKEN}"
+
+          package_api_url='https://api.github.com/users/edr-choi/packages/container/nerd-shapemapper2'
+          status_code="$(curl --silent --show-error \
+            --output package-before.json \
+            --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${GHCR_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "${package_api_url}")"
+
+          if [[ "${status_code}" == '200' ]]; then
+            test "$(jq -r '.visibility' package-before.json)" == 'private'
+          elif [[ "${status_code}" != '404' ]]; then
+            echo "Unable to confirm the existing package visibility (HTTP ${status_code})" >&2
+            exit 1
+          fi
+
+          printf '%s' "${GHCR_TOKEN}" \
+            | docker login ghcr.io --username edr-choi --password-stdin
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+
+          short_sha="${GITHUB_SHA:0:12}"
+          image_ref="ghcr.io/edr-choi/nerd-shapemapper2:2.3-dev-${short_sha}-run${GITHUB_RUN_ID}"
+          docker tag "${LOCAL_IMAGE}" "${image_ref}"
+          docker push "${image_ref}" 2>&1 | tee docker-push.log
+
+          digest="$(sed -n 's/^.*digest: \(sha256:[0-9a-f]\{64\}\).*$/\1/p' docker-push.log | tail -1)"
+          test -n "${digest}"
+
+          for attempt in 1 2 3 4 5; do
+            status_code="$(curl --silent --show-error \
+              --output package-after.json \
+              --write-out '%{http_code}' \
+              --header "Authorization: Bearer ${GHCR_TOKEN}" \
+              --header 'Accept: application/vnd.github+json' \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              "${package_api_url}")"
+            [[ "${status_code}" == '200' ]] && break
+            sleep 3
+          done
+          test "${status_code}" == '200'
+          test "$(jq -r '.visibility' package-after.json)" == 'private'
+
+          digest_ref="ghcr.io/edr-choi/nerd-shapemapper2@${digest}"
+          {
+            echo '### Private development image'
+            echo "- Tag: \`${image_ref}\`"
+            echo "- Digest-pinned reference: \`${digest_ref}\`"
+            echo '- Visibility confirmed: `private`'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          echo "Private image: ${image_ref}"
+          echo "Digest-pinned reference: ${digest_ref}"
