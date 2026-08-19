@@ -1,0 +1,19 @@
+diff --git a/shapemapper2-2.3/internals/bin/make_reactivity_profiles.py b/shapemapper2-2.3/internals/bin/make_reactivity_profiles.py
+--- a/shapemapper2-2.3/internals/bin/make_reactivity_profiles.py
++++ b/shapemapper2-2.3/internals/bin/make_reactivity_profiles.py
+@@ -329,12 +329,12 @@ def load_counts(filename):
+     effective_depth_column = headers.index(effective_depth_header)
+ 
+     # now load counts and depths
+-    counts = np.zeros(length, dtype=np.int)
+-    read_depths = np.zeros(length, dtype=np.int)
+-    effective_depths = np.zeros(length, dtype=np.int)
++    counts = np.zeros(length, dtype=int)
++    read_depths = np.zeros(length, dtype=int)
++    effective_depths = np.zeros(length, dtype=int)
+     addtl_data = []
+     for i in range(len(addtl_column_names)):
+-        addtl_data.append(np.zeros(length, dtype=np.int))
++        addtl_data.append(np.zeros(length, dtype=int))
+     try:
+         for i in range(length):

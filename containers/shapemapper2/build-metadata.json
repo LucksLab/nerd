@@ -27,6 +27,13 @@
       "analysis_parameters_changed": false,
       "scientific_logic_changed": false
     },
+    "numpy_alias_patch": {
+      "path": "patches/numpy-removed-aliases.patch",
+      "sha256": "aa6edb3ba633fff2148db0de185898e29a50fe659cee39ca76ac929e91696bd3",
+      "change": "replace removed NumPy np.int alias with equivalent built-in int",
+      "occurrences": 4,
+      "scientific_logic_changed": false
+    },
     "local_build_2026_08_18": {
       "image_tag": "nerd-shapemapper2:2.3-public-candidate",
       "image_size_bytes": 508942308,

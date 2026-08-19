@@ -7,7 +7,7 @@ and the project owner gives explicit approval.
 ## Public candidate (`Dockerfile`)
 
 The public candidate compiles the checksum-pinned upstream v2.3 source tag,
-after applying two documented runtime compatibility patches, and
+after applying three documented runtime compatibility patches, and
 uses Debian 12 packages. It excludes the official release archive's Miniconda
 environment and old prebuilt third-party executables. That removes the exact
 Azul Zulu and historical Conda source gaps described later in this document.
@@ -20,6 +20,9 @@ Azul Zulu and historical Conda source gaps described later in this document.
 - [x] Apply only the documented `bbmerge-stdin-format.patch` (`in=stdin` to
   `in=stdin.fastq`) so Debian BBMap 39.01 pairs the existing FASTQ stream; do
   not change BBMerge analysis parameters.
+- [x] Apply only the documented `numpy-removed-aliases.patch` (`np.int` to
+  equivalent built-in `int` in four array allocations); do not change array
+  values or scientific logic.
 - [x] Use distribution packages for Bowtie2, STAR, BBMap/BBMerge and its
   separately packaged JNI library, Graphviz, Ghostscript, pv, OpenJDK, Python,
   Boost, zlib, and transitive dependencies.

@@ -14,3 +14,6 @@ c3f14fdd782266522b377b1c22986b98cf9949164ec3f4d582fbe65da5e53ec6  shapemapper2-2
 
 # Auditable BBMerge standard-input format compatibility patch
 6ed6a5de862df74f1b4b45a219963a1e9ed6cd2b3709a6c81a5fc30f5245345e  patches/bbmerge-stdin-format.patch
+
+# Auditable NumPy removed-alias compatibility patch
+aa6edb3ba633fff2148db0de185898e29a50fe659cee39ca76ac929e91696bd3  patches/numpy-removed-aliases.patch

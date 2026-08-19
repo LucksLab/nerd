@@ -1,11 +1,12 @@
 # Third-party notices for the source-built public candidate
 
 This image compiles the checksum-pinned ShapeMapper2 v2.3 source tag after
-applying the two documented files under `patches/`. One replaces Python's
+applying the three documented files under `patches/`. One replaces Python's
 removed `rU` file mode with equivalent `r` mode in 30 file-open calls. The
 other identifies BBMerge's standard-input stream as FASTQ for Debian's newer
-BBMap. Neither changes scientific logic or analysis parameters. The image
-installs runtime dependencies as
+BBMap. The third replaces NumPy's removed `np.int` alias with equivalent
+built-in `int`. None changes scientific logic or analysis parameters. The
+image installs runtime dependencies as
 Debian 12 (bookworm) packages. It does not contain the official ShapeMapper
 release archive's bundled Miniconda environment or historical prebuilt
 executables.
