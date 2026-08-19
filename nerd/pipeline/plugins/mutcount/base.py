@@ -25,6 +25,10 @@ class MutCountPlugin(abc.ABC):
         self.bin_path = bin_path or self.default_binary()
         self.version = version
 
+    def container_spec(self, tool_cfg: Optional[Dict] = None):
+        """Return optional container metadata; native/custom plugins may return ``None``."""
+        return None
+
     @staticmethod
     def default_binary() -> str:
         """Return the default CLI executable name for the tool."""

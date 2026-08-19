@@ -47,6 +47,7 @@ class JobSpec:
     stage_in: List[Dict[str, str]] = field(default_factory=list)
     stage_out: List[str] = field(default_factory=list)
     controller_cwd: Optional[str] = None
+    provenance: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)

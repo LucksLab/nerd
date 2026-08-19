@@ -334,6 +334,7 @@ class MutCountTask(Task):
             plugin_name,
             bin_path=tool_cfg.get("bin"),
             version=tool_cfg.get("version"),
+            container_execution=inputs.get("_container_execution"),
         )
         param_opts = inputs.get("params") or {}
         if not isinstance(param_opts, dict):
@@ -405,6 +406,13 @@ class MutCountTask(Task):
             start_stage_in_idx = len(self._stage_in)
             start_stage_out_idx = len(self._stage_out_extra)
             try:
+                import re as _re
+                import shlex as _shlex
+                if _re.fullmatch(r"[A-Za-z0-9_.-]+", name) is None:
+                    raise ValueError(
+                        "Sample names used in external commands may contain only letters, numbers, '.', '_', and '-'."
+                    )
+                _q = lambda value: _shlex.quote(str(value))
                 parent_srow = _sample_row_by_name(name)
                 is_derived = False
                 derived_row = None
@@ -452,12 +460,12 @@ class MutCountTask(Task):
                 target_fa = sample_dir / "target.fa"
 
                 # 1) ensure sample dir on remote
-                cmds.append(f"mkdir -p {sample_dir}")
+                cmds.append("mkdir -p %s" % _q(sample_dir))
                 # 2) write FASTA via heredoc
                 fasta_text = _fasta_text(nt_rows, header=name)
                 # Protect EOF and content; use single-quoted EOF to avoid shell interpolation
                 heredoc = (
-                    f"cat > {target_fa} << 'EOF'\n" + fasta_text + "EOF\n"
+                    "cat > %s << 'EOF'\n" % _q(target_fa) + fasta_text + "EOF\n"
                 )
                 cmds.append(heredoc)
                 # 3) stage-in parent R1/R2 to remote sample dir
@@ -465,7 +473,7 @@ class MutCountTask(Task):
                 remote_r1 = sample_dir / r1.name
                 remote_r2 = sample_dir / r2.name
                 backend = str(ctx.backend or "").lower()
-                needs_stage = backend not in {"local"}
+                needs_stage = backend not in {"local"} and not bool(inputs.get("_shared_filesystem"))
                 if needs_stage:
                     self._stage_in.append({"src": str(r1), "dst": str(remote_r1)})
                     self._stage_in.append({"src": str(r2), "dst": str(remote_r2)})
@@ -521,7 +529,7 @@ class MutCountTask(Task):
                     out_dir=Path(str(out_dir)),
                     options=options,
                 )
-                wrapped_shapecmd = f"{shapecmd} || echo 'shapemapper failed for {name}'"
+                wrapped_shapecmd = shapecmd
                 sep = "################################################################################"
                 if not is_derived:
                     # Add verification steps for non-derived cases (derived already logs these)
@@ -529,17 +537,17 @@ class MutCountTask(Task):
                     cmds.append(f"echo '{sep}'")
                     cmds.append(f"echo '# 3 - {verify_label}'")
                     cmds.append(f"echo '{sep}'")
-                    cmds.append(f"ls -lh {use_r1} {use_r2} || true")
+                    cmds.append("ls -lh %s %s || true" % (_q(use_r1), _q(use_r2)))
                     cmds.append(f"echo '{sep}'")
                     cmds.append("echo '# 4 - Verify created FASTA'")
                     cmds.append(f"echo '{sep}'")
-                    cmds.append(f"head -n 2 {target_fa} || true")
+                    cmds.append("head -n 2 %s || true" % _q(target_fa))
 
                 # Step 5: show/create shapemapper command
                 cmds.append(f"echo '{sep}'")
                 cmds.append("echo '# 5 - Create shapemapper' ")
                 cmds.append(f"echo '{sep}'")
-                cmds.append(f"echo 'Command: {shapecmd}'")
+                cmds.append("echo %s" % _q("Command: " + shapecmd))
 
                 # Step 6: run shapemapper (or stage in dry-run)
                 cmds.append(f"echo '{sep}'")
@@ -547,18 +555,19 @@ class MutCountTask(Task):
                 cmds.append(f"echo '{sep}'")
                 if dry_run:
                     dry_label = "staged FASTQs" if needs_stage else "FASTQ inputs"
-                    cmds.append(f"echo '[Step 1] Verifying {dry_label} for {name}'")
-                    cmds.append(f"ls -lh {use_r1} {use_r2} || true")
-                    cmds.append(f"echo '[Step 2] FASTA created for {name} at {target_fa}'")
-                    cmds.append(f"head -n 2 {target_fa} || true")
+                    cmds.append("echo %s" % _q("[Step 1] Verifying %s for %s" % (dry_label, name)))
+                    cmds.append("ls -lh %s %s || true" % (_q(use_r1), _q(use_r2)))
+                    cmds.append("echo %s" % _q("[Step 2] FASTA created for %s at %s" % (name, target_fa)))
+                    cmds.append("head -n 2 %s || true" % _q(target_fa))
                     run_script = sample_dir / "run_shapemapper.sh"
-                    cmds.append(f"echo '[Step 3] Creating shapemapper script for {name}: {run_script}'")
+                    cmds.append("echo %s" % _q("[Step 3] Creating shapemapper script for %s: %s" % (name, run_script)))
                     mk_script = (
-                        f"cat > {run_script} << 'EOSH'\n#!/usr/bin/env bash\nset -euo pipefail\n{shapecmd}\nEOSH\n"
+                        "cat > %s << 'EOSH'\n#!/usr/bin/env bash\nset -euo pipefail\n%s\nEOSH\n"
+                        % (_q(run_script), shapecmd)
                     )
                     cmds.append(mk_script)
-                    cmds.append(f"chmod +x {run_script}")
-                    cmds.append(f"echo '[Step 4] Would run shapemapper via {run_script} (skipped in dry_run)'")
+                    cmds.append("chmod +x %s" % _q(run_script))
+                    cmds.append("echo %s" % _q("[Step 4] Would run shapemapper via %s (skipped in dry_run)" % run_script))
                 else:
                     cmds.append(wrapped_shapecmd)
             except Exception:
@@ -574,11 +583,58 @@ class MutCountTask(Task):
             raise RuntimeError("No samples qualified for mut_count task.")
 
         # Use newlines between commands; 'set -e' in the job script ensures abort on failure.
-        return "\n".join(cmds)
+        return "set -euo pipefail\nmkdir -p .nerd-tmp\n" + "\n".join(cmds)
 
     def stage_in_pairs(self) -> List[Dict[str, str]]:
         """Return stage-in file mappings prepared during command() build."""
         return list(self._stage_in or [])
+
+    def prepare_execution(self, cfg, profile, ctx, inputs):
+        """Prepare ShapeMapper's SIF on the actual execution host when requested."""
+        from dataclasses import asdict
+        from nerd.containers import (
+            container_requested, prepare_container, provenance_payload,
+        )
+        from nerd.pipeline.plugins.mutcount import load_mutcount_plugin
+
+        if str(inputs.get("plugin", "")).lower() != "shapemapper":
+            return None
+        tool_cfg = inputs.get("tool") or {}
+        if not container_requested(tool_cfg):
+            return None
+        plugin = load_mutcount_plugin("shapemapper", bin_path=tool_cfg.get("bin"),
+                                      version=tool_cfg.get("version"))
+        spec = plugin.container_spec(tool_cfg)
+        readiness = prepare_container(spec, profile, tool_cfg)
+        execution_workdir = str(ctx.workdir)
+        if profile.executor_type == "ssh_slurm":
+            from pathlib import PurePosixPath
+            execution_workdir = str(PurePosixPath(str(profile.options["remote_base_dir"])) / ctx.workdir.name)
+        inputs["_shared_filesystem"] = bool(profile.options.get("shared_filesystem"))
+        inputs["_container_execution"] = {
+            "runtime": asdict(readiness.runtime),
+            "sif_path": readiness.sif_path,
+            "workdir": execution_workdir,
+            "executable": spec.executable,
+        }
+        return provenance_payload(spec, readiness, "", profile)
+
+    def validate_execution_config(self, inputs, profile=None):
+        """Reject the packaged image placeholder before creating a task or contacting a registry."""
+        from nerd.containers import container_requested
+        from nerd.pipeline.plugins.mutcount import load_mutcount_plugin
+
+        if str(inputs.get("plugin", "")).lower() != "shapemapper":
+            return
+        tool_cfg = inputs.get("tool") or {}
+        if container_requested(tool_cfg):
+            container = tool_cfg.get("container") or {}
+            sif = container.get("sif") if isinstance(container, dict) else None
+            if not sif and profile is not None:
+                sif = profile.options.get("container_sif")
+            plugin = load_mutcount_plugin("shapemapper", bin_path=tool_cfg.get("bin"),
+                                          version=tool_cfg.get("version"))
+            plugin.container_spec(tool_cfg).validate(str(sif) if sif else None)
 
     def stage_out_patterns(self) -> Optional[List[str]]:
         return list(dict.fromkeys(self._stage_out_extra)) if self._stage_out_extra else []
@@ -967,6 +1023,16 @@ class MutCountTask(Task):
             len(sample_names),
             ingested_runs,
         )
+        if found_profiles != len(sample_names):
+            raise ValueError(
+                "Scientific validation failed: ShapeMapper profiles were found for %d/%d samples."
+                % (found_profiles, len(sample_names))
+            )
+        if ingested_runs != len(sample_names):
+            raise ValueError(
+                "Scientific validation failed: results were ingested for %d/%d samples."
+                % (ingested_runs, len(sample_names))
+            )
 
     def _find_shapemapper_log(self, run_dir: Path, sample_dir: Path, sample_name: str) -> Optional[Path]:
         candidates = [

@@ -198,6 +198,25 @@ def job_spec(row: sqlite3.Row) -> JobSpec:
     return JobSpec.from_dict(json.loads(row["job_spec_json"]))
 
 
+def record_container_provenance(conn: sqlite3.Connection, task_id: int,
+                                payload: Dict[str, Any]) -> None:
+    runtime = payload.get("runtime") or {}
+    with conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO core_container_provenance (
+               task_id, oci_reference, oci_digest, sif_path, sif_checksum,
+               runtime, runtime_version, tool_version, command, execution_host,
+               executor_profile, executor_type, recorded_at, provenance_json
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (task_id, payload.get("oci_reference"), payload.get("oci_digest"),
+             payload.get("sif_path"), payload.get("sif_checksum"), runtime.get("command"),
+             runtime.get("version"), payload.get("shapemapper_version"), payload.get("command"),
+             payload.get("execution_host"), payload.get("executor_profile"),
+             payload.get("executor_type"), payload.get("recorded_at"),
+             json.dumps(payload, sort_keys=True)),
+        )
+
+
 def list_tasks(conn: sqlite3.Connection, label: Optional[str] = None) -> List[sqlite3.Row]:
     sql = """
         SELECT t.id, t.task_name, t.label, t.state, t.backend, t.started_at, t.ended_at,

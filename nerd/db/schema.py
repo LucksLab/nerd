@@ -421,6 +421,27 @@ CREATE TABLE IF NOT EXISTS core_state_transitions (
 );
 """
 
+CREATE_CORE_CONTAINER_PROVENANCE = """
+CREATE TABLE IF NOT EXISTS core_container_provenance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL UNIQUE,
+    oci_reference TEXT NOT NULL,
+    oci_digest TEXT,
+    sif_path TEXT NOT NULL,
+    sif_checksum TEXT,
+    runtime TEXT NOT NULL,
+    runtime_version TEXT,
+    tool_version TEXT,
+    command TEXT NOT NULL,
+    execution_host TEXT,
+    executor_profile TEXT NOT NULL,
+    executor_type TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    provenance_json TEXT NOT NULL,
+    FOREIGN KEY(task_id) REFERENCES core_tasks(id) ON DELETE CASCADE
+);
+"""
+
 # ---------------------------------------------------------------------------
 # Indexes
 # ---------------------------------------------------------------------------
@@ -507,6 +528,7 @@ ALL_TABLES = [
     CREATE_CORE_TASK_SCOPE_MEMBERS,
     CREATE_CORE_SCHEDULER_ATTEMPTS,
     CREATE_CORE_STATE_TRANSITIONS,
+    CREATE_CORE_CONTAINER_PROVENANCE,
 ]
 
 ALL_INDEXES = [

@@ -123,3 +123,7 @@ task. Controller-side preparation and scientific output import remain short,
 explicit CLI operations. Phase 1 does not add a daemon, container integration,
 or changes to PRIME normalization, kobs, or dG analyses. Automatic dependency
 graphs and policy-driven retry/backoff are intentionally deferred.
+
+Phase 2 adds the ShapeMapper container execution path described in
+[Containerized ShapeMapper](shapemapper-containers.md). The runtime integration
+is operational and its default is pinned to the published immutable GHCR image.

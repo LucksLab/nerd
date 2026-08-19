@@ -67,7 +67,8 @@ def _context(
 
 
 def _job_spec(task: Any, ctx: TaskContext, cfg: Dict[str, Any], command: str,
-              profile: ExecutorProfile, resources: Dict[str, Any]) -> JobSpec:
+              profile: ExecutorProfile, resources: Dict[str, Any],
+              provenance: Optional[Dict[str, Any]] = None) -> JobSpec:
     run = cfg.get("run", {}) or {}
     options = profile.options
     remote_workdir = None
@@ -99,6 +100,7 @@ def _job_spec(task: Any, ctx: TaskContext, cfg: Dict[str, Any], command: str,
         stage_in=stage_in,
         stage_out=list(dict.fromkeys(stage_out)),
         controller_cwd=str(Path.cwd()),
+        provenance=provenance or {},
     )
 
 
@@ -154,6 +156,9 @@ def submit_task(
             "Identical configuration already completed as task %s; set force_run to submit again."
             % existing["id"]
         )
+    inputs, params = task.prepare(cfg)
+    if hasattr(task, "validate_execution_config"):
+        task.validate_execution_config(inputs, profile)
     suffix = "%s__cfg-%s" % (
         datetime.now().strftime("%Y%m%d_%H%M%S_%f"),
         config_hash(cfg, length=7),
@@ -163,7 +168,9 @@ def submit_task(
     shutil.copy2(str(config_path.resolve()), str(config_snapshot))
     resources = profile_resources(profile, run)
     ctx = _context(conn, cfg, run_dir, profile, resources, output_dir=output_dir)
-    inputs, params = task.prepare(cfg)
+    execution_provenance = None
+    if hasattr(task, "prepare_execution"):
+        execution_provenance = task.prepare_execution(cfg, profile, ctx, inputs)
     scope = task.resolve_scope(ctx, inputs)
     task_id = db_api.begin_task(
         conn, task.name, scope.kind, scope.scope_id, profile.name, output_dir,
@@ -175,6 +182,11 @@ def submit_task(
     if scope.members:
         db_api.record_task_scope_members(conn, task_id, scope.members)
     command = task.command(ctx, inputs, params)
+    if execution_provenance is not None:
+        execution_provenance["command"] = command
+        from nerd.containers import write_provenance
+        write_provenance(run_dir / ".nerd-container-provenance.json", execution_provenance)
+        store.record_container_provenance(conn, task_id, execution_provenance)
     if not command:
         spec = JobSpec(
             command="", workdir=run_dir, resources=resources,
@@ -200,7 +212,7 @@ def submit_task(
         store.transition_task(conn, task_id, TaskState.COMPLETED)
         update_latest_symlink(Path(output_dir) / str(run["label"]), task.name, run_dir)
         return store.get_attempt(conn, scheduler_attempt_id)
-    spec = _job_spec(task, ctx, cfg, command, profile, resources)
+    spec = _job_spec(task, ctx, cfg, command, profile, resources, execution_provenance)
     return _submit_attempt(conn, task_id, spec, profile, config_snapshot)
 
 

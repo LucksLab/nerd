@@ -153,6 +153,13 @@ class _SlowTask(_AsyncFileTask):
         return "sleep 30"
 
 
+class _MissingOutputTask(_AsyncFileTask):
+    name = "_scheduler_missing_output_test"
+
+    def command(self, ctx, inputs, params):
+        return "true"
+
+
 def test_scientific_task_is_only_completed_after_collection(tmp_path, monkeypatch):
     monkeypatch.setitem(TASK_REGISTRY, _AsyncFileTask.name, _AsyncFileTask)
     output = tmp_path / "output"
@@ -176,6 +183,30 @@ def test_scientific_task_is_only_completed_after_collection(tmp_path, monkeypatc
     assert collected["scheduler_state"] == "completed"
     assert collected["task_state"] == "completed"
     assert (store.job_spec(collected).workdir / "validated.txt").is_file()
+    conn.close()
+
+
+def test_scheduler_success_with_missing_scientific_output_fails_validation(tmp_path, monkeypatch):
+    monkeypatch.setitem(TASK_REGISTRY, _MissingOutputTask.name, _MissingOutputTask)
+    output = tmp_path / "output"
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "run:\n  label: missing\n  output_dir: %s\n  executor: laptop\n"
+        "executors:\n  laptop:\n    type: local\n" % output
+    )
+    conn = _db(output / "nerd.sqlite")
+    submitted = submit_task(conn, _MissingOutputTask.name, config)
+    deadline = time.monotonic() + 5
+    row = reconcile(conn, submitted["task_id"])
+    while row["scheduler_state"] != "scheduler_completed":
+        assert time.monotonic() < deadline
+        time.sleep(0.05)
+        row = reconcile(conn, submitted["task_id"])
+    with pytest.raises(FileNotFoundError):
+        collect_task(conn, submitted["task_id"])
+    failed = store.latest_attempt_for_task(conn, submitted["task_id"])
+    assert failed["scheduler_state"] == "validation_failed"
+    assert failed["task_state"] == "failed"
     conn.close()
 
 

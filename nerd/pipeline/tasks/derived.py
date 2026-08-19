@@ -9,6 +9,7 @@ extra stage-out patterns to collect.
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
 from typing import Dict, List, Tuple, Optional
 
 
@@ -48,6 +49,7 @@ class SubsampleMaterializer(DerivedMaterializer):
     ) -> Tuple[Path, Path, List[str], List[str]]:
         out_r1 = sample_dir / "derived_R1.fastq"
         out_r2 = sample_dir / "derived_R2.fastq"
+        q = lambda value: shlex.quote(str(value))
         mapping: Dict[str, str] = {
             "R1": str(parent_r1_remote),
             "R2": str(parent_r2_remote),
@@ -62,13 +64,16 @@ class SubsampleMaterializer(DerivedMaterializer):
             cmd = str(self.cmd_template)
         sep = "################################################################################"
         count_parent_r1 = (
-            f"orig_lines=$( ( [[ '{parent_r1_remote}' == *.gz ]] && zcat '{parent_r1_remote}' || cat '{parent_r1_remote}' ) | wc -l ); orig_rec=$((orig_lines/4))"
+            "orig_lines=$( ( [[ %s == *.gz ]] && zcat %s || cat %s ) | wc -l ); orig_rec=$((orig_lines/4))"
+            % (q(parent_r1_remote), q(parent_r1_remote), q(parent_r1_remote))
         )
         count_parent_r2 = (
-            f"orig2_lines=$( ( [[ '{parent_r2_remote}' == *.gz ]] && zcat '{parent_r2_remote}' || cat '{parent_r2_remote}' ) | wc -l ); orig2_rec=$((orig2_lines/4))"
+            "orig2_lines=$( ( [[ %s == *.gz ]] && zcat %s || cat %s ) | wc -l ); orig2_rec=$((orig2_lines/4))"
+            % (q(parent_r2_remote), q(parent_r2_remote), q(parent_r2_remote))
         )
         count_derived = (
-            f"der1_rec=$(( $(wc -l < {out_r1}) / 4 )); der2_rec=$(( $(wc -l < {out_r2}) / 4 ))"
+            "der1_rec=$(( $(wc -l < %s) / 4 )); der2_rec=$(( $(wc -l < %s) / 4 ))"
+            % (q(out_r1), q(out_r2))
         )
         commands = [
             f"echo '{sep}'",
@@ -84,11 +89,11 @@ class SubsampleMaterializer(DerivedMaterializer):
             f"echo '{sep}'",
             f"echo '# 3 - Verify staged FASTQ (to be used)'",
             f"echo '{sep}'",
-            f"ls -lh {out_r1} {out_r2} || true",
+            "ls -lh %s %s || true" % (q(out_r1), q(out_r2)),
             f"echo '{sep}'",
             f"echo '# 4 - Verify created FASTA'",
             f"echo '{sep}'",
-            f"head -n 2 {target_fa_remote} || true",
+            "head -n 2 %s || true" % q(target_fa_remote),
         ]
         return out_r1, out_r2, commands, []
 
@@ -116,6 +121,7 @@ class FilterSingleHitMaterializer(DerivedMaterializer):
     ) -> Tuple[Path, Path, List[str], List[str]]:
         # 1) Run a minimal ShapeMapper scan to get parsed mutations
         parent_out = sample_dir / "parent_scan"
+        q = lambda value: shlex.quote(str(value))
         scan_cmd = plugin.command(
             sample_name=f"{sample_name}__parent",
             r1_path=parent_r1_remote,
@@ -139,31 +145,35 @@ class FilterSingleHitMaterializer(DerivedMaterializer):
             # Enable nullglob so unmatched globs expand to nothing (not the literal pattern)
             "shopt -s nullglob; "
             # Pick the first matching parsed mutations file (mut or mutga)
-            f"MUT=; for f in {parent_out}/*_parsed.mut {parent_out}/*_parsed.mutga; do MUT=\"$f\"; break; done; "
+            "MUT=; for f in %s/*_parsed.mut %s/*_parsed.mutga; do MUT=\"$f\"; break; done; "
+            % (q(parent_out), q(parent_out)) +
             'if [ -z "$MUT" ]; then echo "No parsed mutations file found in '"'"' + str(parent_out) + '"'"'" >&2; exit 1; fi; '
             # Extract read ids with < max mutations
-            f"{awk} \"$MUT\" > {lst}; "
+            "%s \"$MUT\" > %s; " % (awk, q(lst)) +
             # Log how many ids were selected for easier debugging
-            f'echo "singlehit IDs: $(wc -l < {lst}) from $(basename \"$MUT\")"'
+            'echo "singlehit IDs: $(wc -l < %s) from $(basename \"$MUT\")"' % q(lst)
         )
         # 3) Filter with seqtk
         out_r1 = sample_dir / "derived_R1.fastq"
         out_r2 = sample_dir / "derived_R2.fastq"
         filter_cmd = (
-            f"seqtk subseq {parent_r1_remote} {lst} > {out_r1}\n"
-            f"seqtk subseq {parent_r2_remote} {lst} > {out_r2}"
+            "seqtk subseq %s %s > %s\n" % (q(parent_r1_remote), q(lst), q(out_r1)) +
+            "seqtk subseq %s %s > %s" % (q(parent_r2_remote), q(lst), q(out_r2))
         )
 
         # Summaries and nice headings
         sep = "################################################################################"
         count_parent_r1 = (
-            f"orig_lines=$( ( [[ '{parent_r1_remote}' == *.gz ]] && zcat '{parent_r1_remote}' || cat '{parent_r1_remote}' ) | wc -l ); orig_rec=$((orig_lines/4))"
+            "orig_lines=$( ( [[ %s == *.gz ]] && zcat %s || cat %s ) | wc -l ); orig_rec=$((orig_lines/4))"
+            % (q(parent_r1_remote), q(parent_r1_remote), q(parent_r1_remote))
         )
         count_parent_r2 = (
-            f"orig2_lines=$( ( [[ '{parent_r2_remote}' == *.gz ]] && zcat '{parent_r2_remote}' || cat '{parent_r2_remote}' ) | wc -l ); orig2_rec=$((orig2_lines/4))"
+            "orig2_lines=$( ( [[ %s == *.gz ]] && zcat %s || cat %s ) | wc -l ); orig2_rec=$((orig2_lines/4))"
+            % (q(parent_r2_remote), q(parent_r2_remote), q(parent_r2_remote))
         )
         count_derived = (
-            f"der1_rec=$(( $(wc -l < {out_r1}) / 4 )); der2_rec=$(( $(wc -l < {out_r2}) / 4 ))"
+            "der1_rec=$(( $(wc -l < %s) / 4 )); der2_rec=$(( $(wc -l < %s) / 4 ))"
+            % (q(out_r1), q(out_r2))
         )
 
         commands = [
@@ -176,7 +186,7 @@ class FilterSingleHitMaterializer(DerivedMaterializer):
             f"echo '{sep}'",
             parse_cmd,
             f"echo '[derive:{sample_name}] First 5 single-hit IDs:'",
-            f"head -n 5 {lst} || true",
+            "head -n 5 %s || true" % q(lst),
             filter_cmd,
             count_parent_r1,
             count_parent_r2,
@@ -187,11 +197,11 @@ class FilterSingleHitMaterializer(DerivedMaterializer):
             f"echo '{sep}'",
             f"echo '# 3 - Verify staged FASTQ (to be used)'",
             f"echo '{sep}'",
-            f"ls -lh {out_r1} {out_r2} || true",
+            "ls -lh %s %s || true" % (q(out_r1), q(out_r2)),
             f"echo '{sep}'",
             f"echo '# 4 - Verify created FASTA'",
             f"echo '{sep}'",
-            f"head -n 2 {target_fa_remote} || true",
+            "head -n 2 %s || true" % q(target_fa_remote),
         ]
         patterns = [str(parent_out / "*_parsed.mut*"), str(lst)]
         return out_r1, out_r2, commands, patterns

@@ -271,6 +271,74 @@ def retry(task_id: int = typer.Argument(..., min=1, help="Controller task ID."))
         conn.close()
 
 
+def _container_cli_context(config_path: Path, profile_name: Optional[str]):
+    from nerd.containers import container_requested, shapemapper_container_spec
+    from nerd.scheduler.profiles import load_executor_profile
+
+    cfg = load_config(config_path)
+    block = cfg.get("mut_count") or {}
+    if str(block.get("plugin", "")).lower() != "shapemapper":
+        raise ValueError("Container readiness currently applies to the ShapeMapper mutcount plugin.")
+    tool_cfg = block.get("tool") or {}
+    if not container_requested(tool_cfg):
+        raise ValueError("ShapeMapper is configured for native/custom execution; no container is required.")
+    return shapemapper_container_spec(tool_cfg), load_executor_profile(cfg, profile_name), tool_cfg
+
+
+def _show_readiness(result) -> None:
+    typer.echo("execution_host: %s" % result.execution_host)
+    typer.echo("executor: %s (%s)" % (result.profile, result.executor_type))
+    for check in result.checks:
+        typer.echo("%s  %s: %s" % ("OK" if check["ok"] else "NOT READY", check["name"], check["message"]))
+    typer.echo("ready: %s" % ("yes" if result.ready else "no"))
+
+
+@app.command()
+def doctor(
+    config_path: Path = typer.Argument(
+        ..., exists=True, file_okay=True, dir_okay=False, readable=True,
+        resolve_path=True, help="ShapeMapper run configuration file."
+    ),
+    profile: Optional[str] = typer.Option(None, "--profile", "-p", help="Executor profile to inspect."),
+):
+    """Check ShapeMapper container readiness on the selected execution host."""
+    from nerd.containers import inspect_container
+
+    try:
+        spec, executor_profile, tool_cfg = _container_cli_context(config_path, profile)
+        result = inspect_container(spec, executor_profile, tool_cfg)
+        _show_readiness(result)
+        if not result.ready:
+            raise typer.Exit(code=1)
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        typer.echo("Doctor failed: %s" % exc, err=True)
+        raise typer.Exit(code=1)
+
+
+@app.command("prepare-image")
+def prepare_image(
+    config_path: Path = typer.Argument(
+        ..., exists=True, file_okay=True, dir_okay=False, readable=True,
+        resolve_path=True, help="ShapeMapper run configuration file."
+    ),
+    profile: Optional[str] = typer.Option(None, "--profile", "-p", help="Executor profile to prepare."),
+):
+    """Prepare and smoke-test the immutable ShapeMapper SIF on its execution host."""
+    from nerd.containers import prepare_container
+
+    try:
+        spec, executor_profile, tool_cfg = _container_cli_context(config_path, profile)
+        result = prepare_container(spec, executor_profile, tool_cfg)
+        _show_readiness(result)
+        typer.echo("sif: %s" % result.sif_path)
+        typer.echo("sif_sha256: %s" % result.sif_checksum)
+    except Exception as exc:
+        typer.echo("Preparation failed: %s" % exc, err=True)
+        raise typer.Exit(code=1)
+
+
 @app.command()
 def ls(
     ctx: typer.Context,

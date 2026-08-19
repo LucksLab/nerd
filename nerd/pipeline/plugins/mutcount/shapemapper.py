@@ -17,11 +17,21 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Optional
 import glob
+import shlex
 
 from .base import MutCountPlugin
+from nerd.containers import render_container_exec, shapemapper_container_spec, RuntimeInfo
 
 
 class ShapeMapperPlugin(MutCountPlugin):
+    def __init__(self, bin_path: Optional[str] = None, version: Optional[str] = None,
+                 container_execution: Optional[Dict] = None):
+        super().__init__(bin_path=bin_path, version=version)
+        self.container_execution = container_execution
+
+    def container_spec(self, tool_cfg: Optional[Dict] = None):
+        return shapemapper_container_spec(tool_cfg)
+
     @staticmethod
     def default_binary() -> str:
         return "shapemapper"
@@ -65,7 +75,18 @@ class ShapeMapperPlugin(MutCountPlugin):
         if opts.get("output_parsed_mutations", False):
             parts.append("--output-parsed-mutations")
 
-        return " ".join(parts)
+        if self.container_execution:
+            info = self.container_execution
+            runtime = RuntimeInfo(**info["runtime"])
+            bind_paths = [str(info["workdir"])]
+            for path in (r1_path, r2_path, fasta_path, out_dir):
+                if path.is_absolute():
+                    bind_paths.append(str(path if path.is_dir() else path.parent))
+            parts[0] = str(info.get("executable") or "shapemapper")
+            return render_container_exec(
+                runtime, str(info["sif_path"]), parts, bind_paths, str(info["workdir"])
+            )
+        return shlex.join(str(item) for item in parts)
 
     def find_profile(self, out_dir: Path) -> Optional[Path]:
         # Files end with _profile.txt (or _profile.txtga when N7 is enabled)

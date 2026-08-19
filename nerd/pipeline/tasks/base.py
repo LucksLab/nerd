@@ -142,6 +142,18 @@ class Task(abc.ABC):
 
         # 3. Prepare inputs and parameters.
         inputs, params = self.prepare(cfg)
+        execution_provenance = None
+        if hasattr(self, "prepare_execution"):
+            from nerd.scheduler.profiles import load_executor_profile
+
+            execution_profile = load_executor_profile(cfg)
+            if hasattr(self, "validate_execution_config"):
+                self.validate_execution_config(inputs, execution_profile)
+            if execution_profile.executor_type != "local":
+                raise RuntimeError(
+                    "Containerized Slurm tasks must be launched with 'nerd submit'."
+                )
+            execution_provenance = self.prepare_execution(cfg, execution_profile, ctx, inputs)
         scope = self.resolve_scope(ctx, inputs)
         
         # 4. Record the start of the task in the database.
@@ -161,6 +173,13 @@ class Task(abc.ABC):
 
         # 5. Build the command to be executed.
         cmd = self.command(ctx, inputs, params)
+        if execution_provenance is not None:
+            from nerd.containers import write_provenance
+            from nerd.scheduler import store as scheduler_store
+
+            execution_provenance["command"] = cmd
+            write_provenance(run_dir / ".nerd-container-provenance.json", execution_provenance)
+            scheduler_store.record_container_provenance(ctx.db, task_id, execution_provenance)
         rc = 0
 
         # 6. Run the command using the appropriate runner.

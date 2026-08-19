@@ -5,6 +5,7 @@ nav:
   - Home: index.md
   - Guides:
       - Task Scheduling: guides/task-scheduling.md
+      - Containerized ShapeMapper: guides/shapemapper-containers.md
       - Create Samples: guides/sample-organization.md
       - NMR Kinetics: guides/nmr-kinetics.md
       - Modification Counting: guides/probe-mutcount.md
