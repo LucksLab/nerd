@@ -1,0 +1,316 @@
+diff --git a/shapemapper2-2.3/internals/bin/area_under_ROC_curve.py b/shapemapper2-2.3/internals/bin/area_under_ROC_curve.py
+--- a/shapemapper2-2.3/internals/bin/area_under_ROC_curve.py
++++ b/shapemapper2-2.3/internals/bin/area_under_ROC_curve.py
+@@ -6,7 +6,7 @@ import numpy as np
+ from sklearn.metrics import roc_curve, auc
+ 
+ def load_ct(filename):
+-    f = open(filename, "rU")
++    f = open(filename, "r")
+     f.readline()
+     paired = []
+     for line in f:
+@@ -21,7 +21,7 @@ def load_ct(filename):
+ 
+ 
+ def load_map(filename):
+-    f = open(filename, "rU")
++    f = open(filename, "r")
+     profile = []
+     for line in f:
+         s = line.strip().split()
+diff --git a/shapemapper2-2.3/internals/bin/compare_fasta.py b/shapemapper2-2.3/internals/bin/compare_fasta.py
+--- a/shapemapper2-2.3/internals/bin/compare_fasta.py
++++ b/shapemapper2-2.3/internals/bin/compare_fasta.py
+@@ -15,7 +15,7 @@ import traceback
+ 
+ 
+ def load_fasta(fastaname, rna=None, convert_to_rna=True):
+-    f = open(fastaname, "rU")
++    f = open(fastaname, "r")
+     seq = ""
+     rna_count = 0
+     in_selected_rna = False
+diff --git a/shapemapper2-2.3/internals/bin/deinterleave_fastq.py b/shapemapper2-2.3/internals/bin/deinterleave_fastq.py
+--- a/shapemapper2-2.3/internals/bin/deinterleave_fastq.py
++++ b/shapemapper2-2.3/internals/bin/deinterleave_fastq.py
+@@ -16,7 +16,7 @@ ap.add_argument('--R2-out', type=str)
+ # FIXME: combine with deinterleave_fastq_columns.py as a more general utility
+ 
+ def iterate_fastq(filename):
+-    f = open(filename, "rU")
++    f = open(filename, "r")
+     lines = []
+     for line in f:
+         # suppress jdb socket message
+diff --git a/shapemapper2-2.3/internals/bin/deinterleave_fastq_columns.py b/shapemapper2-2.3/internals/bin/deinterleave_fastq_columns.py
+--- a/shapemapper2-2.3/internals/bin/deinterleave_fastq_columns.py
++++ b/shapemapper2-2.3/internals/bin/deinterleave_fastq_columns.py
+@@ -4,7 +4,7 @@ import sys, os
+ # FIXME: rewrite in c++
+ 
+ def iterate_fastq(filename):
+-    f = open(filename, "rU")
++    f = open(filename, "r")
+     lines = []
+     for line in f:
+         # suppress jdb socket message
+@@ -16,7 +16,7 @@ def iterate_fastq(filename):
+             yield l
+             lines = []
+ 
+-input = open(sys.argv[1], 'rU')
++input = open(sys.argv[1], 'r')
+ r1_out = open(sys.argv[2], 'w')
+ r2_out = open(sys.argv[3], 'w')
+ unpaired_out = open(sys.argv[4], 'w')
+diff --git a/shapemapper2-2.3/internals/bin/get_sequence_lengths.py b/shapemapper2-2.3/internals/bin/get_sequence_lengths.py
+--- a/shapemapper2-2.3/internals/bin/get_sequence_lengths.py
++++ b/shapemapper2-2.3/internals/bin/get_sequence_lengths.py
+@@ -15,7 +15,7 @@ import argparse, sys, os
+ 
+ 
+ def get_lengths(filename):
+-    f = open(filename, "rU")
++    f = open(filename, "r")
+     lengths = []
+     for line in f:
+         if line[0] == ">":
+diff --git a/shapemapper2-2.3/internals/bin/interleave_fastq.py b/shapemapper2-2.3/internals/bin/interleave_fastq.py
+--- a/shapemapper2-2.3/internals/bin/interleave_fastq.py
++++ b/shapemapper2-2.3/internals/bin/interleave_fastq.py
+@@ -4,7 +4,7 @@ import sys, os
+ # FIXME: rewrite in c++
+ 
+ def iterate_fastq(filename):
+-    f = open(filename, "rU")
++    f = open(filename, "r")
+     lines = []
+     for line in f:
+         lines.append(line.strip())
+diff --git a/shapemapper2-2.3/internals/bin/make_reactivity_profiles.py b/shapemapper2-2.3/internals/bin/make_reactivity_profiles.py
+--- a/shapemapper2-2.3/internals/bin/make_reactivity_profiles.py
++++ b/shapemapper2-2.3/internals/bin/make_reactivity_profiles.py
+@@ -207,7 +207,7 @@ def write_tab_file(seq,
+             f.write("\n")
+ 
+ def load_fasta(fastaname, rna, convert_to_rna=True):
+-    f = open(fastaname, "rU")
++    f = open(fastaname, "r")
+     seq = ""
+     rna_count = 0
+     in_selected_rna = False
+@@ -239,7 +239,7 @@ def load_counts(filename):
+     if filename is None:
+         return None
+ 
+-    f = open(filename, "rU")
++    f = open(filename, "r")
+ 
+     # do one pass to determine array length
+     # TODO: might actually be faster to just resize array in memory and read in one pass
+diff --git a/shapemapper2-2.3/internals/bin/make_variant.py b/shapemapper2-2.3/internals/bin/make_variant.py
+--- a/shapemapper2-2.3/internals/bin/make_variant.py
++++ b/shapemapper2-2.3/internals/bin/make_variant.py
+@@ -40,7 +40,7 @@ len_err = RuntimeError(len_msg)
+ # TODO: move load_fasta(), load_depth() to their own file utility module, since
+ # they are used by both make_reactivity_profiles.py and make_variant.py
+ def load_fasta(fastaname, rna, convert_to_rna=True):
+-    f = open(fastaname, "rU")
++    f = open(fastaname, "r")
+     seq = ""
+     rna_count = 0
+     in_selected_rna = False
+@@ -205,7 +205,7 @@ def load_variants(variant_filepath,
+     assert isinstance(warningfreq, float)
+ 
+     # load depths in first pass
+-    f = open(variant_filepath, "rU")
++    f = open(variant_filepath, "r")
+     depths = []
+     for line in f:
+         try:
+diff --git a/shapemapper2-2.3/internals/bin/mix_sam.py b/shapemapper2-2.3/internals/bin/mix_sam.py
+--- a/shapemapper2-2.3/internals/bin/mix_sam.py
++++ b/shapemapper2-2.3/internals/bin/mix_sam.py
+@@ -32,8 +32,8 @@ def iterate_sam(f):
+         yield lines
+ 
+ o = open(sys.argv[3], "w")
+-f1 = open(sys.argv[1], "rU")
+-f2 = open(sys.argv[2], "rU")
++f1 = open(sys.argv[1], "r")
++f2 = open(sys.argv[2], "r")
+ 
+ for lines1, lines2 in zip_longest(iterate_sam(f1),
+                                   iterate_sam(f2)):
+diff --git a/shapemapper2-2.3/internals/bin/render_mapped_depths.py b/shapemapper2-2.3/internals/bin/render_mapped_depths.py
+--- a/shapemapper2-2.3/internals/bin/render_mapped_depths.py
++++ b/shapemapper2-2.3/internals/bin/render_mapped_depths.py
+@@ -128,7 +128,7 @@ def load_primers(filename):
+     if filename is None or filename == "":
+         return []
+ 
+-    f = open(filename, "rU")
++    f = open(filename, "r")
+     primers = []
+     i = 0
+     for line in f:
+@@ -159,7 +159,7 @@ class DataColumn:
+ 
+ 
+ def load_table(filename):
+-    f = open(filename, 'rU')
++    f = open(filename, 'r')
+     headers = f.readline().rstrip().split('\t')
+     seq = []
+     seq_index = headers.index("Sequence")
+diff --git a/shapemapper2-2.3/internals/bin/render_mutations_ps.py b/shapemapper2-2.3/internals/bin/render_mutations_ps.py
+--- a/shapemapper2-2.3/internals/bin/render_mutations_ps.py
++++ b/shapemapper2-2.3/internals/bin/render_mutations_ps.py
+@@ -162,7 +162,7 @@ def load_primers(filename):
+     if filename is None or filename == "":
+         return []
+ 
+-    f = open(filename, "rU")
++    f = open(filename, "r")
+     primers = []
+     for line in f:
+         if line[0] == '>' or len(line) < 1:
+@@ -956,7 +956,7 @@ def main():
+                  mustspan=p.must_span)
+     max_pages = p.max_pages
+     primers = load_primers(p.primers)
+-    input_file = open(p.input, 'rU')
++    input_file = open(p.input, 'r')
+     o = open(p.output, "w")
+ 
+     o.write(header())
+diff --git a/shapemapper2-2.3/internals/bin/split_by_target.py b/shapemapper2-2.3/internals/bin/split_by_target.py
+--- a/shapemapper2-2.3/internals/bin/split_by_target.py
++++ b/shapemapper2-2.3/internals/bin/split_by_target.py
+@@ -20,7 +20,7 @@ def split_sam(sam=None,
+               outs=None):
+     if len(outs) != len(names):
+         raise RuntimeError("Error: number of output files must match number of sequence target names.")
+-    f = open(sam, "rU")
++    f = open(sam, "r")
+     o = [open(x, "w") for x in outs]
+     for line in f:
+         # copy any headers/comment lines to all outputs
+diff --git a/shapemapper2-2.3/internals/bin/tab6_interleave.py b/shapemapper2-2.3/internals/bin/tab6_interleave.py
+--- a/shapemapper2-2.3/internals/bin/tab6_interleave.py
++++ b/shapemapper2-2.3/internals/bin/tab6_interleave.py
+@@ -11,7 +11,7 @@ ap.add_argument('--output', type=str)
+ # FIXME: rewrite in c++
+ 
+ def iterate_fastq(filename):
+-    f = open(filename, "rU")
++    f = open(filename, "r")
+     lines = []
+     for line in f:
+         # suppress jdb socket message
+diff --git a/shapemapper2-2.3/internals/python/pyshapemap/component.py b/shapemapper2-2.3/internals/python/pyshapemap/component.py
+--- a/shapemapper2-2.3/internals/python/pyshapemap/component.py
++++ b/shapemapper2-2.3/internals/python/pyshapemap/component.py
+@@ -324,7 +324,7 @@ class Component():
+             # FIXME: all these isinstances are hacky, should use a unified interface to access file/folder path, move logic to subclass defs
+             if isinstance(node, ParameterNode):
+                 # load parameter value from intermediate file
+-                values[node.get_name()] = open(node.input_node.filename,"rU").read().strip()
++                values[node.get_name()] = open(node.input_node.filename,"r").read().strip()
+             else:
+                 if isinstance(node.input_node, FileNode):
+                     values[node.get_name()] = '"'+node.input_node.filename+'"'
+@@ -483,14 +483,14 @@ class Component():
+ 
+     def read_stdout(self):
+         try:
+-            f = open(self.stdout.output_nodes[0].filename, 'rU')
++            f = open(self.stdout.output_nodes[0].filename, 'r')
+             return f.read()
+         except AttributeError:
+             return ""
+ 
+     def read_stderr(self):
+         try:
+-            f = open(self.stderr.output_nodes[0].filename, 'rU')
++            f = open(self.stderr.output_nodes[0].filename, 'r')
+             return f.read()
+         except AttributeError:
+             return ""
+diff --git a/shapemapper2-2.3/internals/python/pyshapemap/components.py b/shapemapper2-2.3/internals/python/pyshapemap/components.py
+--- a/shapemapper2-2.3/internals/python/pyshapemap/components.py
++++ b/shapemapper2-2.3/internals/python/pyshapemap/components.py
+@@ -625,7 +625,7 @@ class StarAligner(Component):
+         return cmd
+ 
+     def after_run_message(self):
+-        return open(os.path.join(self.logs.output_nodes[0].foldername, "Log.final.out"), "rU").read()
++        return open(os.path.join(self.logs.output_nodes[0].foldername, "Log.final.out"), "r").read()
+ 
+ 
+ class StarAlignerMixedInput(Component):
+diff --git a/shapemapper2-2.3/internals/python/pyshapemap/locate_primers.py b/shapemapper2-2.3/internals/python/pyshapemap/locate_primers.py
+--- a/shapemapper2-2.3/internals/python/pyshapemap/locate_primers.py
++++ b/shapemapper2-2.3/internals/python/pyshapemap/locate_primers.py
+@@ -58,7 +58,7 @@ def locate_primer_pairs(fastas,
+     current_RNA = "__ALL_TARGETS__"
+     if primer_filenames is not None:
+         for filename in primer_filenames:
+-            for line in open(filename, "rU"):
++            for line in open(filename, "r"):
+                 if line[0] == '>':
+                     current_RNA = sanitize(line[1:].rstrip())
+                 else:
+@@ -84,7 +84,7 @@ def locate_primer_pairs(fastas,
+ 
+     def iterate_fasta(filenames):
+         for filename in filenames:
+-            f = open(filename, "rU")
++            f = open(filename, "r")
+             name = None
+             seq = ""
+             for line in f:
+diff --git a/shapemapper2-2.3/internals/python/pyshapemap/util.py b/shapemapper2-2.3/internals/python/pyshapemap/util.py
+--- a/shapemapper2-2.3/internals/python/pyshapemap/util.py
++++ b/shapemapper2-2.3/internals/python/pyshapemap/util.py
+@@ -45,7 +45,7 @@ def timestamp():
+ def version():
+     this_dir = os.path.dirname(os.path.realpath(__file__))
+     release_dir = os.path.join(this_dir, "../../release")
+-    f = open(os.path.join(release_dir, "version.txt"), "rU")
++    f = open(os.path.join(release_dir, "version.txt"), "r")
+     return f.readline().strip()
+ 
+ 
+@@ -191,7 +191,7 @@ def read_fasta_names_lengths(fastas):
+     lowercase_error += "Please provide at least some unmasked sequence (uppercase characters) for each sequence."
+ 
+     for filename in fastas:
+-        f = open(filename, "rU")
++        f = open(filename, "r")
+         is_all_lower = False
+         for line in f:
+             if line[0] == '>':
+diff --git a/shapemapper2-2.3/util/scale_nuc.py b/shapemapper2-2.3/util/scale_nuc.py
+--- a/shapemapper2-2.3/util/scale_nuc.py
++++ b/shapemapper2-2.3/util/scale_nuc.py
+@@ -33,7 +33,7 @@ global_scale_factors = {
+ 
+ 
+ def load_scale_factors(filename):
+-    f = open(filename, "rU")
++    f = open(filename, "r")
+     nucs = "AUGC"
+     scale_factors = {}
+     for line in f:
+@@ -53,7 +53,7 @@ def load_map(filename):
+ 
+ 
+ def load_map(filename):
+-    f = open(filename, "rU")
++    f = open(filename, "r")
+     nums = []
+     seq = []
+     profile = []

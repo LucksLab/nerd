@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
-# Public candidate: compile the unchanged upstream v2.3 source tag and use
+# Public candidate: compile the checksum-pinned upstream v2.3 source tag with
+# one documented Python 3.11 file-mode compatibility patch, and use
 # source-traceable Debian packages for runtime dependencies.
 FROM --platform=linux/amd64 debian:bookworm-slim@sha256:362e64223cc0da95422b3b13c045186fc0a81250e765d31c025fbddf257f6143 AS build
 
@@ -18,6 +19,7 @@ RUN apt-get update \
         libboost-program-options-dev \
         libboost-system-dev \
         make \
+        patch \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -25,12 +27,16 @@ ADD --checksum=sha256:1c1fb1e6e03249715eedb822217c8c3b5d18a0d60724ca4d403d88f29f
     https://codeload.github.com/Weeks-UNC/shapemapper2/tar.gz/refs/tags/v2.3 \
     /tmp/shapemapper2-v2.3.tar.gz
 
+COPY patches/python311-open-mode.patch /tmp/python311-open-mode.patch
+
 RUN test "${SHAPEMAPPER_VERSION}" = "2.3" \
     && test "${SHAPEMAPPER_SOURCE_SHA256}" = "1c1fb1e6e03249715eedb822217c8c3b5d18a0d60724ca4d403d88f29f866b6f" \
     && test "${SHAPEMAPPER_SOURCE_URL}" = "https://codeload.github.com/Weeks-UNC/shapemapper2/tar.gz/refs/tags/v2.3" \
     && tar -xzf /tmp/shapemapper2-v2.3.tar.gz -C /opt \
     && mv /opt/shapemapper2-2.3 /opt/shapemapper2 \
     && rm /tmp/shapemapper2-v2.3.tar.gz \
+    && patch --batch --forward --strip=2 --directory=/opt/shapemapper2 < /tmp/python311-open-mode.patch \
+    && rm /tmp/python311-open-mode.patch \
     && cmake -S /opt/shapemapper2 -B /tmp/shapemapper-build -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /tmp/shapemapper-build --parallel 2
 
@@ -40,7 +46,7 @@ ARG SHAPEMAPPER_VERSION=2.3
 ARG SHAPEMAPPER_SOURCE_SHA256=1c1fb1e6e03249715eedb822217c8c3b5d18a0d60724ca4d403d88f29f866b6f
 
 LABEL org.opencontainers.image.title="NERD ShapeMapper2" \
-      org.opencontainers.image.description="ShapeMapper2 v2.3 built from the unchanged upstream source tag with Debian runtime packages" \
+      org.opencontainers.image.description="ShapeMapper2 v2.3 built from its checksum-pinned upstream source tag with a documented Python 3.11 compatibility patch" \
       org.opencontainers.image.source="https://github.com/LucksLab/nerd" \
       org.opencontainers.image.url="https://github.com/LucksLab/nerd" \
       org.opencontainers.image.version="2.3-r0-candidate" \

@@ -6,14 +6,17 @@ and the project owner gives explicit approval.
 
 ## Public candidate (`Dockerfile`)
 
-The public candidate compiles the unchanged upstream v2.3 source tag and uses
-Debian 12 packages. It excludes the official release archive's Miniconda
+The public candidate compiles the checksum-pinned upstream v2.3 source tag,
+after applying one documented Python 3.11 file-mode compatibility patch, and
+uses Debian 12 packages. It excludes the official release archive's Miniconda
 environment and old prebuilt third-party executables. That removes the exact
 Azul Zulu and historical Conda source gaps described later in this document.
 
 - [x] Pin the upstream ShapeMapper v2.3 source archive by SHA-256.
 - [x] Preserve the ShapeMapper MIT notice in the source tree and image.
-- [x] Compile without patching or vendoring the upstream repository.
+- [x] Apply only the documented `python311-open-mode.patch` (`rU` to `r` in
+  30 file-open calls across 18 files); do not change scientific logic or
+  vendor/fork the upstream repository.
 - [x] Use distribution packages for Bowtie2, STAR, BBMap/BBMerge, Graphviz,
   Ghostscript, pv, OpenJDK, Python, Boost, zlib, and transitive dependencies.
 - [x] Preserve Debian package copyright records under

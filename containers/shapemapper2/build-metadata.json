@@ -9,9 +9,17 @@
   },
   "public_candidate": {
     "recipe": "Dockerfile",
-    "strategy": "compile unchanged upstream source; install Debian runtime packages",
+    "strategy": "compile checksum-pinned upstream source with a documented Python 3.11 file-mode compatibility patch; install Debian runtime packages",
     "upstream_source_url": "https://codeload.github.com/Weeks-UNC/shapemapper2/tar.gz/refs/tags/v2.3",
     "upstream_source_sha256": "1c1fb1e6e03249715eedb822217c8c3b5d18a0d60724ca4d403d88f29f866b6f",
+    "compatibility_patch": {
+      "path": "patches/python311-open-mode.patch",
+      "sha256": "30746f44ed4756b208f010784c09be813481f83353231bc18aee4a7532d3663f",
+      "change": "replace removed Python rU file mode with equivalent r mode",
+      "occurrences": 30,
+      "files": 18,
+      "scientific_logic_changed": false
+    },
     "local_build_2026_08_18": {
       "image_tag": "nerd-shapemapper2:2.3-public-candidate",
       "image_size_bytes": 508942308,

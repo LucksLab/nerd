@@ -1,12 +1,14 @@
 # ShapeMapper2 v2.3 container
 
-This directory contains two Linux-amd64 container recipes for the unmodified
-upstream ShapeMapper2 v2.3 code. Neither recipe forks ShapeMapper, and neither
-image is currently published to GHCR.
+This directory contains two Linux-amd64 container recipes based on upstream
+ShapeMapper2 v2.3. Neither recipe forks ShapeMapper, and neither image is
+currently published to GHCR.
 
 - `Dockerfile` is the smaller public candidate. It downloads the upstream v2.3
-  source tag directly, verifies its SHA-256, compiles ShapeMapper, and uses
-  Debian packages for runtime dependencies.
+  source tag directly, verifies its SHA-256, applies the documented
+  `patches/python311-open-mode.patch`, compiles ShapeMapper, and uses Debian
+  packages for runtime dependencies. The patch replaces Python's removed
+  `rU` file mode with equivalent `r` mode; it changes no scientific logic.
 - `Dockerfile.reference` is the private reference recipe. It wraps the official
   upstream release archive, including its historical Miniconda environment.
   This image remains useful as a behavioral comparison but is not the public
@@ -42,9 +44,9 @@ docker build --platform linux/amd64 \
 ```
 
 Both recipes pin the amd64 Debian base manifest. The public candidate pins the
-upstream source-tag archive; the private reference recipe pins the official
-release asset. No ShapeMapper source files are copied into this repository or
-patched during either build.
+upstream source-tag archive and carries one small, auditable compatibility
+patch rather than a ShapeMapper fork; the private reference recipe pins the
+official release asset and does not patch it.
 
 ## Test levels
 
@@ -90,13 +92,17 @@ failure-injection miss while rejecting any normal execution failure.
 ### Smaller public candidate result
 
 On 2026-08-18, the source-based candidate compiled successfully from the
-unchanged upstream v2.3 source archive. Its local amd64 image size was
+checksum-pinned upstream v2.3 source archive. Its local amd64 image size was
 508,942,308 bytes (about 485 MiB), approximately 75% smaller than the private
 reference image. A second low-memory build also compiled successfully with the
 recipe's two-job compiler limit and installed the full Debian runtime. Runtime
 and built-in test validation is pending because the host ran out of disk space
 during final layer assembly, leaving both local container stores unavailable.
 This is an infrastructure failure, not a ShapeMapper compile or test failure.
+A subsequent GitHub Actions smoke test exposed Python 3.11's removal of the
+legacy `rU` open mode. The documented compatibility patch fixes all 30 such
+uses across 18 upstream Python files; final runtime validation is pending the
+CI rerun.
 
 ## Publication gate
 

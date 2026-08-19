@@ -1,9 +1,12 @@
 # Third-party notices for the source-built public candidate
 
-This image compiles the unchanged ShapeMapper2 v2.3 source tag and installs
-runtime dependencies as Debian 12 (bookworm) packages. It does not contain the
-official ShapeMapper release archive's bundled Miniconda environment or its
-historical prebuilt executables.
+This image compiles the checksum-pinned ShapeMapper2 v2.3 source tag after
+applying `patches/python311-open-mode.patch`. That patch replaces Python's
+removed `rU` file mode with equivalent `r` mode in 30 file-open calls and
+changes no scientific logic. The image installs runtime dependencies as
+Debian 12 (bookworm) packages. It does not contain the official ShapeMapper
+release archive's bundled Miniconda environment or historical prebuilt
+executables.
 
 ShapeMapper2 is Copyright (c) 2018 Steven Busan and is distributed under the
 MIT License. The complete notice is installed beside this file and remains in

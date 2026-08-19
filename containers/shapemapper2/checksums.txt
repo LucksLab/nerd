@@ -8,3 +8,6 @@ c3f14fdd782266522b377b1c22986b98cf9949164ec3f4d582fbe65da5e53ec6  shapemapper2-2
 # ShapeMapper2 v2.3 source-tag archive used by the public candidate:
 # https://codeload.github.com/Weeks-UNC/shapemapper2/tar.gz/refs/tags/v2.3
 1c1fb1e6e03249715eedb822217c8c3b5d18a0d60724ca4d403d88f29f866b6f  shapemapper2-v2.3-source.tar.gz
+
+# Auditable Python 3.11 file-mode compatibility patch applied by Dockerfile
+30746f44ed4756b208f010784c09be813481f83353231bc18aee4a7532d3663f  patches/python311-open-mode.patch
