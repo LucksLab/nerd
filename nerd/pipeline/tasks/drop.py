@@ -197,6 +197,20 @@ class DropTask(Task):
         missing_path = run_dir / "samples_not_found.txt"
         missing_path.write_text("\n".join(missing) + ("\n" if missing else ""), encoding="utf-8")
         log.info("Listed %d samples not found in %s", len(missing), missing_path)
+        already_set = len(found) - changed_count
+        return {
+            "counts": {
+                "attempted": len(sample_names), "succeeded": len(found),
+                "failed": 0, "skipped": len(missing), "requested": len(sample_names),
+                "found": len(found), "changed": changed_count, "already_set": already_set,
+                "missing": len(missing), "reset": len(undropped_changed),
+            },
+            "metrics": {"replacement_mode": True, "target_to_drop": drop_flag},
+            "artifacts": [
+                {"kind": "drop_summary", "path": str(summary_path)},
+                {"kind": "missing_samples", "path": str(missing_path)},
+            ],
+        }
 
     def resolve_scope(self, ctx: Optional[TaskContext], inputs: Any) -> TaskScope:
         if isinstance(inputs, dict):

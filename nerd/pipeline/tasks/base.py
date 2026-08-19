@@ -5,6 +5,8 @@ Defines the abstract base class for tasks and the context for their execution.
 
 import abc
 import sqlite3
+import time
+from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Tuple, Dict, Any, Optional, List
@@ -14,6 +16,7 @@ from nerd.utils.paths import make_run_dir, update_latest_symlink, get_command_lo
 from nerd.utils.hashing import config_hash
 from nerd.db import api as db_api
 from nerd.pipeline.runners.local import LocalRunner
+from nerd.reporting.summary import ArtifactReference, TaskSummary
 
 
 @dataclass
@@ -70,6 +73,8 @@ class Task(abc.ABC):
         Orchestrates the full lifecycle of a task execution.
         """
         log = get_logger(__name__)
+        total_started = time.monotonic()
+        started_at = datetime.now().isoformat()
         output_dir = cfg.get("run", {}).get("output_dir", "nerd_output")
         label = cfg.get("run", {}).get("label")
         if not label:
@@ -92,13 +97,25 @@ class Task(abc.ABC):
         if existing is not None and not force_rerun:
             # Record a cached task to make the skip visible in DB, then return
             msg = f"Identical config (cfg={cfg_hash_short}) previously completed as task_id={existing['id']} — skipping."
-            db_api.record_cached_task(
+            cached_task_id = db_api.record_cached_task(
                 db_conn, self.name, cached_scope.kind, cached_scope.scope_id, cfg.get("run", {}).get("backend", "local"),
                 output_dir, label, cache_key_full, msg,
                 tool=self.task_tool(inputs=None), tool_version=self.task_tool_version(inputs=None)
             )
             log.info("%s", msg)
-            return
+            ended_at = datetime.now().isoformat()
+            return TaskSummary(
+                status="cached", workflow=self.name, task_id=cached_task_id,
+                source_task_id=int(existing["id"]), label=label,
+                plugin=self.task_tool(inputs=None), version=self.task_tool_version(inputs=None),
+                started_at=started_at, ended_at=ended_at,
+                duration_seconds=round(time.monotonic() - total_started, 6),
+                timings={"preparation_seconds": 0.0, "execution_seconds": 0.0,
+                         "collection_seconds": 0.0},
+                counts={"attempted": 0, "succeeded": 0, "failed": 0, "skipped": 1},
+                database_path=self._database_path(db_conn),
+                next_actions=["nerd task show %s" % existing["id"]],
+            )
 
         # 1. Create a unique directory for this run.
         run_dir = make_run_dir(label_path, self.name, suffix=f"__cfg-{cfg_hash_short}")
@@ -141,6 +158,7 @@ class Task(abc.ABC):
         )
 
         # 3. Prepare inputs and parameters.
+        prepare_started = time.monotonic()
         inputs, params = self.prepare(cfg)
         execution_provenance = None
         if hasattr(self, "prepare_execution"):
@@ -155,6 +173,7 @@ class Task(abc.ABC):
                 )
             execution_provenance = self.prepare_execution(cfg, execution_profile, ctx, inputs)
         scope = self.resolve_scope(ctx, inputs)
+        preparation_seconds = time.monotonic() - prepare_started
         
         # 4. Record the start of the task in the database.
         task_id = db_api.begin_task(
@@ -181,6 +200,7 @@ class Task(abc.ABC):
             write_provenance(run_dir / ".nerd-container-provenance.json", execution_provenance)
             scheduler_store.record_container_provenance(ctx.db, task_id, execution_provenance)
         rc = 0
+        execution_started = time.monotonic()
 
         # 6. Run the command using the appropriate runner.
         if cmd:
@@ -282,6 +302,7 @@ class Task(abc.ABC):
 
             # Record the attempt.
             db_api.attempt(ctx.db, task_id, 1, cmd, {}, get_command_log_path(run_dir))
+        execution_seconds = time.monotonic() - execution_started
         
         # 7. Check the result and update the task status.
         if rc != 0:
@@ -292,7 +313,9 @@ class Task(abc.ABC):
         # 8. Consume the outputs of the task.
         log.info("Command completed successfully. Consuming outputs.")
         try:
-            self.consume_outputs(ctx, inputs, params, run_dir, task_id=task_id)
+            collection_started = time.monotonic()
+            result = self.consume_outputs(ctx, inputs, params, run_dir, task_id=task_id)
+            collection_seconds = time.monotonic() - collection_started
         except Exception as exc:
             db_api.finish_task(
                 ctx.db,
@@ -309,6 +332,63 @@ class Task(abc.ABC):
 
         # 10. Update the 'latest' symlink to point to this run.
         update_latest_symlink(label_path, self.name, run_dir)
+        ended_at = datetime.now().isoformat()
+        return self.build_summary(
+            ctx, inputs, params, result, task_id=task_id, run_dir=run_dir,
+            status="completed", started_at=started_at, ended_at=ended_at,
+            timings={
+                "preparation_seconds": round(preparation_seconds, 6),
+                "execution_seconds": round(execution_seconds, 6),
+                "collection_seconds": round(collection_seconds, 6),
+            },
+            duration_seconds=round(time.monotonic() - total_started, 6),
+        )
+
+    @staticmethod
+    def _database_path(conn: sqlite3.Connection) -> Optional[str]:
+        try:
+            return str(Path(conn.execute("PRAGMA database_list").fetchone()[2]).resolve())
+        except Exception:
+            return None
+
+    def build_summary(
+        self, ctx: TaskContext, inputs: Any, params: Any, result: Any, *,
+        task_id: int, run_dir: Path, status: str, started_at: Optional[str] = None,
+        ended_at: Optional[str] = None,
+        timings: Optional[Dict[str, Optional[float]]] = None,
+        duration_seconds: Optional[float] = None,
+    ) -> TaskSummary:
+        """Build an evidence-backed summary from a task's optional result mapping."""
+        details = dict(result) if isinstance(result, dict) else {}
+        counts = dict(details.pop("counts", {}) or {})
+        counts.setdefault("attempted", 1)
+        counts.setdefault("succeeded", 1 if status == "completed" else 0)
+        counts.setdefault("failed", 0)
+        counts.setdefault("skipped", 0)
+        if status == "completed" and counts.get("failed", 0) > 0:
+            status = "partial_success" if counts.get("succeeded", 0) > 0 else "failed"
+        command_log = get_command_log_path(run_dir)
+        artifacts = [
+            ArtifactReference("output_directory", str(run_dir), exists=run_dir.exists()),
+            ArtifactReference("command_log", str(command_log), exists=command_log.exists()),
+        ]
+        for item in details.pop("artifacts", []) or []:
+            artifacts.append(item if isinstance(item, ArtifactReference) else ArtifactReference(**item))
+        plugin = details.pop("plugin", None) or self.task_tool(inputs)
+        engine = details.pop("engine", None)
+        version = details.pop("version", None) or self.task_tool_version(inputs)
+        return TaskSummary(
+            status=status, workflow=self.name, task_id=task_id, label=ctx.label,
+            plugin=plugin, engine=engine, version=version,
+            started_at=started_at, ended_at=ended_at,
+            duration_seconds=duration_seconds, timings=timings or {}, counts=counts,
+            metrics=dict(details.pop("metrics", {}) or {}),
+            warnings=list(details.pop("warnings", []) or []),
+            failures=list(details.pop("failures", []) or []), artifacts=artifacts,
+            log_path=str(command_log),
+            database_path=self._database_path(ctx.db),
+            next_actions=["nerd task show %s" % task_id],
+        )
 
     def scope_id(self, ctx: Optional[TaskContext], inputs: Any) -> Optional[int]:
         """Determines the primary ID for the task's scope (e.g., a sample ID)."""

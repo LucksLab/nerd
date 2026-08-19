@@ -167,7 +167,9 @@ def get_attempt(conn: sqlite3.Connection, scheduler_attempt_id: int) -> sqlite3.
                sa.started_at AS scheduler_started_at,
                sa.finished_at AS scheduler_finished_at, sa.collected_at,
                sa.job_spec_json, sa.config_path, t.task_name, t.state AS task_state,
-               t.label, t.output_dir, t.message AS task_message
+               t.label, t.output_dir, t.message AS task_message,
+               t.started_at AS task_started_at, t.ended_at AS task_ended_at,
+               t.tool, t.tool_version
         FROM core_scheduler_attempts sa
         JOIN core_task_attempts a ON a.id=sa.attempt_id
         JOIN core_tasks t ON t.id=a.task_id

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import enum
+import json
 from pathlib import Path
+import re
+import time
 from typing import Callable, Optional
 
 import typer
@@ -15,6 +18,10 @@ from nerd.project import ContextResolutionError, ProjectContext
 from nerd.utils.config import load_config
 from nerd.utils.hashing import config_hash
 from nerd.utils.logging import get_logger, setup_logger
+from nerd.reporting.summary import (
+    ArtifactReference, TaskIssue, TaskSummary, render_human, render_json,
+    summary_exit_code,
+)
 
 
 app = typer.Typer(
@@ -49,6 +56,8 @@ class ContainerPlugin(str, enum.Enum):
 def main_callback(
     ctx: typer.Context,
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable DEBUG logging."),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress informational progress."),
+    no_color: bool = typer.Option(False, "--no-color", help="Disable colored logging output."),
     db: Optional[Path] = typer.Option(None, "--db", help="SQLite database path."),
     project: Optional[Path] = typer.Option(None, "--project", help="Project directory containing nerd.sqlite."),
     log_file: Optional[Path] = typer.Option(None, "--log-file", help="Write NERD logs to this file."),
@@ -57,15 +66,41 @@ def main_callback(
     ctx.obj = {
         "project_context": ProjectContext(db=db, project=project),
         "verbose": verbose,
-        "log_file": log_file,
+        "log_file": log_file, "quiet": quiet, "no_color": no_color,
     }
-    setup_logger(logfile=log_file, verbose=verbose)
+    setup_logger(logfile=log_file, verbose=verbose, quiet=quiet, no_color=no_color)
 
 
 def _invocation_context(ctx: Optional[typer.Context]) -> dict:
     if ctx is not None and isinstance(ctx.obj, dict):
         return ctx.obj
-    return {"project_context": ProjectContext(), "verbose": False, "log_file": None}
+    return {"project_context": ProjectContext(), "verbose": False, "log_file": None,
+            "quiet": False, "no_color": False}
+
+
+def _emit_summary(summary: TaskSummary, json_output: bool = False) -> None:
+    typer.echo(render_json(summary) if json_output else render_human(summary), nl=False)
+
+
+def _set_json_logging(ctx: typer.Context) -> None:
+    invocation = _invocation_context(ctx)
+    setup_logger(logfile=invocation.get("log_file"), verbose=invocation.get("verbose", False),
+                 quiet=invocation.get("quiet", False), no_color=invocation.get("no_color", False),
+                 json_mode=True)
+
+
+def _failure_summary(workflow: str, exc: BaseException, *, started: float,
+                     database_path: Optional[str] = None) -> TaskSummary:
+    duration = round(time.monotonic() - started, 6)
+    ended_at = datetime.now()
+    return TaskSummary(
+        status="failed", workflow=workflow,
+        started_at=(ended_at - timedelta(seconds=duration)).isoformat(),
+        ended_at=ended_at.isoformat(), duration_seconds=duration,
+        counts={"attempted": 1, "succeeded": 0, "failed": 1, "skipped": 0},
+        failures=[TaskIssue("execution_failed", str(exc))],
+        database_path=database_path,
+    )
 
 
 def _command_context(ctx: typer.Context, db: Optional[Path], project: Optional[Path]) -> ProjectContext:
@@ -110,6 +145,70 @@ def _next_actions(row) -> list[str]:
     return actions
 
 
+def _seconds_between(start, end) -> Optional[float]:
+    if not start or not end:
+        return None
+    try:
+        return round((datetime.fromisoformat(str(end)) - datetime.fromisoformat(str(start))).total_seconds(), 6)
+    except (TypeError, ValueError):
+        return None
+
+
+def _scheduler_summary(row, database_path: Optional[str] = None) -> TaskSummary:
+    attempt_state = str(row["scheduler_state"])
+    task_state = str(row["task_state"])
+    statuses = {
+        "completed": "completed", "cached": "cached", "failed": "failed",
+        "cancelled": "cancelled", "submitted": "submitted", "running": "running",
+        "awaiting_collection": "awaiting_collection", "pending": "queued",
+    }
+    status = statuses.get(task_state, task_state)
+    task_message = _row_value(row, "task_message")
+    error = row["error"] or task_message
+    source_task_id = None
+    if status == "cached" and error:
+        match = re.search(r"task_id=(\d+)", str(error))
+        source_task_id = int(match.group(1)) if match else None
+    submitted = _row_value(row, "submitted_at") or _row_value(row, "task_started_at")
+    started = _row_value(row, "scheduler_started_at")
+    finished = _row_value(row, "scheduler_finished_at")
+    collected = _row_value(row, "collected_at") or _row_value(row, "task_ended_at")
+    metrics = {
+        "attempt": int(row["try_index"]),
+        "attempt_state": attempt_state,
+        "executor": row["executor_profile"],
+        "executor_type": _row_value(row, "executor_type"),
+        "scheduler_id": row["scheduler_id"],
+        "exit_code": row["exit_code"],
+        "message": task_message,
+    }
+    timings = {
+        "queue_seconds": _seconds_between(submitted, started),
+        "execution_seconds": _seconds_between(started, finished),
+        "collection_seconds": _seconds_between(finished, collected),
+    }
+    artifacts = []
+    output_dir = _row_value(row, "output_dir")
+    if output_dir:
+        from nerd.reporting.summary import ArtifactReference
+        artifacts.append(ArtifactReference("output_directory", str(output_dir)))
+    return TaskSummary(
+        status=status, workflow=str(row["task_name"]), task_id=int(row["task_id"]),
+        source_task_id=source_task_id,
+        label=_row_value(row, "label"), plugin=_row_value(row, "tool"),
+        version=_row_value(row, "tool_version"), started_at=started or submitted,
+        ended_at=collected or finished, duration_seconds=_seconds_between(submitted, collected or finished),
+        timings=timings,
+        counts={"attempted": 1, "succeeded": 1 if status == "completed" else 0,
+                "failed": 1 if status in {"failed", "cancelled"} else 0, "skipped": 0},
+        metrics=metrics,
+        failures=([TaskIssue("scheduler_error", str(error))]
+                  if error and status in {"failed", "cancelled"} else []),
+        artifacts=artifacts, log_path=_row_value(row, "log_path"),
+        database_path=database_path, next_actions=_next_actions(row),
+    )
+
+
 def _show_scheduler_row(row, *, detailed: bool = False) -> None:
     """Render stable human fields available before Phase 3's output contract."""
     typer.echo("task_id: %s" % row["task_id"])
@@ -152,16 +251,27 @@ def _show_scheduler_row(row, *, detailed: bool = False) -> None:
 def _submit_handler(
     ctx: typer.Context, workflow: RunStep, config_path: Path,
     profile: Optional[str], db: Optional[Path], project: Optional[Path],
+    json_output: bool = False,
 ) -> None:
     from nerd.scheduler.service import submit_task
 
     conn = None
     try:
+        if json_output:
+            _set_json_logging(ctx)
         conn = _scheduler_connection(config_path, context=_command_context(ctx, db, project))
-        _show_scheduler_row(submit_task(conn, workflow.value, config_path, profile))
+        row = submit_task(conn, workflow.value, config_path, profile)
+        db_path = str(Path(conn.execute("PRAGMA database_list").fetchone()[2]).resolve())
+        if json_output:
+            _emit_summary(_scheduler_summary(row, db_path), True)
+        else:
+            _show_scheduler_row(row)
     except Exception as exc:
         get_logger(__name__).exception("Task submission failed: %s", exc)
-        typer.echo("Submission failed: %s" % exc, err=True)
+        if json_output:
+            _emit_summary(_failure_summary(workflow.value, exc, started=time.monotonic()), True)
+        else:
+            typer.echo("Submission failed: %s" % exc, err=True)
         raise typer.Exit(code=1)
     finally:
         if conn is not None:
@@ -170,10 +280,12 @@ def _submit_handler(
 
 def _run_sync(
     ctx: typer.Context, workflow: RunStep, config_path: Path,
-    db: Optional[Path], project: Optional[Path],
+    db: Optional[Path], project: Optional[Path], json_output: bool = False,
 ) -> None:
     log = get_logger(__name__)
+    started = time.monotonic()
     conn = None
+    selected_log = _invocation_context(ctx).get("log_file")
     try:
         cfg = load_config(config_path)
         output_dir = Path(cfg.get("run", {}).get("output_dir", "."))
@@ -183,18 +295,37 @@ def _run_sync(
             dt_str = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
             log_dir = output_dir / "run_logs"
             log_dir.mkdir(parents=True, exist_ok=True)
+            selected_log = log_dir / ("%s__cfg-%s.log" % (dt_str, config_hash(cfg)))
             setup_logger(
-                logfile=log_dir / ("%s__cfg-%s.log" % (dt_str, config_hash(cfg))),
+                logfile=selected_log,
                 verbose=invocation.get("verbose", False),
+                quiet=invocation.get("quiet", False), no_color=invocation.get("no_color", False),
+                json_mode=json_output,
             )
         conn = db_api.connect(db_path)
         db_api.init_schema(conn)
         task_class = TASK_REGISTRY.get(workflow.value)
         if task_class is None:
             raise ValueError("Task '%s' is not available in this build." % workflow.value)
-        task_class().exec(conn, cfg, verbose=invocation["verbose"])
-    except Exception as exc:
+        summary = task_class().exec(conn, cfg, verbose=invocation["verbose"])
+        # Third-party/legacy Task implementations may still return None.
+        if summary is not None:
+            if selected_log is not None:
+                summary.log_path = str(selected_log)
+            _emit_summary(summary, json_output)
+            code = summary_exit_code(summary)
+            if code:
+                raise typer.Exit(code=code)
+    except typer.Exit:
+        raise
+    except (Exception, SystemExit) as exc:
         log.exception("Failed to execute task '%s': %s", workflow.value, exc)
+        if json_output:
+            db_path_value = None
+            if conn is not None:
+                db_path_value = str(Path(conn.execute("PRAGMA database_list").fetchone()[2]).resolve())
+            _emit_summary(_failure_summary(workflow.value, exc, started=started,
+                                           database_path=db_path_value), True)
         raise typer.Exit(code=1)
     finally:
         if conn is not None:
@@ -213,15 +344,16 @@ def run(
     profile: Optional[str] = typer.Option(None, "--profile", "-p", help="Executor profile used with --detach."),
     db: Optional[Path] = typer.Option(None, "--db", help="SQLite database for this run."),
     project: Optional[Path] = typer.Option(None, "--project", help="Project directory."),
+    json_output: bool = typer.Option(False, "--json", help="Write only the JSON result to stdout."),
 ):
     """Run a scientific workflow synchronously or submit it with --detach."""
     if profile and not detach:
         typer.echo("--profile is only supported with --detach.", err=True)
         raise typer.Exit(code=2)
     if detach:
-        _submit_handler(ctx, workflow, config_path, profile, db, project)
+        _submit_handler(ctx, workflow, config_path, profile, db, project, json_output)
     else:
-        _run_sync(ctx, workflow, config_path, db, project)
+        _run_sync(ctx, workflow, config_path, db, project, json_output)
 
 
 def _open_existing(ctx, db: Optional[Path], project: Optional[Path], failure: str):
@@ -234,13 +366,24 @@ def _open_existing(ctx, db: Optional[Path], project: Optional[Path], failure: st
 
 def _action_handler(
     ctx: typer.Context, task_id: int, db: Optional[Path], project: Optional[Path],
-    action: Callable, failure: str, *, detailed: bool = False,
+    action: Callable, failure: str, *, detailed: bool = False, json_output: bool = False,
 ) -> None:
+    if json_output:
+        _set_json_logging(ctx)
     conn = _open_existing(ctx, db, project, failure)
     try:
-        _show_scheduler_row(action(conn, task_id), detailed=detailed)
+        row = action(conn, task_id)
+        if json_output:
+            db_path = str(Path(conn.execute("PRAGMA database_list").fetchone()[2]).resolve())
+            _emit_summary(_scheduler_summary(row, db_path), True)
+        else:
+            _show_scheduler_row(row, detailed=detailed)
     except Exception as exc:
-        typer.echo("%s failed: %s" % (failure, exc), err=True)
+        if json_output:
+            _emit_summary(_failure_summary("task_%s" % failure.lower(), exc,
+                                           started=time.monotonic()), True)
+        else:
+            typer.echo("%s failed: %s" % (failure, exc), err=True)
         raise typer.Exit(code=1)
     finally:
         conn.close()
@@ -264,16 +407,30 @@ def _logs_handler(
 
 def _list_handler(
     ctx: typer.Context, label: Optional[str], state: Optional[str], workflow: Optional[RunStep],
-    limit: int, db: Optional[Path], project: Optional[Path],
+    limit: int, db: Optional[Path], project: Optional[Path], json_output: bool = False,
 ) -> None:
     from nerd.scheduler import store
 
+    if json_output:
+        _set_json_logging(ctx)
     conn = _open_existing(ctx, db, project, "List")
     try:
         rows = store.list_tasks(
             conn, label=label, state=state,
             task_name=workflow.value if workflow else None, limit=limit,
         )
+        if json_output:
+            payload = {
+                "schema_version": "1.0",
+                "tasks": [{
+                    "task_id": row["id"], "workflow": row["task_name"], "label": row["label"],
+                    "status": row["state"], "attempt": row["try_index"],
+                    "executor": row["executor_profile"], "scheduler_id": row["scheduler_id"],
+                    "started_at": row["started_at"], "ended_at": row["ended_at"],
+                } for row in rows],
+            }
+            typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+            return
         if not rows:
             typer.echo("No tasks found.")
             return
@@ -296,9 +453,10 @@ def task_list(
     limit: int = typer.Option(50, "--limit", min=1, help="Maximum tasks to show."),
     db: Optional[Path] = typer.Option(None, "--db", help="Existing controller database."),
     project: Optional[Path] = typer.Option(None, "--project", help="Project directory."),
+    json_output: bool = typer.Option(False, "--json", help="Write only JSON to stdout."),
 ):
     """List durable tasks, newest first."""
-    _list_handler(ctx, label, state, workflow, limit, db, project)
+    _list_handler(ctx, label, state, workflow, limit, db, project, json_output)
 
 
 @task_app.command("show")
@@ -307,10 +465,12 @@ def task_show(
     task_id: int = typer.Argument(..., min=1, help="Durable task ID."),
     db: Optional[Path] = typer.Option(None, "--db", help="Existing controller database."),
     project: Optional[Path] = typer.Option(None, "--project", help="Project directory."),
+    json_output: bool = typer.Option(False, "--json", help="Write only JSON to stdout."),
 ):
     """Reconcile and show task, attempt, executor, path, and next-action details."""
     from nerd.scheduler.service import reconcile
-    _action_handler(ctx, task_id, db, project, reconcile, "Show", detailed=True)
+    _action_handler(ctx, task_id, db, project, reconcile, "Show", detailed=True,
+                    json_output=json_output)
 
 
 @task_app.command("logs")
@@ -333,13 +493,15 @@ def task_wait(
     poll_interval: float = typer.Option(1.0, "--poll-interval", min=0.05, help="Seconds between checks."),
     db: Optional[Path] = typer.Option(None, "--db", help="Existing controller database."),
     project: Optional[Path] = typer.Option(None, "--project", help="Project directory."),
+    json_output: bool = typer.Option(False, "--json", help="Write only JSON to stdout."),
 ):
     """Wait for scheduling to finish; optionally collect successful output."""
     from nerd.scheduler.service import wait_for_task
     action = lambda conn, task_id: wait_for_task(
         conn, task_id, collect=collect, poll_interval=poll_interval
     )
-    _action_handler(ctx, task_id, db, project, action, "Wait", detailed=True)
+    _action_handler(ctx, task_id, db, project, action, "Wait", detailed=True,
+                    json_output=json_output)
 
 
 def _lifecycle_command(name: str, action_name: str, help_text: str):
@@ -348,9 +510,11 @@ def _lifecycle_command(name: str, action_name: str, help_text: str):
         task_id: int = typer.Argument(..., min=1, help="Durable task ID."),
         db: Optional[Path] = typer.Option(None, "--db", help="Existing controller database."),
         project: Optional[Path] = typer.Option(None, "--project", help="Project directory."),
+        json_output: bool = typer.Option(False, "--json", help="Write only JSON to stdout."),
     ):
         from nerd.scheduler import service
-        _action_handler(ctx, task_id, db, project, getattr(service, action_name), name.title())
+        _action_handler(ctx, task_id, db, project, getattr(service, action_name), name.title(),
+                        json_output=json_output)
 
     command.__name__ = "task_%s" % name
     command.__doc__ = help_text
@@ -387,31 +551,66 @@ def _show_readiness(result) -> None:
     typer.echo("ready: %s" % ("yes" if result.ready else "no"))
 
 
-def _inspect_shapemapper(config_path: Path, profile: Optional[str]) -> None:
+def _readiness_summary(result, spec, workflow: str) -> TaskSummary:
+    passed = sum(1 for check in result.checks if check["ok"])
+    failures = [TaskIssue("container_" + str(check["name"]), str(check["message"]))
+                for check in result.checks if not check["ok"]]
+    runtime = result.runtime
+    return TaskSummary(
+        status="success" if result.ready else "failed", workflow=workflow,
+        engine=runtime.command if runtime else None,
+        version=runtime.version if runtime else None,
+        counts={"attempted": len(result.checks), "succeeded": passed,
+                "failed": len(result.checks) - passed, "skipped": 0,
+                "checks_total": len(result.checks), "checks_passed": passed},
+        metrics={"execution_host": result.execution_host, "architecture": result.architecture,
+                 "executor": result.profile, "executor_type": result.executor_type,
+                 "oci_reference": spec.oci_reference, "image_digest": spec.digest,
+                 "sif_checksum": result.sif_checksum},
+        failures=failures,
+        artifacts=([ArtifactReference("sif", str(result.sif_path), exists=True)]
+                   if result.sif_path else []),
+        next_actions=(["nerd image prepare shapemapper CONFIG"] if not result.ready else []),
+    )
+
+
+def _inspect_shapemapper(config_path: Path, profile: Optional[str], json_output: bool = False) -> None:
     from nerd.containers import inspect_container
     try:
         spec, executor_profile, tool_cfg = _container_cli_context(config_path, profile)
         result = inspect_container(spec, executor_profile, tool_cfg)
-        _show_readiness(result)
+        if json_output:
+            _emit_summary(_readiness_summary(result, spec, "container_inspect"), True)
+        else:
+            _show_readiness(result)
         if not result.ready:
             raise typer.Exit(code=1)
     except typer.Exit:
         raise
     except Exception as exc:
-        typer.echo("Inspection failed: %s" % exc, err=True)
+        if json_output:
+            _emit_summary(_failure_summary("container_inspect", exc, started=time.monotonic()), True)
+        else:
+            typer.echo("Inspection failed: %s" % exc, err=True)
         raise typer.Exit(code=1)
 
 
-def _prepare_shapemapper(config_path: Path, profile: Optional[str]) -> None:
+def _prepare_shapemapper(config_path: Path, profile: Optional[str], json_output: bool = False) -> None:
     from nerd.containers import prepare_container
     try:
         spec, executor_profile, tool_cfg = _container_cli_context(config_path, profile)
         result = prepare_container(spec, executor_profile, tool_cfg)
-        _show_readiness(result)
-        typer.echo("sif: %s" % result.sif_path)
-        typer.echo("sif_sha256: %s" % result.sif_checksum)
+        if json_output:
+            _emit_summary(_readiness_summary(result, spec, "container_prepare"), True)
+        else:
+            _show_readiness(result)
+            typer.echo("sif: %s" % result.sif_path)
+            typer.echo("sif_sha256: %s" % result.sif_checksum)
     except Exception as exc:
-        typer.echo("Preparation failed: %s" % exc, err=True)
+        if json_output:
+            _emit_summary(_failure_summary("container_prepare", exc, started=time.monotonic()), True)
+        else:
+            typer.echo("Preparation failed: %s" % exc, err=True)
         raise typer.Exit(code=1)
 
 
@@ -422,9 +621,10 @@ def plugin_doctor_shapemapper(
         resolve_path=True, help="ShapeMapper run configuration file."
     ),
     profile: Optional[str] = typer.Option(None, "--profile", "-p", help="Executor profile."),
+    json_output: bool = typer.Option(False, "--json", help="Write only JSON to stdout."),
 ):
     """Check ShapeMapper runtime and immutable-image readiness."""
-    _inspect_shapemapper(config_path, profile)
+    _inspect_shapemapper(config_path, profile, json_output)
 
 
 @image_app.command("inspect")
@@ -435,9 +635,10 @@ def image_inspect(
         resolve_path=True, help="Plugin run configuration file."
     ),
     profile: Optional[str] = typer.Option(None, "--profile", "-p", help="Executor profile."),
+    json_output: bool = typer.Option(False, "--json", help="Write only JSON to stdout."),
 ):
     """Inspect an immutable plugin image without preparing it."""
-    _inspect_shapemapper(config_path, profile)
+    _inspect_shapemapper(config_path, profile, json_output)
 
 
 @image_app.command("prepare")
@@ -448,9 +649,10 @@ def image_prepare(
         resolve_path=True, help="Plugin run configuration file."
     ),
     profile: Optional[str] = typer.Option(None, "--profile", "-p", help="Executor profile."),
+    json_output: bool = typer.Option(False, "--json", help="Write only JSON to stdout."),
 ):
     """Prepare and smoke-test an immutable plugin image."""
-    _prepare_shapemapper(config_path, profile)
+    _prepare_shapemapper(config_path, profile, json_output)
 
 
 def _resolved_existing_database(ctx: typer.Context, db: Optional[Path], project: Optional[Path]) -> Path:

@@ -6,9 +6,12 @@ This module provides centralized logging configuration for the nerd application.
 import logging
 from pathlib import Path
 from typing import Optional
+from rich.console import Console
 from rich.logging import RichHandler
 
-def setup_logger(logfile: Optional[Path] = None, verbose: bool = False) -> logging.Logger:
+def setup_logger(logfile: Optional[Path] = None, verbose: bool = False,
+                 quiet: bool = False, no_color: bool = False,
+                 json_mode: bool = False) -> logging.Logger:
     """
     Configures the root logger for the 'nerd' application and returns it.
 
@@ -23,7 +26,7 @@ def setup_logger(logfile: Optional[Path] = None, verbose: bool = False) -> loggi
     Returns:
         The configured 'nerd' root logger instance.
     """
-    level = logging.DEBUG if verbose else logging.INFO
+    level = logging.WARNING if quiet else (logging.DEBUG if verbose else logging.INFO)
     
     # Get the root logger for the application namespace
     log = logging.getLogger("nerd")
@@ -39,11 +42,16 @@ def setup_logger(logfile: Optional[Path] = None, verbose: bool = False) -> loggi
     # --- Console Handler ---
     # Always add a rich handler for beautiful console output
     console_handler = RichHandler(
+        console=Console(stderr=True, no_color=no_color),
         rich_tracebacks=True,
         show_path=False,
         log_time_format="[%X]"
     )
-    console_handler.setLevel(level)
+    # JSON commands reserve stdout for the document. In normal terminals this
+    # handler writes stderr; suppressing it in JSON mode also keeps older Click
+    # test runners (which merge both streams) machine-readable. File logs remain
+    # complete at the requested verbosity.
+    console_handler.setLevel(logging.CRITICAL + 1 if json_mode else level)
     log.addHandler(console_handler)
 
     # --- File Handler ---

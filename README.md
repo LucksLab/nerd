@@ -57,6 +57,21 @@ nerd task logs TASK_ID --db results/nerd.sqlite
 nerd task wait TASK_ID --collect --db results/nerd.sqlite
 ```
 
+All scientific runs and task lifecycle views can emit a stable machine-readable
+summary. JSON is the only standard-output content in this mode, so it can be
+piped directly to other tools:
+
+```bash
+nerd run mut_count path/to/config.yaml --json > summary.json
+nerd task show TASK_ID --db results/nerd.sqlite --json
+nerd task list --db results/nerd.sqlite --json
+```
+
+The human completion summary includes status, evidence-backed counts and
+metrics, elapsed time, artifacts, logs, and next actions. See the
+[output and JSON contract](docs/cli/output-contract.md) for the v1.0 schema and
+nullable-field guarantees.
+
 `run --detach` returns after the local process or Slurm job has been accepted. Slurm
 jobs are not tied to the controller or SSH session. See the
 [task scheduling guide](docs/guides/task-scheduling.md) for executor profiles,

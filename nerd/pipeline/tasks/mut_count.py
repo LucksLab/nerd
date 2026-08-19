@@ -750,6 +750,8 @@ class MutCountTask(Task):
 
         found_profiles = 0
         ingested_runs = 0
+        nucleotide_values_ingested = 0
+        histogram_count = 0
 
         for name in sample_names:
             sample_dir = artifacts_dir / name
@@ -959,6 +961,7 @@ class MutCountTask(Task):
                     continue
 
                 db_api.bulk_insert_fmod_vals(ctx.db, records)
+                nucleotide_values_ingested += len(records)
                 log.info("Inserted %d probe_fmod_values records for %s (%s).", len(records), name, valtype)
                 existing_valtypes.add(valtype)
                 inserted_for_sample = True
@@ -973,6 +976,7 @@ class MutCountTask(Task):
                     except Exception:
                         pass
                     log.info("Wrote per-read histogram for %s (%s) to %s", name, "Modified", hist_path)
+                    histogram_count += 1
                 ga_hist = histograms.get("GAmodrate")
                 if ga_hist:
                     hist_ga_path = sample_dir / "per_read_histogram.txtga"
@@ -982,6 +986,7 @@ class MutCountTask(Task):
                     except Exception:
                         pass
                     log.info("Wrote per-read histogram for %s (%s) to %s", name, "GA", hist_ga_path)
+                    histogram_count += 1
 
             if log_path and log_path.exists():
                 try:
@@ -1033,6 +1038,19 @@ class MutCountTask(Task):
                 "Scientific validation failed: results were ingested for %d/%d samples."
                 % (ingested_runs, len(sample_names))
             )
+        return {
+            "plugin": str(plugin_name),
+            "counts": {
+                "attempted": len(sample_names), "succeeded": ingested_runs,
+                "failed": len(sample_names) - ingested_runs, "skipped": 0,
+                "samples_requested": len(sample_names), "samples_completed": ingested_runs,
+                "profiles_found": found_profiles, "profiles_missing": len(sample_names) - found_profiles,
+                "runs_ingested": ingested_runs, "nucleotide_values_ingested": nucleotide_values_ingested,
+                "sequence_mismatches": 0, "histograms": histogram_count,
+            },
+            "metrics": {"failed_sample_names": []},
+            "artifacts": [{"kind": "artifacts_directory", "path": str(artifacts_dir)}],
+        }
 
     def _find_shapemapper_log(self, run_dir: Path, sample_dir: Path, sample_name: str) -> Optional[Path]:
         candidates = [

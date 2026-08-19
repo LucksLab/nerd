@@ -176,6 +176,43 @@ class TempgradFitTask(Task):
             entries.extend(self._entries_from_mapping(series.metadata or {}, prefix="meta:"))
             entries.extend(self._entries_from_mapping(result.metadata or {}, prefix="request:"))
             db_api.record_tempgrad_fit_params(ctx.db, fit_run_id=fit_run_id, entries=entries)
+        fitted = len(result.series_results)
+        points_supplied = sum(len(series.x_values) for series in series_list)
+        accepted_values = []
+        excluded_values = []
+        quality: Dict[str, List[float]] = {"r2": [], "chisq": [], "rmse": []}
+        for item in result.series_results:
+            for key in ("r2", "chisq", "rmse"):
+                value = item.diagnostics.get(key)
+                if isinstance(value, (int, float)):
+                    quality[key].append(float(value))
+            for key in ("points_accepted", "n_accepted", "n_points"):
+                value = item.diagnostics.get(key)
+                if isinstance(value, (int, float)):
+                    accepted_values.append(int(value))
+                    break
+            for key in ("points_excluded", "n_excluded"):
+                value = item.diagnostics.get(key)
+                if isinstance(value, (int, float)):
+                    excluded_values.append(int(value))
+                    break
+        result_counts = {
+            "attempted": len(series_list), "succeeded": fitted,
+            "failed": max(0, len(series_list) - fitted), "skipped": 0,
+            "series_attempted": len(series_list), "series_fitted": fitted,
+            "series_failed": max(0, len(series_list) - fitted),
+            "points_supplied": points_supplied,
+        }
+        if accepted_values:
+            result_counts["points_accepted"] = sum(accepted_values)
+        if excluded_values:
+            result_counts["points_excluded"] = sum(excluded_values)
+        return {
+            "engine": result.engine, "version": result.engine_version,
+            "counts": result_counts,
+            "metrics": {"mode": inputs["mode"], "fit_quality": quality},
+            "artifacts": [{"kind": "fit_result", "path": str(run_dir / "results" / "tempgrad_result.json")}],
+        }
 
     # ------------------------------------------------------------------
     # Helpers

@@ -791,4 +791,20 @@ class CreateTask(Task):
             raise
 
         # Pure-Python ingestion; no external command required.
-        return None
+        counts: Dict[str, int] = {"unresolved_references": 0}
+        names = {"meta_constructs": "constructs", "meta_buffers": "buffers",
+                 "sequencing_runs": "sequencing_runs", "samples": "samples"}
+        for section, public_name in names.items():
+            entries = created_log.get(section, [])
+            counts[public_name + "_created"] = sum(1 for item in entries if item.get("status") == "created")
+            counts[public_name + "_updated"] = sum(1 for item in entries if item.get("status") == "updated")
+            counts[public_name + "_unchanged"] = 0
+            counts[public_name + "_failed"] = 0
+        processed = sum(len(v) for v in created_log.values()) + len(derived_data)
+        # The current helper does not distinguish inserted from updated derived samples.
+        counts["derived_samples_processed"] = len(derived_data)
+        counts.update({"attempted": processed, "succeeded": processed, "failed": 0, "skipped": 0})
+        return {"counts": counts, "artifacts": [
+            {"kind": "ingest_json", "path": str(run_dir / "created_objects.json")},
+            {"kind": "ingest_log", "path": str(run_dir / "created_objects.log")},
+        ]}

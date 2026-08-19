@@ -54,10 +54,51 @@ class NmrKineticFitTask(Task):
         params: Dict[str, Any],
         run_dir: Path,
         task_id: Optional[int] = None,
-    ) -> None:
+    ) -> Dict[str, Any]:
         self._delegate(str(inputs["fit_type"])).consume_outputs(
             ctx, inputs, params, run_dir, task_id=task_id
         )
+        rows = ctx.db.execute(
+            "SELECT id, plugin, status FROM nmr_fit_runs WHERE task_id=? ORDER BY id",
+            (task_id,),
+        ).fetchall() if task_id is not None else []
+        completed = sum(1 for row in rows if row["status"] == "completed")
+        failed = sum(1 for row in rows if row["status"] == "failed")
+        fit_ids = [int(row["id"]) for row in rows]
+        r2_values = []
+        chisq_values = []
+        if fit_ids:
+            placeholders = ",".join("?" for _ in fit_ids)
+            for row in ctx.db.execute(
+                "SELECT param_name, param_numeric FROM nmr_fit_params "
+                "WHERE fit_run_id IN (%s) AND param_name IN ('r2','chisq')" % placeholders,
+                fit_ids,
+            ).fetchall():
+                if row["param_name"] == "r2" and row["param_numeric"] is not None:
+                    r2_values.append(float(row["param_numeric"]))
+                if row["param_name"] == "chisq" and row["param_numeric"] is not None:
+                    chisq_values.append(float(row["param_numeric"]))
+        attempted = len(rows)
+        plugin = str(inputs.get("plugin") or (rows[0]["plugin"] if rows else "")) or None
+        def _quality_summary(values):
+            if not values:
+                return None
+            return {"count": len(values), "min": min(values),
+                    "mean": sum(values) / len(values), "max": max(values)}
+        return {
+            "plugin": plugin,
+            "counts": {"attempted": attempted, "succeeded": completed, "failed": failed,
+                       "skipped": max(0, attempted - completed - failed),
+                       "reactions_attempted": attempted, "reactions_succeeded": completed,
+                       "reactions_failed": failed,
+                       "reactions_skipped": max(0, attempted - completed - failed),
+                       "convergence_failures": failed, "missing_trace_failures": 0},
+            "metrics": {"fit_type": inputs["fit_type"],
+                        "fit_success_rate": (completed / attempted if attempted else None),
+                        "r2_summary": _quality_summary(r2_values),
+                        "chisq_summary": _quality_summary(chisq_values)},
+            "artifacts": [{"kind": "results_directory", "path": str(run_dir / "results")}],
+        }
 
     def resolve_scope(
         self, ctx: Optional[TaskContext], inputs: Any

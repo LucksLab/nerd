@@ -252,6 +252,13 @@ class ProbeTimecourseTask(Task):
             )
 
         engine = load_timecourse_engine(engine_name, **dict(engine_options_template))
+        groups_succeeded = 0
+        groups_skipped = 0
+        nucleotides_attempted = 0
+        rounds_succeeded = 0
+        rounds_skipped = 0
+        round_statuses: Dict[str, int] = {}
+        engine_version: Optional[str] = None
 
         arrhenius_target = engine_options_template.get("initialize_kdeg_arrhenius")
         arrhenius_fit = None
@@ -291,7 +298,10 @@ class ProbeTimecourseTask(Task):
 
             if not all_series:
                 log.warning("No series loaded for rg_id=%s across valtypes %s; skipping.", rg_id, valtypes)
+                groups_skipped += 1
+                rounds_skipped += len(rounds)
                 continue
+            nucleotides_attempted += len(all_series)
 
             selected_site_bases = sorted(
                 {
@@ -337,6 +347,7 @@ class ProbeTimecourseTask(Task):
                 options=options_for_rg,
             )
             result = engine.run(request)
+            engine_version = result.engine_version
             if result.rounds:
                 normalized_requested = {str(r).strip().lower() for r in (inputs.get("rounds") or [])}
                 filtered_rounds = [
@@ -363,6 +374,14 @@ class ProbeTimecourseTask(Task):
             result.metadata = result_meta
 
             self._write_result_artifact(results_dir, rg_id, result)
+            groups_succeeded += 1
+            for round_result in result.rounds:
+                state = str(round_result.status).lower()
+                round_statuses[state] = round_statuses.get(state, 0) + 1
+                if state in {"completed", "success", "succeeded", "ok"}:
+                    rounds_succeeded += 1
+                else:
+                    rounds_skipped += 1
             if task_id is not None:
                 self._persist_result(
                     ctx.db,
@@ -370,6 +389,24 @@ class ProbeTimecourseTask(Task):
                     model=engine_name,
                     overwrite=overwrite,
                 )
+        requested_rounds = len(inputs["rg_ids"]) * len(rounds)
+        return {
+            "engine": engine_name, "version": engine_version,
+            "counts": {
+                "attempted": len(inputs["rg_ids"]), "succeeded": groups_succeeded,
+                "failed": 0, "skipped": groups_skipped,
+                "reaction_groups": len(inputs["rg_ids"]),
+                "nucleotides": nucleotides_attempted,
+                "rounds_attempted": requested_rounds,
+                "rounds_succeeded": rounds_succeeded,
+                "rounds_skipped": rounds_skipped,
+                "outliers_applied": int(outlier_report["applied"]),
+                "outliers_unmatched": len(outlier_report["missing"]),
+                "engine_failures": 0,
+            },
+            "metrics": {"per_round_status": round_statuses},
+            "artifacts": [{"kind": "results_directory", "path": str(results_dir)}],
+        }
 
     def _fetch_arrhenius_fit(self, conn, target_label: str) -> Dict[str, Any]:
         rows = conn.execute(

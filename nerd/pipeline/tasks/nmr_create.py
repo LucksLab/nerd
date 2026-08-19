@@ -83,8 +83,12 @@ class NmrCreateTask(Task):
         label_dir = Path(ctx.output_dir) / ctx.label
         roots = search_roots(label_dir, inputs.get("search_roots") or [])
 
+        created = 0
+        updated = 0
+        traces_registered = 0
         for reaction in inputs.get("reactions", []):
             record, trace_map = self._build_reaction_payload(ctx, reaction)
+            existing_id = db_api.get_nmr_reaction_id_by_dir(ctx.db, record["kinetic_data_dir"])
             reaction_id = db_api.upsert_nmr_reaction(ctx.db, record)
             if reaction_id is None:
                 raise RuntimeError(f"Failed to insert/update NMR reaction '{record['kinetic_data_dir']}'.")
@@ -102,6 +106,19 @@ class NmrCreateTask(Task):
                     task_id=task_id,
                 )
                 log.info("Registered trace '%s' for reaction_id=%s (%s)", role, reaction_id, resolved)
+                traces_registered += 1
+            if existing_id is None:
+                created += 1
+            else:
+                updated += 1
+        expected = sum(len((reaction.get("trace_files") or {})) for reaction in inputs.get("reactions", []))
+        total = len(inputs.get("reactions", []))
+        return {"counts": {
+            "attempted": total, "succeeded": total, "failed": 0, "skipped": 0,
+            "reactions_imported": created, "reactions_updated": updated,
+            "traces_expected": expected, "traces_registered": traces_registered,
+            "traces_missing": expected - traces_registered,
+        }}
 
     def resolve_scope(self, ctx: Optional[TaskContext], inputs: Any) -> TaskScope:
         if ctx is None or not isinstance(inputs, dict):

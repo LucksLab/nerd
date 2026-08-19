@@ -153,10 +153,24 @@ def submit_task(
             conn, run["label"], configured_output_dir, cache_key
         )
     if existing is not None and not force:
-        raise ValueError(
-            "Identical configuration already completed as task %s; set force_run to submit again."
-            % existing["id"]
+        message = "Identical configuration previously completed as task_id=%s; skipping." % existing["id"]
+        cached_id = db_api.record_cached_task(
+            conn, task.name, task.scope_kind, None, profile.name, output_dir,
+            str(run["label"]), cache_key, message,
+            tool=task.task_tool(None), tool_version=task.task_tool_version(None),
         )
+        if cached_id is None:
+            raise RuntimeError("Could not persist cached task result.")
+        cached_dir = Path(output_dir) / str(run["label"]) / task.name / "cached"
+        spec = JobSpec(command="", workdir=cached_dir,
+                       controller_cwd=str(getattr(cfg, "base_dir", Path.cwd())))
+        row = store.create_attempt(conn, cached_id, "controller", "controller", spec, config_path)
+        store.transition_attempt(
+            conn, int(row["scheduler_attempt_id"]), AttemptState.COMPLETED,
+            handle=JobHandle("cache"), status=JobStatus(AttemptState.COMPLETED, exit_code=0),
+            collected=True,
+        )
+        return store.get_attempt(conn, int(row["scheduler_attempt_id"]))
     inputs, params = task.prepare(cfg)
     if hasattr(task, "validate_execution_config"):
         task.validate_execution_config(inputs, profile)

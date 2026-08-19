@@ -38,6 +38,7 @@ nerd run probe_timecourse demo_folder/05_probe_tc_kinetics/configs/probe_tc.yaml
   - [NMR kinetics workflow](guides/nmr-kinetics.md)
   - [Temperature-gradient fitting](guides/tempgrad-fit.md)
 - **CLI Reference**: `nerd run …`
+  - [Output and JSON contract](cli/output-contract.md)
   - [create](cli/create.md)
   - [mut_count](cli/mut_count.md)
   - [nmr_create](cli/nmr_create.md)
