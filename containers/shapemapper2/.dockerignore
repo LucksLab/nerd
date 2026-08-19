@@ -1,0 +1,10 @@
+**
+!Dockerfile
+!Dockerfile.reference
+!LICENSES/
+!LICENSES/**
+!THIRD_PARTY_NOTICES.md
+!PUBLIC_THIRD_PARTY_NOTICES.md
+!source-manifest.tsv
+!conda-packages.tsv
+!copyleft-conda-packages.tsv

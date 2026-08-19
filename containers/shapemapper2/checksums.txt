@@ -1,0 +1,10 @@
+# ShapeMapper2 v2.3 release asset downloaded from:
+# https://github.com/Weeks-UNC/shapemapper2/releases/download/v2.3/shapemapper2-2.3.tar.gz
+c3f14fdd782266522b377b1c22986b98cf9949164ec3f4d582fbe65da5e53ec6  shapemapper2-2.3.tar.gz
+
+# linux/amd64 manifest for docker.io/library/debian:bookworm-slim
+362e64223cc0da95422b3b13c045186fc0a81250e765d31c025fbddf257f6143  debian-bookworm-slim-linux-amd64.oci-manifest
+
+# ShapeMapper2 v2.3 source-tag archive used by the public candidate:
+# https://codeload.github.com/Weeks-UNC/shapemapper2/tar.gz/refs/tags/v2.3
+1c1fb1e6e03249715eedb822217c8c3b5d18a0d60724ca4d403d88f29f866b6f  shapemapper2-v2.3-source.tar.gz
