@@ -2,7 +2,6 @@ run:
   output_dir: demo_folder
   label: 01_create_samples
   backend: local
-
 nmr_create:
   # Relative paths below are resolved against the label directory; these entries
   # step back to the repository's test_data folder.

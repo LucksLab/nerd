@@ -9,7 +9,7 @@ tempgrad_fit:
   data_source: nmr
   overwrite: true
   metadata:
-    description: "Arrhenius test on NMR degradation rates"
+    description: "Arrhenius fit on NMR degradation rates"
 
   filters:
     reaction_type: deg
