@@ -25,7 +25,8 @@ Azul Zulu and historical Conda source gaps described later in this document.
   values or scientific logic.
 - [x] Use distribution packages for Bowtie2, STAR, BBMap/BBMerge and its
   separately packaged JNI library, Graphviz, Ghostscript, pv, OpenJDK, Python,
-  Boost, zlib, and transitive dependencies.
+  Debian's Python-to-Python-3 command compatibility link, Boost, zlib, and
+  transitive dependencies.
 - [x] Preserve Debian package copyright records under
   `/usr/share/doc/<package>/copyright`.
 - [x] Add `PUBLIC_THIRD_PARTY_NOTICES.md` as an index to those records.

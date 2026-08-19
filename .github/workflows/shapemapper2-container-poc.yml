@@ -51,7 +51,7 @@ jobs:
             "${LOCAL_IMAGE}" \
             -c '
               set -e
-              for tool in bbmerge.sh bowtie2 bowtie2-build STAR dot gs pv; do
+              for tool in bbmerge.sh bowtie2 bowtie2-build STAR dot gs pv python python3; do
                 command -v "${tool}"
               done
               dpkg-query -W bbmap-jni
