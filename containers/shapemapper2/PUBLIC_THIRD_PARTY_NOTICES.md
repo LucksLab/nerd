@@ -1,9 +1,11 @@
 # Third-party notices for the source-built public candidate
 
 This image compiles the checksum-pinned ShapeMapper2 v2.3 source tag after
-applying `patches/python311-open-mode.patch`. That patch replaces Python's
-removed `rU` file mode with equivalent `r` mode in 30 file-open calls and
-changes no scientific logic. The image installs runtime dependencies as
+applying the two documented files under `patches/`. One replaces Python's
+removed `rU` file mode with equivalent `r` mode in 30 file-open calls. The
+other identifies BBMerge's standard-input stream as FASTQ for Debian's newer
+BBMap. Neither changes scientific logic or analysis parameters. The image
+installs runtime dependencies as
 Debian 12 (bookworm) packages. It does not contain the official ShapeMapper
 release archive's bundled Miniconda environment or historical prebuilt
 executables.

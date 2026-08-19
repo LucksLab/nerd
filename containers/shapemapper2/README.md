@@ -5,10 +5,12 @@ ShapeMapper2 v2.3. Neither recipe forks ShapeMapper, and neither image is
 currently published to GHCR.
 
 - `Dockerfile` is the smaller public candidate. It downloads the upstream v2.3
-  source tag directly, verifies its SHA-256, applies the documented
-  `patches/python311-open-mode.patch`, compiles ShapeMapper, and uses Debian
-  packages for runtime dependencies. The patch replaces Python's removed
-  `rU` file mode with equivalent `r` mode; it changes no scientific logic.
+  source tag directly, verifies its SHA-256, applies the two documented files
+  under `patches/`, compiles ShapeMapper, and uses Debian packages for runtime
+  dependencies. One patch replaces Python's removed `rU` file mode with
+  equivalent `r` mode. The other identifies BBMerge's standard-input stream as
+  FASTQ for Debian's newer BBMap. Neither changes scientific logic or analysis
+  settings.
 - `Dockerfile.reference` is the private reference recipe. It wraps the official
   upstream release archive, including its historical Miniconda environment.
   This image remains useful as a behavioral comparison but is not the public
@@ -45,7 +47,7 @@ docker build --platform linux/amd64 \
 
 Both recipes pin the amd64 Debian base manifest. The public candidate pins the
 upstream source-tag archive and carries one small, auditable compatibility
-patch rather than a ShapeMapper fork; the private reference recipe pins the
+patch set rather than a ShapeMapper fork; the private reference recipe pins the
 official release asset and does not patch it.
 
 ## Test levels
@@ -99,10 +101,10 @@ recipe's two-job compiler limit and installed the full Debian runtime. Runtime
 and built-in test validation is pending because the host ran out of disk space
 during final layer assembly, leaving both local container stores unavailable.
 This is an infrastructure failure, not a ShapeMapper compile or test failure.
-A subsequent GitHub Actions smoke test exposed Python 3.11's removal of the
-legacy `rU` open mode. The documented compatibility patch fixes all 30 such
-uses across 18 upstream Python files; final runtime validation is pending the
-CI rerun.
+Subsequent GitHub Actions smoke tests exposed Python 3.11's removal of the
+legacy `rU` open mode and BBMap 39.01's need for an explicit FASTQ suffix when
+reading interleaved pairs from standard input. The two documented compatibility
+patches address those runtime-interface changes; final validation is pending.
 
 ## Publication gate
 

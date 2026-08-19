@@ -20,6 +20,13 @@
       "files": 18,
       "scientific_logic_changed": false
     },
+    "bbmerge_stream_patch": {
+      "path": "patches/bbmerge-stdin-format.patch",
+      "sha256": "6ed6a5de862df74f1b4b45a219963a1e9ed6cd2b3709a6c81a5fc30f5245345e",
+      "change": "identify BBMerge standard input as FASTQ for Debian BBMap 39.01",
+      "analysis_parameters_changed": false,
+      "scientific_logic_changed": false
+    },
     "local_build_2026_08_18": {
       "image_tag": "nerd-shapemapper2:2.3-public-candidate",
       "image_size_bytes": 508942308,
