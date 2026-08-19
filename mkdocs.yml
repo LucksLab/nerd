@@ -4,6 +4,7 @@ repo_name: nerd
 nav:
   - Home: index.md
   - Guides:
+      - Task Scheduling: guides/task-scheduling.md
       - Create Samples: guides/sample-organization.md
       - NMR Kinetics: guides/nmr-kinetics.md
       - Modification Counting: guides/probe-mutcount.md

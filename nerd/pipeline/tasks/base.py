@@ -168,6 +168,17 @@ class Task(abc.ABC):
             backend = str(ctx.backend).lower()
             log.info("Starting command (backend=%s) in %s", backend or "local", run_dir)
             log.debug("Executing command: %s", cmd)
+            if backend in {"slurm", "remote_slurm"}:
+                db_api.finish_task(
+                    ctx.db,
+                    task_id,
+                    "failed",
+                    "Blocking Slurm execution is no longer supported; use 'nerd submit'.",
+                )
+                raise RuntimeError(
+                    "Slurm tasks must be launched with 'nerd submit' so their job ID and "
+                    "attempt state survive controller disconnection."
+                )
             # Select runner based on backend
             if backend in {"slurm", "remote_slurm", "ssh", "login", "remote_login", "remote"}:
                 try:

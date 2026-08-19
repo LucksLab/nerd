@@ -384,6 +384,43 @@ CREATE TABLE IF NOT EXISTS core_task_scope_members (
 );
 """
 
+CREATE_CORE_SCHEDULER_ATTEMPTS = """
+CREATE TABLE IF NOT EXISTS core_scheduler_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempt_id INTEGER NOT NULL UNIQUE,
+    executor_profile TEXT NOT NULL,
+    executor_type TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending',
+    scheduler_id TEXT,
+    remote_workdir TEXT,
+    log_path TEXT,
+    exit_code INTEGER,
+    signal TEXT,
+    error TEXT,
+    submitted_at TEXT,
+    started_at TEXT,
+    finished_at TEXT,
+    collected_at TEXT,
+    job_spec_json TEXT NOT NULL,
+    config_path TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(attempt_id) REFERENCES core_task_attempts(id) ON DELETE CASCADE
+);
+"""
+
+CREATE_CORE_STATE_TRANSITIONS = """
+CREATE TABLE IF NOT EXISTS core_state_transitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_kind TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    from_state TEXT,
+    to_state TEXT NOT NULL,
+    message TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
 # ---------------------------------------------------------------------------
 # Indexes
 # ---------------------------------------------------------------------------
@@ -406,6 +443,14 @@ CREATE INDEX IF NOT EXISTS idx_core_artifacts_task ON core_artifacts (task_id, k
 
 CREATE_INDEX_CORE_TASK_SCOPE_MEMBERS = """
 CREATE INDEX IF NOT EXISTS idx_core_task_scope_members_task ON core_task_scope_members (task_id);
+"""
+
+CREATE_INDEX_CORE_SCHEDULER_STATE = """
+CREATE INDEX IF NOT EXISTS idx_core_scheduler_attempts_state ON core_scheduler_attempts (state, attempt_id);
+"""
+
+CREATE_INDEX_CORE_STATE_TRANSITIONS = """
+CREATE INDEX IF NOT EXISTS idx_core_state_transitions_entity ON core_state_transitions (entity_kind, entity_id, id);
 """
 
 CREATE_INDEX_PROBE_REACTION_GROUPS = """
@@ -460,6 +505,8 @@ ALL_TABLES = [
     CREATE_CORE_TASK_ATTEMPTS,
     CREATE_CORE_ARTIFACTS,
     CREATE_CORE_TASK_SCOPE_MEMBERS,
+    CREATE_CORE_SCHEDULER_ATTEMPTS,
+    CREATE_CORE_STATE_TRANSITIONS,
 ]
 
 ALL_INDEXES = [
@@ -468,6 +515,8 @@ ALL_INDEXES = [
     CREATE_INDEX_CORE_TASK_ATTEMPTS,
     CREATE_INDEX_CORE_ARTIFACTS,
     CREATE_INDEX_CORE_TASK_SCOPE_MEMBERS,
+    CREATE_INDEX_CORE_SCHEDULER_STATE,
+    CREATE_INDEX_CORE_STATE_TRANSITIONS,
     CREATE_INDEX_PROBE_REACTION_GROUPS,
     CREATE_INDEX_DERIVED_CHILD,
     CREATE_INDEX_DERIVED_PARENT,

@@ -1,7 +1,7 @@
 """
 Unified remote runner that supports two modes on the same cluster:
 
-- mode = 'slurm' (aka remote_slurm): submit the rendered script via sbatch and wait
+- mode = 'slurm' (aka remote_slurm): deprecated; use the durable scheduler API
 - mode = 'ssh'   (aka remote/login): execute the rendered script directly over SSH
 
 Common features:
@@ -37,6 +37,11 @@ class RemoteRunner(Runner):
         timeout: Optional[int] = None,
     ) -> int:
         log = get_logger(__name__)
+        if self.mode in {"slurm", "remote_slurm"}:
+            raise RuntimeError(
+                "Blocking Slurm execution was removed. Use 'nerd submit' so the job ID "
+                "is persisted and later reconciled with 'nerd status'/'nerd collect'."
+            )
         workdir = Path(workdir)
         workdir.mkdir(parents=True, exist_ok=True)
         get_command_log_path(workdir)  # ensure parent exists
@@ -136,12 +141,8 @@ class RemoteRunner(Runner):
         )
 
         # Execute: sbatch or direct ssh
-        if self.mode in {"slurm", "remote_slurm"}:
-            get_logger(__name__).info("Submitting remote Slurm job in %s", remote_dir)
-            rc = self._submit_slurm(ssh_base, ssh_dest, remote_dir, merged_env, timeout)
-        else:
-            get_logger(__name__).info("Executing remote script via SSH in %s", remote_dir)
-            rc = self._exec_ssh(ssh_base, ssh_dest, remote_dir, timeout)
+        get_logger(__name__).info("Executing remote script via SSH in %s", remote_dir)
+        rc = self._exec_ssh(ssh_base, ssh_dest, remote_dir, timeout)
 
         # Stage out logs and patterns; preserve relative paths
         self._stage_out(ssh_base, ssh_dest, remote_dir, workdir, merged_env)
@@ -177,7 +178,6 @@ class RemoteRunner(Runner):
             "--chdir", f"{remote_dir}",
             "--output", f"{remote_dir}/command.log",
             "--error", f"{remote_dir}/command.log",
-            "--wait",
             "--parsable",
         ]
         if env.get("SLURM_PARTITION"):
@@ -198,7 +198,7 @@ class RemoteRunner(Runner):
                 check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
             )
         except subprocess.TimeoutExpired:
-            log.error("remote sbatch wait timed out after %s seconds", timeout)
+            log.error("remote sbatch submission timed out after %s seconds", timeout)
             return 124
         except Exception as e:
             log.exception("Failed to submit remote Slurm job: %s", e)

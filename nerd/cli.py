@@ -140,6 +140,137 @@ def run(
             log.debug("Database connection closed.")
 
 
+def _scheduler_connection(config_path: Optional[Path] = None):
+    """Open the controller database used by asynchronous scheduler commands."""
+    db_path = state.get("db")
+    if db_path is None and config_path is not None:
+        cfg = load_config(config_path)
+        db_path = Path(cfg.get("run", {}).get("output_dir", ".")) / "nerd.sqlite"
+    if db_path is None:
+        db_path = Path("nerd.sqlite")
+    conn = db_api.connect(Path(db_path).resolve())
+    db_api.init_schema(conn)
+    return conn
+
+
+def _show_scheduler_row(row) -> None:
+    typer.echo("task_id: %s" % row["task_id"])
+    typer.echo("task: %s" % row["task_name"])
+    typer.echo("task_state: %s" % row["task_state"])
+    typer.echo("attempt: %s" % row["try_index"])
+    typer.echo("attempt_state: %s" % row["scheduler_state"])
+    typer.echo("executor: %s" % row["executor_profile"])
+    typer.echo("scheduler_id: %s" % (row["scheduler_id"] or "-"))
+    if row["exit_code"] is not None:
+        typer.echo("exit_code: %s" % row["exit_code"])
+    if row["error"]:
+        typer.echo("message: %s" % row["error"])
+
+
+@app.command()
+def submit(
+    step: RunStep = typer.Argument(..., help="The scientific task to submit."),
+    config_path: Path = typer.Argument(
+        ..., exists=True, file_okay=True, dir_okay=False, readable=True,
+        resolve_path=True, help="Path to the run configuration file."
+    ),
+    profile: Optional[str] = typer.Option(
+        None, "--profile", "-p", help="Named executor profile from the configuration."
+    ),
+):
+    """Prepare and submit a task without waiting for its command to finish."""
+    from nerd.scheduler.service import submit_task
+
+    conn = _scheduler_connection(config_path)
+    try:
+        row = submit_task(conn, step.value, config_path, profile)
+        _show_scheduler_row(row)
+    except Exception as exc:
+        get_logger(__name__).exception("Task submission failed: %s", exc)
+        typer.echo("Submission failed: %s" % exc, err=True)
+        raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@app.command()
+def status(task_id: int = typer.Argument(..., min=1, help="Controller task ID.")):
+    """Reconcile one task with its executor and show durable state."""
+    from nerd.scheduler.service import reconcile
+
+    conn = _scheduler_connection()
+    try:
+        _show_scheduler_row(reconcile(conn, task_id))
+    except Exception as exc:
+        typer.echo("Status failed: %s" % exc, err=True)
+        raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@app.command("logs")
+def scheduler_logs(
+    task_id: int = typer.Argument(..., min=1, help="Controller task ID."),
+    tail: int = typer.Option(100, "--tail", "-n", min=0, help="Number of lines to show."),
+):
+    """Read local or remote logs for the latest task attempt."""
+    from nerd.scheduler.service import task_logs
+
+    conn = _scheduler_connection()
+    try:
+        typer.echo(task_logs(conn, task_id, tail), nl=True)
+    except Exception as exc:
+        typer.echo("Logs failed: %s" % exc, err=True)
+        raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@app.command()
+def cancel(task_id: int = typer.Argument(..., min=1, help="Controller task ID.")):
+    """Request cancellation of the latest task attempt."""
+    from nerd.scheduler.service import cancel_task
+
+    conn = _scheduler_connection()
+    try:
+        _show_scheduler_row(cancel_task(conn, task_id))
+    except Exception as exc:
+        typer.echo("Cancellation failed: %s" % exc, err=True)
+        raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@app.command()
+def collect(task_id: int = typer.Argument(..., min=1, help="Controller task ID.")):
+    """Collect completed output, validate it, and import scientific results."""
+    from nerd.scheduler.service import collect_task
+
+    conn = _scheduler_connection()
+    try:
+        _show_scheduler_row(collect_task(conn, task_id))
+    except Exception as exc:
+        typer.echo("Collection failed: %s" % exc, err=True)
+        raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@app.command()
+def retry(task_id: int = typer.Argument(..., min=1, help="Controller task ID.")):
+    """Create and submit a new attempt for a failed or cancelled task."""
+    from nerd.scheduler.service import retry_task
+
+    conn = _scheduler_connection()
+    try:
+        _show_scheduler_row(retry_task(conn, task_id))
+    except Exception as exc:
+        typer.echo("Retry failed: %s" % exc, err=True)
+        raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
 @app.command()
 def ls(
     ctx: typer.Context,
@@ -150,12 +281,23 @@ def ls(
     """
     List available runs and their status.
     """
-    log = get_logger(__name__)
-    log.info("Executing 'ls' command. Label: %s", label)
-    
-    # Delegate to a function in main.py
-    # list_runs(db_path=state["db"], label=label)
-    log.warning("'ls' command is not fully implemented yet.")
+    from nerd.scheduler import store
+
+    conn = _scheduler_connection()
+    try:
+        rows = store.list_tasks(conn, label)
+        if not rows:
+            typer.echo("No tasks found.")
+            return
+        typer.echo("ID\tTASK\tLABEL\tSTATE\tATTEMPT\tEXECUTOR\tSCHEDULER ID")
+        for row in rows:
+            typer.echo("%s\t%s\t%s\t%s\t%s\t%s\t%s" % (
+                row["id"], row["task_name"], row["label"], row["state"],
+                row["try_index"] or "-", row["executor_profile"] or "-",
+                row["scheduler_id"] or "-",
+            ))
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

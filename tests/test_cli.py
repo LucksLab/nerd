@@ -77,8 +77,12 @@ def test_cli_help_lists_commands(cli_runner):
     result = cli_runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "Usage" in result.stdout
-    assert "run   Execute a specific step" in result.stdout
-    assert "ls    List available runs" in result.stdout
+    assert "run" in result.stdout
+    assert "Execute a specific step" in result.stdout
+    assert "ls" in result.stdout
+    assert "List available runs" in result.stdout
+    assert "submit" in result.stdout
+    assert "status" in result.stdout
 
 
 def test_cli_run_create_populates_database(cli_runner, tmp_path):
@@ -108,5 +112,5 @@ def test_cli_run_unknown_step_errors(cli_runner, tmp_path):
     cfg_path = _write_create_config(tmp_path)
     result = cli_runner.invoke(app, ["run", "nonexistent_step", str(cfg_path)])
     assert result.exit_code != 0
-    message = (result.stderr or result.stdout).lower()
+    message = result.output.lower()
     assert "invalid value" in message

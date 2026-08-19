@@ -47,6 +47,22 @@ Every command follows the same pattern:
 nerd run <step> path/to/config.yaml
 ```
 
+Long-running commands can instead be submitted to a durable executor and
+reconciled by later CLI invocations:
+
+```bash
+nerd submit mut_count path/to/config.yaml --profile quest
+nerd --db results/nerd.sqlite status TASK_ID
+nerd --db results/nerd.sqlite logs TASK_ID
+nerd --db results/nerd.sqlite collect TASK_ID
+```
+
+`submit` returns after the local process or Slurm job has been accepted. Slurm
+jobs are not tied to the controller or SSH session. See the
+[task scheduling guide](docs/guides/task-scheduling.md) for executor profiles,
+state semantics, cancellation, and retries. The original `nerd run` command
+remains the synchronous compatibility path.
+
 Each config shares a small `run` header for bookkeeping:
 
 ```yaml
