@@ -1,0 +1,62 @@
+{
+  "schema_version": 2,
+  "image": {
+    "intended_repository": "ghcr.io/edr-choi/nerd-shapemapper2",
+    "intended_release_tag": "2.3-r0",
+    "platform": "linux/amd64",
+    "publication_approved": false,
+    "pushed": false
+  },
+  "public_candidate": {
+    "recipe": "Dockerfile",
+    "strategy": "compile checksum-pinned upstream source with a documented Python 3.11 file-mode compatibility patch; install Debian runtime packages",
+    "upstream_source_url": "https://codeload.github.com/Weeks-UNC/shapemapper2/tar.gz/refs/tags/v2.3",
+    "upstream_source_sha256": "1c1fb1e6e03249715eedb822217c8c3b5d18a0d60724ca4d403d88f29f866b6f",
+    "compatibility_patch": {
+      "path": "patches/python311-open-mode.patch",
+      "sha256": "30746f44ed4756b208f010784c09be813481f83353231bc18aee4a7532d3663f",
+      "change": "replace removed Python rU file mode with equivalent r mode",
+      "occurrences": 30,
+      "files": 18,
+      "scientific_logic_changed": false
+    },
+    "bbmerge_stream_patch": {
+      "path": "patches/bbmerge-stdin-format.patch",
+      "sha256": "6ed6a5de862df74f1b4b45a219963a1e9ed6cd2b3709a6c81a5fc30f5245345e",
+      "change": "identify BBMerge standard input as FASTQ for Debian BBMap 39.01",
+      "analysis_parameters_changed": false,
+      "scientific_logic_changed": false
+    },
+    "numpy_alias_patch": {
+      "path": "patches/numpy-removed-aliases.patch",
+      "sha256": "aa6edb3ba633fff2148db0de185898e29a50fe659cee39ca76ac929e91696bd3",
+      "change": "replace removed NumPy np.int alias with equivalent built-in int",
+      "occurrences": 4,
+      "scientific_logic_changed": false
+    },
+    "local_build_2026_08_18": {
+      "image_tag": "nerd-shapemapper2:2.3-public-candidate",
+      "image_size_bytes": 508942308,
+      "local_manifest_list_id": "sha256:68fdce9e7531b06b0749c79fed8399e946438cdfb54fb2b91c9d35a8c3383330",
+      "compile": "pass",
+      "runtime_validation": "pending: host disk exhaustion damaged both local container stores before runtime checks; the source compiled in two independent builds and the second installed all runtime packages before final-layer assembly failed",
+      "sbom": "pending",
+      "debian_package_inventory": "pending"
+    }
+  },
+  "private_reference": {
+    "recipe": "Dockerfile.reference",
+    "upstream_release_url": "https://github.com/Weeks-UNC/shapemapper2/releases/download/v2.3/shapemapper2-2.3.tar.gz",
+    "upstream_release_size_bytes": 1028394655,
+    "upstream_release_sha256": "c3f14fdd782266522b377b1c22986b98cf9949164ec3f4d582fbe65da5e53ec6",
+    "local_image_tag": "nerd-shapemapper2:2.3-compliance",
+    "local_image_size_bytes": 2053836415,
+    "local_manifest_list_id": "sha256:cbf1cbff48b12459db966e1973d2ef8f56677e5d960da8ec63330b98e1903157",
+    "upstream_tests": "208/208 pass",
+    "distribution": "keep private"
+  },
+  "base_image": {
+    "reference": "debian:bookworm-slim",
+    "linux_amd64_manifest_digest": "sha256:362e64223cc0da95422b3b13c045186fc0a81250e765d31c025fbddf257f6143"
+  }
+}

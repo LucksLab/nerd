@@ -1,0 +1,14 @@
+**
+!Dockerfile
+!Dockerfile.reference
+!LICENSES/
+!LICENSES/**
+!THIRD_PARTY_NOTICES.md
+!PUBLIC_THIRD_PARTY_NOTICES.md
+!patches/
+!patches/bbmerge-stdin-format.patch
+!patches/numpy-removed-aliases.patch
+!patches/python311-open-mode.patch
+!source-manifest.tsv
+!conda-packages.tsv
+!copyleft-conda-packages.tsv

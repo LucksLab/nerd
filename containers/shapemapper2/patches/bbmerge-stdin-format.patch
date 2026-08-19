@@ -1,0 +1,12 @@
+diff --git a/shapemapper2-2.3/internals/python/pyshapemap/components.py b/shapemapper2-2.3/internals/python/pyshapemap/components.py
+--- a/shapemapper2-2.3/internals/python/pyshapemap/components.py
++++ b/shapemapper2-2.3/internals/python/pyshapemap/components.py
+@@ -274,7 +274,7 @@ class Merger(Component):
+     def cmd(self):
+         cmd = ["bbmerge.sh",
+                "vstrict=t",
+-               "in=stdin",
++               "in=stdin.fastq",
+                "out=stdout",
+                "outu=stdout",
+                "interleaved=t",

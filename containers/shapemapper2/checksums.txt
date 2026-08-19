@@ -1,0 +1,19 @@
+# ShapeMapper2 v2.3 release asset downloaded from:
+# https://github.com/Weeks-UNC/shapemapper2/releases/download/v2.3/shapemapper2-2.3.tar.gz
+c3f14fdd782266522b377b1c22986b98cf9949164ec3f4d582fbe65da5e53ec6  shapemapper2-2.3.tar.gz
+
+# linux/amd64 manifest for docker.io/library/debian:bookworm-slim
+362e64223cc0da95422b3b13c045186fc0a81250e765d31c025fbddf257f6143  debian-bookworm-slim-linux-amd64.oci-manifest
+
+# ShapeMapper2 v2.3 source-tag archive used by the public candidate:
+# https://codeload.github.com/Weeks-UNC/shapemapper2/tar.gz/refs/tags/v2.3
+1c1fb1e6e03249715eedb822217c8c3b5d18a0d60724ca4d403d88f29f866b6f  shapemapper2-v2.3-source.tar.gz
+
+# Auditable Python 3.11 file-mode compatibility patch applied by Dockerfile
+30746f44ed4756b208f010784c09be813481f83353231bc18aee4a7532d3663f  patches/python311-open-mode.patch
+
+# Auditable BBMerge standard-input format compatibility patch
+6ed6a5de862df74f1b4b45a219963a1e9ed6cd2b3709a6c81a5fc30f5245345e  patches/bbmerge-stdin-format.patch
+
+# Auditable NumPy removed-alias compatibility patch
+aa6edb3ba633fff2148db0de185898e29a50fe659cee39ca76ac929e91696bd3  patches/numpy-removed-aliases.patch

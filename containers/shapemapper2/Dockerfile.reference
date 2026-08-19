@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1.7
+
+# Private reference image: this deliberately wraps the large official v2.3
+# release archive, including its historical Miniconda environment and binaries.
+FROM --platform=linux/amd64 debian:bookworm-slim@sha256:362e64223cc0da95422b3b13c045186fc0a81250e765d31c025fbddf257f6143
+
+ARG SHAPEMAPPER_VERSION=2.3
+ARG SHAPEMAPPER_ARCHIVE_SHA256=c3f14fdd782266522b377b1c22986b98cf9949164ec3f4d582fbe65da5e53ec6
+ARG SHAPEMAPPER_ARCHIVE_URL=https://github.com/Weeks-UNC/shapemapper2/releases/download/v2.3/shapemapper2-2.3.tar.gz
+
+LABEL org.opencontainers.image.title="NERD ShapeMapper2 reference" \
+      org.opencontainers.image.description="Private reference wrapper around the official ShapeMapper2 v2.3 release archive" \
+      org.opencontainers.image.source="https://github.com/LucksLab/nerd" \
+      org.opencontainers.image.version="2.3-reference" \
+      org.opencontainers.image.vendor="Lucks Lab" \
+      io.nerd.shapemapper.upstream="https://github.com/Weeks-UNC/shapemapper2/releases/tag/v2.3" \
+      io.nerd.shapemapper.archive-sha256="c3f14fdd782266522b377b1c22986b98cf9949164ec3f4d582fbe65da5e53ec6" \
+      io.nerd.shapemapper.distribution="private-reference"
+
+ADD --checksum=sha256:c3f14fdd782266522b377b1c22986b98cf9949164ec3f4d582fbe65da5e53ec6 \
+    https://github.com/Weeks-UNC/shapemapper2/releases/download/v2.3/shapemapper2-2.3.tar.gz \
+    /tmp/shapemapper2-2.3.tar.gz
+
+RUN test "${SHAPEMAPPER_VERSION}" = "2.3" \
+    && test "${SHAPEMAPPER_ARCHIVE_SHA256}" = "c3f14fdd782266522b377b1c22986b98cf9949164ec3f4d582fbe65da5e53ec6" \
+    && test "${SHAPEMAPPER_ARCHIVE_URL}" = "https://github.com/Weeks-UNC/shapemapper2/releases/download/v2.3/shapemapper2-2.3.tar.gz" \
+    && tar -xzf /tmp/shapemapper2-2.3.tar.gz -C /opt \
+    && mv /opt/shapemapper2-2.3 /opt/shapemapper2 \
+    && rm -f /tmp/shapemapper2-2.3.tar.gz \
+    && rm -rf /opt/shapemapper2/.git
+
+COPY LICENSES/ /usr/share/licenses/nerd-shapemapper2/LICENSES/
+COPY THIRD_PARTY_NOTICES.md source-manifest.tsv conda-packages.tsv \
+    copyleft-conda-packages.tsv \
+    /usr/share/licenses/nerd-shapemapper2/
+
+ENV SHAPEMAPPER_ROOT_DIR=/opt/shapemapper2 \
+    PATH=/opt/shapemapper2:/opt/shapemapper2/internals/bin:/opt/shapemapper2/internals/thirdparty/miniconda/envs/shapemapper_make/bin:/opt/shapemapper2/internals/thirdparty/bowtie2:/opt/shapemapper2/internals/thirdparty/pipeviewer/bin:/opt/shapemapper2/internals/thirdparty/ghostscript:${PATH}
+
+WORKDIR /work
+
+ENTRYPOINT ["/opt/shapemapper2/shapemapper"]
+CMD ["--help"]
