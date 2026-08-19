@@ -31,7 +31,7 @@ For adduction, the column header is `peak` (representing normalized integral). M
 
 ---
 
-## Degradation Fits (`nmr_deg_kinetics`)
+## Degradation fits
 
 Degradation experiments expose probe to buffer (no nucleotide). The measured peak integral decays exponentially as reactive probe is consumed. Internally, the default `lmfit_deg` plugin fits:
 
@@ -58,7 +58,8 @@ run:
   label: water_deg
   output_dir: outputs
 
-nmr_deg_kinetics:
+nmr_kinetic_fit:
+  fit_type: degradation
   reaction_ids: [12]        # IDs from nmr_create
   plugin: lmfit_deg
   species: dms              # Optional override; defaults to reaction probe
@@ -66,12 +67,12 @@ nmr_deg_kinetics:
 
 ### Outputs
 
-- A JSON artifact under `outputs/<label>/nmr_deg_kinetics/.../results`.
+- A JSON artifact under `outputs/<label>/nmr_kinetic_fit/.../results`.
 - Database rows in `nmr_fit_runs` (`plugin = lmfit_deg`) and `nmr_fit_params` (parameters such as `k_value`, `tau`, `chisq`).
 
 ---
 
-## Adduction Fits (`nmr_add_kinetics`)
+## Adduction fits
 
 Adduction experiments mix probe with a nucleotide triphosphate (NTP). Two peaks are tracked:
 
@@ -109,7 +110,8 @@ run:
   label: ntp_adduct
   output_dir: outputs
 
-nmr_add_kinetics:
+nmr_kinetic_fit:
+  fit_type: adduction
   reaction_ids: [21]
   plugin: ode_lsq_ntp_add
   plugin_options:

@@ -19,7 +19,10 @@ def config_hash(cfg: Dict[str, Any], length: int = 7) -> str:
         A hexadecimal hash string.
     """
     # Convert the dict to a sorted JSON string to ensure consistency
-    config_string = json.dumps(cfg, sort_keys=True, ensure_ascii=True)
+    # Runtime path normalization must not invalidate cache identities for an
+    # otherwise unchanged YAML file.
+    hash_data = getattr(cfg, "hash_data", cfg)
+    config_string = json.dumps(hash_data, sort_keys=True, ensure_ascii=True)
     
     # Use SHA256 for hashing
     sha256 = hashlib.sha256(config_string.encode('utf-8')).hexdigest()

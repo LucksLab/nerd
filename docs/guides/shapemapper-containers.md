@@ -28,7 +28,7 @@ mut_count:
 The digest is mandatory for downloaded images. It determines the SIF cache
 filename, so changing a mutable tag cannot silently replace cached software.
 The current package is private, so authenticate the selected Apptainer or
-Singularity runtime to GHCR on the execution host before `prepare-image`.
+Singularity runtime to GHCR on the execution host before `image prepare shapemapper`.
 For SSH-Slurm, that means authenticating on Quest, not on the Mac controller.
 Do not place a GitHub token in the NERD YAML. NERD reports registry
 authentication failures as a distinct preparation error and does not store
@@ -54,23 +54,23 @@ runs the configured ShapeMapper version smoke test before submission.
 Run all three commands with the same configuration and executor profile:
 
 ```bash
-nerd doctor configs/mut_count.yaml --profile quest
-nerd prepare-image configs/mut_count.yaml --profile quest
-nerd submit mut_count configs/mut_count.yaml --profile quest
+nerd plugin doctor shapemapper configs/mut_count.yaml --profile quest
+nerd image prepare shapemapper configs/mut_count.yaml --profile quest
+nerd run mut_count configs/mut_count.yaml --detach --profile quest
 ```
 
-`doctor` checks the selected execution environment without contacting GHCR. It
+`plugin doctor shapemapper` checks the selected execution environment without contacting GHCR. It
 reports scheduler availability where applicable, host architecture, exact
 Apptainer/Singularity version, cache writability, immutable image metadata, and
 an installed SIF if configured.
 
-`prepare-image` pulls `docker://<reference>@sha256:<digest>` only after all
+`image prepare shapemapper` pulls `docker://<reference>@sha256:<digest>` only after all
 metadata is ready. It writes a process-specific temporary file, coordinates
 through a no-clobber lock, verifies a nonempty result, and atomically renames
 the completed SIF into the shared cache. A cache hit skips the pull. It then
 runs `shapemapper --version` inside the SIF.
 
-`submit` repeats preparation/readiness so a stale doctor result cannot launch
+`run --detach` repeats preparation/readiness so a stale doctor result cannot launch
 an unready task. The durable attempt stores the fully quoted command and
 container provenance. Scheduler completion remains separate from scientific
 validation: `collect` must find and ingest all expected ShapeMapper profiles
@@ -139,7 +139,7 @@ executor/host identity. The serialized job specification carries the same
 metadata for attempt inspection.
 
 Remote workers write only logs, output files, and Phase 1 job markers. They do
-not open the controller's SQLite database. `nerd collect` transfers configured
+not open the controller's SQLite database. `nerd task collect` transfers configured
 outputs and performs database ingestion on the controller.
 
 ## Private-image operational checklist
@@ -148,13 +148,13 @@ For the current private image:
 
 1. Authenticate the execution host's container runtime to GHCR without adding
    credentials to NERD configuration.
-2. On an Apptainer host, run `doctor`, `prepare-image`, and a minimal real
-   ShapeMapper dataset. Confirm the reported OCI digest, SIF SHA-256, runtime
+2. On an Apptainer host, run `plugin doctor shapemapper`, `image prepare
+   shapemapper`, and a minimal real ShapeMapper dataset. Confirm the reported OCI digest, SIF SHA-256, runtime
    version, and ShapeMapper version.
 3. Repeat on Quest with its supported Singularity module and a scratch cache.
 4. Run the same Quest test from a Mac with the `ssh_slurm` profile, first with
    staged FASTQs and then, if applicable, with a verified shared filesystem.
-5. Disconnect after submission, reconnect, run `status`, then `collect`.
+5. Disconnect after submission, reconnect, run `task show`, then `task collect`.
    Confirm the worker never created or modified SQLite.
 6. Force a scheduler-success/missing-output case and confirm collection ends in
    `validation_failed`, not `completed`.

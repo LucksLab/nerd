@@ -9,6 +9,7 @@ from nerd.pipeline.plugins.nmr_fit_kinetics import FitResult
 from nerd.pipeline.tasks.base import TaskContext
 from nerd.pipeline.tasks.nmr_add_kinetics import NmrAddKineticsTask
 from nerd.pipeline.tasks.nmr_deg_kinetics import NmrDegKineticsTask
+from nerd.pipeline.tasks.nmr_kinetic_fit import NmrKineticFitTask
 
 
 def make_ctx(tmp_path: Path, label: str = "NMR_Run") -> tuple[TaskContext, Path, Path]:
@@ -295,3 +296,25 @@ def test_nmr_add_task_uses_substrate_metadata(tmp_path, monkeypatch):
     assert species_row["param_text"] == "ATP_C8"
     assert captured["meta"]["ntp_conc"] == 0.25
     assert captured["meta"]["substrate"] == "ATP"
+
+
+def test_unified_nmr_kinetic_fit_dispatches_by_explicit_fit_type():
+    task = NmrKineticFitTask()
+
+    degradation, _ = task.prepare({
+        "nmr_kinetic_fit": {"fit_type": "degradation", "reaction_ids": [1]}
+    })
+    adduction, _ = task.prepare({
+        "nmr_kinetic_fit": {"fit_type": "adduction", "reaction_ids": [2]}
+    })
+
+    assert degradation["fit_type"] == "degradation"
+    assert degradation["plugin"] == "lmfit_deg"
+    assert adduction["fit_type"] == "adduction"
+    assert adduction["plugin"] == "ode_lsq_ntp_add"
+
+
+def test_unified_nmr_kinetic_fit_requires_known_fit_type():
+    task = NmrKineticFitTask()
+    with pytest.raises(ValueError, match="fit_type must be"):
+        task.prepare({"nmr_kinetic_fit": {"fit_type": "other"}})

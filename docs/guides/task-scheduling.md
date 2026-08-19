@@ -6,13 +6,13 @@ controller is the only process that writes the NERD SQLite database. Local and
 remote workers write command output and small status files in their work
 directory; they never open the controller database.
 
-The existing `nerd run STEP CONFIG` command remains available for synchronous
-workflows. Use `nerd submit` for a durable asynchronous attempt.
+`nerd run WORKFLOW CONFIG` runs synchronously. Add `--detach` for a durable
+asynchronous attempt managed through the `nerd task` command group.
 
 ## Executor profiles
 
 Profiles are named under `executors`. Select a default with `run.executor`, or
-override it with `nerd submit --profile NAME`.
+override it with `nerd run WORKFLOW CONFIG --detach --profile NAME`.
 
 ```yaml
 run:
@@ -68,34 +68,44 @@ possible, but named profiles are recommended for new runs.
 Submission prints the durable controller task ID and scheduler ID:
 
 ```bash
-nerd submit mut_count configs/mut_count.yaml --profile quest
+nerd run mut_count configs/mut_count.yaml --detach --profile quest
 ```
 
-Later commands need the same controller database. If `--db` is omitted they
-use `./nerd.sqlite`; passing it explicitly is safest:
+Later commands need the same controller database. NERD first honors an explicit
+`--db` or `--project`, then discovers an existing `nerd.sqlite` in the current
+directory or a parent, then checks `NERD_DB`/`NERD_PROJECT`. Inspection commands
+never create a missing database. The selectors work naturally after the command:
 
 ```bash
-nerd --db results/nerd.sqlite status 42
-nerd --db results/nerd.sqlite logs 42 --tail 200
-nerd --db results/nerd.sqlite cancel 42
-nerd --db results/nerd.sqlite collect 42
-nerd --db results/nerd.sqlite retry 42
-nerd --db results/nerd.sqlite ls
+nerd task show 42 --db results/nerd.sqlite
+nerd task logs 42 --db results/nerd.sqlite --tail 200
+nerd task wait 42 --project results
+nerd task cancel 42 --project results
+nerd task collect 42 --project results
+nerd task retry 42 --project results
+nerd task list --project results --state failed --limit 20
 ```
 
-`status` first asks Slurm (or the local executor) and then records the observed
+`task show` first asks Slurm (or the local executor) and then records the observed
 state in SQLite. There is no required daemon. An SSH or controller disconnect
-does not stop a Slurm job; run `status` after reconnecting.
+does not stop a Slurm job; run `task show` after reconnecting. `task wait`
+polls until the executor reaches a terminal or collection-ready state; add
+`--collect` to import successful output before returning.
 
-`collect` is deliberately separate from scheduler completion. A successful
+`task collect` is deliberately separate from scheduler completion. A successful
 Slurm exit moves the task to `awaiting_collection`. Collection stages remote
 files back when needed, invokes the task's existing output consumer, and only
 then marks the scientific task `completed`. Missing or invalid output becomes
 `validation_failed`, even when Slurm reported success.
 
-`retry` is explicit and attempt-aware. It creates the next `try_index` for the
+`task retry` is explicit and attempt-aware. It creates the next `try_index` for the
 same task and is accepted only after a failed, cancelled, or validation-failed
 attempt.
+
+The old top-level `submit`, `ls`, `status`, `logs`, `cancel`, `collect`, and
+`retry` spellings are hidden deprecated wrappers for one compatibility period.
+They print a concise replacement message to standard error and use the same
+services as the grouped commands.
 
 ## Durable states and records
 
@@ -115,6 +125,13 @@ directory so later collection and retry do not depend on the original YAML
 remaining unchanged. `core_state_transitions` provides an append-only state
 history. Existing scientific provenance continues to use `core_tasks` and
 `core_task_attempts`.
+
+Relative path values in YAML, including `run.output_dir` and explicit input
+path fields, are resolved from the configuration file's directory. The
+submitted snapshot stores those normalized paths, so collection and retry are
+independent of the shell working directory. Cache hashes continue to use the
+original YAML values; path normalization alone does not invalidate an existing
+configuration identity.
 
 ## Phase 1 boundaries
 

@@ -104,7 +104,7 @@ Each time-course task can spawn multiple rounds; the CLI writes one `probe_tc_fi
 The workflow:
 
 1. `nmr_create` registers trace files and reaction metadata.
-2. `nmr_deg_kinetics` / `nmr_add_kinetics` draw inputs, stage trace files into a run directory, and execute the named plugin.
+2. `nmr_kinetic_fit` draws inputs, stages trace files into a run directory, and executes the degradation or adduction plugin selected by `fit_type`.
 3. Results land in `nmr_fit_runs` (one row per reaction fit) with parameters normalized into `nmr_fit_params`.
 
 ---

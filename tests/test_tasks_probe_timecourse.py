@@ -1,8 +1,4 @@
-"""
-Unit tests for round1_free behavior and confirmation that
-ProbeTimecourseTask accepts round2_global_profiled without any task-layer
-changes (round dispatch/persistence are generic over round_id strings).
-"""
+"""Focused tests for canonical probe-timecourse round behavior."""
 
 from __future__ import annotations
 
@@ -22,11 +18,22 @@ def test_round1_free_fits_each_nucleotide_independently():
     for idx, lk in enumerate(log_kdeg_true, start=1):
         y = _fmod_model(np.asarray(x), math.log(1.0), lk, math.log(0.02))
         series.append(
-            NucleotideSeries(nt_id=idx, timepoints=x, fmod_values=y.tolist(), metadata={"base": "A"})
+            NucleotideSeries(
+                nt_id=idx,
+                timepoints=x,
+                fmod_values=y.tolist(),
+                metadata={"base": "A"},
+            )
         )
 
     engine = BaselinePythonEngine()
-    request = TimecourseRequest(rg_id=1, rounds=[ROUND_FREE], nucleotides=series, global_metadata={}, options={})
+    request = TimecourseRequest(
+        rg_id=1,
+        rounds=[ROUND_FREE],
+        nucleotides=series,
+        global_metadata={},
+        options={},
+    )
     result = engine.run(request)
     free_round = next(r for r in result.rounds if r.round_id == ROUND_FREE)
     assert free_round.status == "completed"
@@ -36,7 +43,7 @@ def test_round1_free_fits_each_nucleotide_independently():
         assert abs(fitted[idx] - lk) < 0.05
 
 
-def test_task_prepare_accepts_round2_global_profiled_unmodified():
+def test_task_prepare_accepts_profiled_round():
     task = ProbeTimecourseTask()
     cfg = {
         "probe_timecourse": {
@@ -47,4 +54,8 @@ def test_task_prepare_accepts_round2_global_profiled_unmodified():
         }
     }
     inputs, _ = task.prepare(cfg)
-    assert inputs["rounds"] == ["round1_free", "round2_global_profiled", "round3_constrained"]
+    assert inputs["rounds"] == [
+        "round1_free",
+        "round2_global_profiled",
+        "round3_constrained",
+    ]

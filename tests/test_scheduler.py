@@ -165,11 +165,19 @@ def test_scientific_task_is_only_completed_after_collection(tmp_path, monkeypatc
     output = tmp_path / "output"
     config = tmp_path / "config.yaml"
     config.write_text(
-        "run:\n  label: async\n  output_dir: %s\n  executor: laptop\n"
-        "executors:\n  laptop:\n    type: local\n" % output
+        "run:\n  label: async\n  output_dir: output\n  executor: laptop\n"
+        "executors:\n  laptop:\n    type: local\n"
     )
+    invocation_dir = tmp_path / "invocation"
+    invocation_dir.mkdir()
+    monkeypatch.chdir(invocation_dir)
     conn = _db(output / "nerd.sqlite")
     submitted = submit_task(conn, _AsyncFileTask.name, config)
+    snapshot = Path(submitted["config_path"])
+    assert str(output.resolve()) in snapshot.read_text()
+    collection_dir = tmp_path / "collection"
+    collection_dir.mkdir()
+    monkeypatch.chdir(collection_dir)
     task_id = submitted["task_id"]
     assert submitted["task_state"] == "submitted"
     deadline = time.monotonic() + 5
@@ -228,3 +236,21 @@ def test_cancel_and_retry_are_attempt_aware(tmp_path, monkeypatch):
     assert second["task_state"] == "submitted"
     cancel_task(conn, first["task_id"])
     conn.close()
+
+
+def test_wait_for_task_can_collect_when_scheduler_finishes(monkeypatch):
+    from nerd.scheduler import service
+
+    states = iter([
+        {"task_state": "running"},
+        {"task_state": "awaiting_collection"},
+    ])
+    sleeps = []
+    collected = {"task_state": "completed", "scheduler_state": "completed"}
+
+    monkeypatch.setattr(service, "reconcile", lambda conn, task_id: next(states))
+    monkeypatch.setattr(service, "collect_task", lambda conn, task_id: collected)
+    monkeypatch.setattr(service.time, "sleep", lambda interval: sleeps.append(interval))
+
+    assert service.wait_for_task(object(), 17, collect=True, poll_interval=0.25) is collected
+    assert sleeps == [0.25]

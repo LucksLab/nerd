@@ -14,7 +14,7 @@ def _write_create_config(base_dir: Path) -> Path:
     output_dir = base_dir / "outputs"
     label = "cli_run"
     label_dir = output_dir / label
-    fq_dir = label_dir / "fastqs"
+    fq_dir = base_dir / "fastqs"
 
     fq_dir.mkdir(parents=True, exist_ok=True)
     (fq_dir / "R1.fastq.gz").write_text("placeholder\n")
@@ -75,14 +75,18 @@ def _write_create_config(base_dir: Path) -> Path:
 
 def test_cli_help_lists_commands(cli_runner):
     result = cli_runner.invoke(app, ["--help"])
+    no_args = cli_runner.invoke(app, [])
     assert result.exit_code == 0
+    assert no_args.exit_code == 0
+    assert "run" in no_args.stdout
+    assert "task" in no_args.stdout
     assert "Usage" in result.stdout
     assert "run" in result.stdout
-    assert "Execute a specific step" in result.stdout
-    assert "ls" in result.stdout
-    assert "List available runs" in result.stdout
-    assert "submit" in result.stdout
-    assert "status" in result.stdout
+    assert "scientific workflow" in result.stdout
+    assert "task" in result.stdout
+    assert "durable tasks" in result.stdout
+    assert "│ submit " not in result.stdout
+    assert "│ status " not in result.stdout
 
 
 def test_cli_run_create_populates_database(cli_runner, tmp_path):

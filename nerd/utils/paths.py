@@ -54,7 +54,7 @@ def make_run_dir(label_root: Path, task_name: str, suffix: Optional[str] = None)
 
     Args:
         label_root: The base directory for the label.
-        task_name: The name of the task being run (e.g., 'tc_free', 'mut_count').
+        task_name: The name of the task being run (e.g., 'probe_timecourse', 'mut_count').
         suffix: An optional custom suffix for the directory name.
 
     Returns:

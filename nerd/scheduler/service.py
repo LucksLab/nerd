@@ -7,7 +7,8 @@ from contextlib import contextmanager
 from datetime import datetime
 import os
 from pathlib import Path, PurePosixPath
-import shutil
+import time
+import yaml
 from typing import Any, Dict, Optional
 
 from nerd.db import api as db_api
@@ -99,7 +100,7 @@ def _job_spec(task: Any, ctx: TaskContext, cfg: Dict[str, Any], command: str,
         preamble=preamble,
         stage_in=stage_in,
         stage_out=list(dict.fromkeys(stage_out)),
-        controller_cwd=str(Path.cwd()),
+        controller_cwd=str(getattr(cfg, "base_dir", Path.cwd())),
         provenance=provenance or {},
     )
 
@@ -165,7 +166,11 @@ def submit_task(
     )
     run_dir = make_run_dir(Path(output_dir) / str(run["label"]), task.name, suffix=suffix)
     config_snapshot = run_dir / ".nerd-submitted-config.yaml"
-    shutil.copy2(str(config_path.resolve()), str(config_snapshot))
+    # Persist normalized runtime paths so collection and retry are independent
+    # of both the original config and the later controller working directory.
+    config_snapshot.write_text(
+        yaml.safe_dump(dict(cfg), sort_keys=False), encoding="utf-8"
+    )
     resources = profile_resources(profile, run)
     ctx = _context(conn, cfg, run_dir, profile, resources, output_dir=output_dir)
     execution_provenance = None
@@ -190,7 +195,7 @@ def submit_task(
     if not command:
         spec = JobSpec(
             command="", workdir=run_dir, resources=resources,
-            controller_cwd=str(Path.cwd()),
+            controller_cwd=str(getattr(cfg, "base_dir", Path.cwd())),
         )
         row = store.create_attempt(conn, task_id, "controller", "controller", spec, config_snapshot)
         scheduler_attempt_id = int(row["scheduler_attempt_id"])
@@ -340,3 +345,27 @@ def retry_task(conn: sqlite3.Connection, task_id: int) -> sqlite3.Row:
     spec = store.job_spec(row)
     store.transition_task(conn, task_id, TaskState.PENDING, "Explicit retry requested.")
     return _submit_attempt(conn, task_id, spec, profile, Path(row["config_path"]))
+
+
+def wait_for_task(
+    conn: sqlite3.Connection,
+    task_id: int,
+    *,
+    collect: bool = False,
+    poll_interval: float = 1.0,
+) -> sqlite3.Row:
+    """Wait for a durable task to reach a useful terminal/collection state."""
+    if poll_interval <= 0:
+        raise ValueError("Poll interval must be greater than zero.")
+    terminal = {
+        TaskState.COMPLETED.value,
+        TaskState.FAILED.value,
+        TaskState.CANCELLED.value,
+    }
+    while True:
+        row = reconcile(conn, task_id)
+        if row["task_state"] == TaskState.AWAITING_COLLECTION.value:
+            return collect_task(conn, task_id) if collect else row
+        if row["task_state"] in terminal:
+            return row
+        time.sleep(poll_interval)

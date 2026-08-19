@@ -217,7 +217,16 @@ def record_container_provenance(conn: sqlite3.Connection, task_id: int,
         )
 
 
-def list_tasks(conn: sqlite3.Connection, label: Optional[str] = None) -> List[sqlite3.Row]:
+def list_tasks(
+    conn: sqlite3.Connection,
+    label: Optional[str] = None,
+    state: Optional[str] = None,
+    task_name: Optional[str] = None,
+    limit: int = 50,
+) -> List[sqlite3.Row]:
+    """List durable tasks using filters that require no schema changes."""
+    if limit < 1:
+        raise ValueError("Task list limit must be at least 1.")
     sql = """
         SELECT t.id, t.task_name, t.label, t.state, t.backend, t.started_at, t.ended_at,
                a.try_index, sa.executor_profile, sa.scheduler_id, sa.state AS attempt_state
@@ -228,9 +237,19 @@ def list_tasks(conn: sqlite3.Connection, label: Optional[str] = None) -> List[sq
         )
         LEFT JOIN core_scheduler_attempts sa ON sa.attempt_id=a.id
     """
+    filters = []
     params: List[Any] = []
     if label:
-        sql += " WHERE t.label=?"
+        filters.append("t.label=?")
         params.append(label)
-    sql += " ORDER BY t.id DESC"
+    if state:
+        filters.append("t.state=?")
+        params.append(state)
+    if task_name:
+        filters.append("t.task_name=?")
+        params.append(task_name)
+    if filters:
+        sql += " WHERE " + " AND ".join(filters)
+    sql += " ORDER BY t.id DESC LIMIT ?"
+    params.append(limit)
     return list(conn.execute(sql, params).fetchall())

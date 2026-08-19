@@ -41,8 +41,7 @@ nerd run probe_timecourse demo_folder/05_probe_tc_kinetics/configs/probe_tc.yaml
   - [create](cli/create.md)
   - [mut_count](cli/mut_count.md)
   - [nmr_create](cli/nmr_create.md)
-  - [nmr_deg_kinetics](cli/nmr_deg_kinetics.md)
-  - [nmr_add_kinetics](cli/nmr_add_kinetics.md)
+  - [nmr_kinetic_fit](cli/nmr_kinetic_fit.md)
   - [probe_timecourse](cli/probe_timecourse.md)
   - [tempgrad_fit](cli/tempgrad_fit.md)
 - **Configuration & Workflow Guide**: See guides above plus example YAML in `demo_folder/`

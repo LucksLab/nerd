@@ -4,6 +4,8 @@ repo_name: nerd
 nav:
   - Home: index.md
   - Guides:
+      - Quest from a Mac: guides/quest-new-user.md
+      - Running NERD on Quest: guides/quest-local-user.md
       - Task Scheduling: guides/task-scheduling.md
       - Containerized ShapeMapper: guides/shapemapper-containers.md
       - Create Samples: guides/sample-organization.md
@@ -14,8 +16,7 @@ nav:
   - CLI Reference:
       - create: cli/create.md
       - nmr_create: cli/nmr_create.md
-      - nmr_deg_kinetics: cli/nmr_deg_kinetics.md
-      - nmr_add_kinetics: cli/nmr_add_kinetics.md
+      - nmr_kinetic_fit: cli/nmr_kinetic_fit.md
       - mut_count: cli/mut_count.md
       - probe_timecourse: cli/probe_timecourse.md
       - tempgrad_fit: cli/tempgrad_fit.md

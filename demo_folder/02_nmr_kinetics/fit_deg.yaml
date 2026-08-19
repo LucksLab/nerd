@@ -3,7 +3,8 @@ run:
   label: 02_nmr_kinetics
   backend: local
 
-nmr_deg_kinetics:
+nmr_kinetic_fit:
+  fit_type: degradation
   # Limit to the reactions imported by examples/nmr_create_deg/config.yaml.
   # If you skip this key, all available 'deg' reactions in the DB will be fitted.
   # reaction_ids: [1, 2]

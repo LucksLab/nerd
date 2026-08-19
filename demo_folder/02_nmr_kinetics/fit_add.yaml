@@ -4,7 +4,8 @@ run:
   backend: local
 
 # Select species or substrates with matching experimental conditions (buffer, temp, etc.).
-nmr_add_kinetics:
+nmr_kinetic_fit:
+  fit_type: adduction
   search_roots:
     - ../demo_data
 

@@ -291,7 +291,17 @@ class Task(abc.ABC):
 
         # 8. Consume the outputs of the task.
         log.info("Command completed successfully. Consuming outputs.")
-        self.consume_outputs(ctx, inputs, params, run_dir, task_id=task_id)
+        try:
+            self.consume_outputs(ctx, inputs, params, run_dir, task_id=task_id)
+        except Exception as exc:
+            db_api.finish_task(
+                ctx.db,
+                task_id,
+                "failed",
+                "Output validation failed: %s" % exc,
+            )
+            log.exception("Output validation failed for task_id=%s: %s", task_id, exc)
+            raise
 
         # 9. Mark the task as completed.
         db_api.finish_task(ctx.db, task_id, "completed")

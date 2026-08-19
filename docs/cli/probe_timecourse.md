@@ -1,9 +1,9 @@
-# `nerd probe_timecourse`
+# `nerd run probe_timecourse`
 
-`nerd probe_timecourse` fits chemical probing time-course data stored in `probe_fmod_values`, producing per-nucleotide parameters (free fits, global deg fits, constrained refits). Results are written to `probe_tc_fit_runs`/`probe_tc_fit_params` and JSON artifacts for each reaction group.
+`nerd run probe_timecourse` fits chemical probing time-course data stored in `probe_fmod_values`, producing per-nucleotide parameters (free fits, global deg fits, constrained refits). Results are written to `probe_tc_fit_runs`/`probe_tc_fit_params` and JSON artifacts for each reaction group.
 
 ```
-nerd probe_timecourse --config PATH/TO/config.yaml --db PATH/TO/nerd.sqlite
+nerd run probe_timecourse PATH/TO/config.yaml --db PATH/TO/nerd.sqlite
 ```
 
 Omitting `--db` defaults to `<run.output_dir>/nerd.sqlite`.
@@ -75,13 +75,13 @@ You can run any subset of rounds depending on the goal (e.g., skip global and on
 
 ```bash
 # Full three-round fit for selected reaction groups
-nerd probe_timecourse --config examples/probing_timecourse_fits/config.yaml                       --db examples/nerd.sqlite
+nerd run probe_timecourse examples/probing_timecourse_fits/config.yaml --db examples/nerd.sqlite
 
 # Only run free fits
-nerd probe_timecourse --config configs/probe_tc_free.yaml --db nerd.sqlite
+nerd run probe_timecourse configs/probe_timecourse_free.yaml --db nerd.sqlite
 
 # Constrained refits using existing global kdeg
-nerd probe_timecourse --config configs/probe_tc_constrained.yaml --db nerd.sqlite
+nerd run probe_timecourse configs/probe_timecourse_constrained.yaml --db nerd.sqlite
 ```
 
 Once fits are completed, downstream tasks (e.g., `tempgrad_fit` with `data_source: probe_tc`) can reuse the stored kinetics for Arrhenius analysis.

@@ -36,7 +36,7 @@ NERD ships with a lightweight dependency set (Typer, SQLite, NumPy, Pandas, lmfi
 ## Core Nerd CLI Functions
 
 1. **Sample creation & organization** – `nerd run create` ingests constructs, buffers, reaction conditions, and FASTQ paths into the SQLite backbone. Declare `derived_samples` in the same config to spin up subsampled or filtered sequencing inputs on the fly.
-2. **NMR kinetic analysis** – Pair `nerd run nmr_create` (trace registration) with `nerd run nmr_deg_kinetics` or `nerd run nmr_add_kinetics` to generate degradation and adduction fits.
+2. **NMR kinetic analysis** – Pair `nerd run nmr_create` (trace registration) with `nerd run nmr_kinetic_fit`; select degradation or adduction fitting with `fit_type` in the config.
 3. **Mutational counting pipeline** – `nerd run mut_count` stages the FASTQs, dispatches the selected counter (ShapeMapper supported today), and writes counts plus QC metadata back to the database, including any derived samples.
 4. **Probe time-course fitting** – `nerd run probe_timecourse` executes free, global, and constrained kinetic rounds, centralizing fit metadata so results stay linked to reaction groups and nucleotides.
 5. **Temperature-gradient analysis** – `nerd run tempgrad_fit` consumes NMR or probe outputs to fit melted Arrhenius or two-state models across constructs, buffers, and bases.
@@ -51,17 +51,19 @@ Long-running commands can instead be submitted to a durable executor and
 reconciled by later CLI invocations:
 
 ```bash
-nerd submit mut_count path/to/config.yaml --profile quest
-nerd --db results/nerd.sqlite status TASK_ID
-nerd --db results/nerd.sqlite logs TASK_ID
-nerd --db results/nerd.sqlite collect TASK_ID
+nerd run mut_count path/to/config.yaml --detach --profile quest
+nerd task show TASK_ID --db results/nerd.sqlite
+nerd task logs TASK_ID --db results/nerd.sqlite
+nerd task wait TASK_ID --collect --db results/nerd.sqlite
 ```
 
-`submit` returns after the local process or Slurm job has been accepted. Slurm
+`run --detach` returns after the local process or Slurm job has been accepted. Slurm
 jobs are not tied to the controller or SSH session. See the
 [task scheduling guide](docs/guides/task-scheduling.md) for executor profiles,
-state semantics, cancellation, and retries. The original `nerd run` command
-remains the synchronous compatibility path.
+state semantics, cancellation, and retries. Without `--detach`, `nerd run`
+remains synchronous. The former top-level lifecycle commands (`submit`, `ls`,
+`status`, `logs`, `cancel`, `collect`, and `retry`) remain hidden deprecated
+wrappers for one compatibility period.
 
 Each config shares a small `run` header for bookkeeping:
 
@@ -96,12 +98,12 @@ Add a task-specific block (e.g., `create`, `mut_count`, `probe_timecourse`) to d
    Estimate degradation and adduction rate constants, then perform Arrhenius fits across temperatures:
 
    ```bash
-   nerd run nmr_deg_kinetics demo_folder/02_nmr_kinetics/fit_deg.yaml
-   nerd run nmr_deg_kinetics demo_folder/02_nmr_kinetics/fit_add.yaml
+   nerd run nmr_kinetic_fit demo_folder/02_nmr_kinetics/fit_deg.yaml
+   nerd run nmr_kinetic_fit demo_folder/02_nmr_kinetics/fit_add.yaml
 
    # temperature dependence
-   nerd run nmr_deg_kinetics demo_folder/03_nmr_arrhenius/tempgrad_deg.yaml
-   nerd run nmr_deg_kinetics demo_folder/03_nmr_arrhenius/tempgrad_atp_c8.yaml
+   nerd run tempgrad_fit demo_folder/03_nmr_arrhenius/tempgrad_deg.yaml
+   nerd run tempgrad_fit demo_folder/03_nmr_arrhenius/tempgrad_atp_c8.yaml
    ```
 
 3. **Count mutations from sequencing data**

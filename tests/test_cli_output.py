@@ -1,0 +1,105 @@
+"""Semantic CLI help/output assertions that avoid Rich rendering snapshots."""
+
+import pytest
+from typer.main import get_command
+
+from nerd.cli import app
+
+
+TOP_LEVEL_COMMANDS = {
+    "run",
+    "task",
+    "plugin",
+    "image",
+    "db",
+    "submit",
+    "status",
+    "logs",
+    "cancel",
+    "collect",
+    "retry",
+    "doctor",
+    "prepare-image",
+    "ls",
+}
+
+
+def test_top_level_help_and_command_inventory(cli_runner):
+    root = get_command(app)
+    result = cli_runner.invoke(app, ["--help"])
+
+    assert result.exit_code == 0
+    assert set(root.commands) == TOP_LEVEL_COMMANDS
+    normalized_help = " ".join(result.output.split())
+    assert "NERD: run scientific workflows and manage durable tasks" in normalized_help
+    for command_name in {"run", "task", "plugin", "image", "db"}:
+        assert command_name in normalized_help
+    for hidden_wrapper in TOP_LEVEL_COMMANDS - {"run", "task", "plugin", "image", "db"}:
+        assert "│ %s " % hidden_wrapper not in result.output
+
+
+@pytest.mark.parametrize(
+    ("command_name", "semantic_help"),
+    [
+        ("run", "scientific workflow synchronously"),
+        ("task", "manage durable tasks"),
+        ("plugin", "plugin maintenance"),
+        ("image", "immutable tool images"),
+        ("db", "project database"),
+    ],
+)
+def test_relevant_subcommand_help_remains_available(
+    cli_runner, command_name, semantic_help
+):
+    result = cli_runner.invoke(app, [command_name, "--help"])
+
+    assert result.exit_code == 0
+    normalized_help = " ".join(result.output.split())
+    assert "Usage" in normalized_help
+    assert semantic_help in normalized_help
+
+
+def test_scheduler_row_output_exposes_durable_identifiers(cli_runner, tmp_path, monkeypatch):
+    from nerd.scheduler import service
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("{}\n")
+
+    def fake_submit_task(conn, step, received_config_path, profile):
+        return {
+            "task_id": 41,
+            "task_name": step,
+            "task_state": "submitted",
+            "try_index": 1,
+            "scheduler_state": "queued",
+            "executor_profile": profile,
+            "scheduler_id": "fake-41",
+            "exit_code": None,
+            "error": None,
+        }
+
+    monkeypatch.setattr(service, "submit_task", fake_submit_task)
+    result = cli_runner.invoke(
+        app,
+        [
+            "--db",
+            str(tmp_path / "controller.sqlite"),
+            "submit",
+            "create",
+            str(config_path),
+            "--profile",
+            "quest",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    for semantic_field in (
+        "task_id: 41",
+        "task: create",
+        "task_state: submitted",
+        "attempt: 1",
+        "attempt_state: queued",
+        "executor: quest",
+        "scheduler_id: fake-41",
+    ):
+        assert semantic_field in result.output

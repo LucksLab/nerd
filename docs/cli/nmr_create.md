@@ -1,6 +1,6 @@
 # `nerd nmr_create`
 
-`nerd nmr_create` registers NMR reactions and their trace files in the database, enabling downstream kinetics tasks (`nmr_deg_kinetics`, `nmr_add_kinetics`). You can inline reactions in YAML or point to CSV sheets.
+`nerd run nmr_create` registers NMR reactions and their trace files in the database, enabling the downstream `nmr_kinetic_fit` workflow. You can inline reactions in YAML or point to CSV sheets.
 
 ```
 nerd nmr_create --config PATH/TO/config.yaml --db PATH/TO/nerd.sqlite
@@ -74,4 +74,4 @@ nerd nmr_create --config examples/nmr_create/nmr_create_deg.yaml --db nerd.sqlit
 nerd nmr_create --config configs/nmr_create_add.yaml --db nerd.sqlite
 ```
 
-After `nmr_create`, run `nmr_deg_kinetics` or `nmr_add_kinetics` to fit the registered reactions.
+After `nmr_create`, run `nmr_kinetic_fit` with `fit_type: degradation` or `fit_type: adduction` to fit the registered reactions.
