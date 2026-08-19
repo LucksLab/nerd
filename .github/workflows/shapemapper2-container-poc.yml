@@ -54,6 +54,7 @@ jobs:
               for tool in bbmerge.sh bowtie2 bowtie2-build STAR dot gs pv; do
                 command -v "${tool}"
               done
+              dpkg-query -W bbmap-jni
               python3 -c "import matplotlib, numpy, scipy, sklearn"
             '
 

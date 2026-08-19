@@ -61,6 +61,7 @@ LABEL org.opencontainers.image.title="NERD ShapeMapper2" \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bbmap \
+        bbmap-jni \
         bowtie2 \
         ca-certificates \
         fonts-dejavu-core \

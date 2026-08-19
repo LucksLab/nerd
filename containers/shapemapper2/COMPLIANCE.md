@@ -17,8 +17,9 @@ Azul Zulu and historical Conda source gaps described later in this document.
 - [x] Apply only the documented `python311-open-mode.patch` (`rU` to `r` in
   30 file-open calls across 18 files); do not change scientific logic or
   vendor/fork the upstream repository.
-- [x] Use distribution packages for Bowtie2, STAR, BBMap/BBMerge, Graphviz,
-  Ghostscript, pv, OpenJDK, Python, Boost, zlib, and transitive dependencies.
+- [x] Use distribution packages for Bowtie2, STAR, BBMap/BBMerge and its
+  separately packaged JNI library, Graphviz, Ghostscript, pv, OpenJDK, Python,
+  Boost, zlib, and transitive dependencies.
 - [x] Preserve Debian package copyright records under
   `/usr/share/doc/<package>/copyright`.
 - [x] Add `PUBLIC_THIRD_PARTY_NOTICES.md` as an index to those records.
