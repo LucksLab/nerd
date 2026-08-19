@@ -1,20 +1,20 @@
 run:
-  label: 05_probe_tc_kinetics
+  label: 05_probe_tc_kinetics_profiled
   output_dir: demo_folder
   backend: local
   threads: 4
   time: "00:30:00"
 
-# Demonstrates the migrated probe timecourse fitting engine.
+# Demonstrates the numerically robust profiled-global round (round2_global_profiled)
+# as a drop-in alternative to round2_global for reaction groups with many
+# nucleotides, where the joint high-dimensional optimizer in round2_global can
+# raise "math range error" (exp overflow).
 probe_timecourse:
   engine: python_baseline
   rounds:
     - round1_free
-    - round2_global
+    - round2_global_profiled
     - round3_constrained
-  # For reaction groups with many nucleotides where round2_global raises
-  # "math range error" (exp overflow), see config_profiled.yaml for the
-  # numerically robust round2_global_profiled alternative.
 
   # Reaction groups pulled from examples/nerd.sqlite
   rg_ids:
@@ -36,7 +36,14 @@ probe_timecourse:
       r2_threshold: 0.75
     initial_kdeg: 0.0025  # s^-1; translated to log space internally
 
+    # Optional: override the auto-derived 1D search window (log space).
+    # Auto-derivation pads the round1 log_kdeg spread by
+    # global_profiled_bounds_pad decades (default 3), then hard-clamps to
+    # [-30, 10] regardless of overrides.
+    # global_profiled_bounds: [-20, 2]
+    # global_profiled_bounds_pad: 3.0
+
   # Metadata mirrored into result artifacts for provenance.
   global_metadata:
     analyst: demo_user
-    notes: "Baseline python engine demo using examples/nerd.sqlite"
+    notes: "Profiled (1D scalar) global engine demo — robust for large-N reaction groups; compare log_kdeg output against config.yaml's round2_global."

@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from lmfit import Model, Parameters, minimize
+from scipy.optimize import minimize_scalar
 
 from .base import (
     NucleotideSeries,
@@ -23,6 +24,7 @@ from .base import (
 
 ROUND_FREE = "round1_free"
 ROUND_GLOBAL = "round2_global"
+ROUND_GLOBAL_PROFILED = "round2_global_profiled"
 ROUND_CONSTRAINED = "round3_constrained"
 
 
@@ -170,6 +172,35 @@ def _global_objective(params: Parameters, x: np.ndarray, data: np.ndarray) -> np
     return residual.flatten()
 
 
+def _profiled_objective(
+    log_kdeg: float,
+    selected_series: Sequence[NucleotideSeries],
+    log_kdeg_initial: Optional[float],
+    penalty: float,
+) -> float:
+    """
+    Scalar objective for the profiled (1D) global search: sum of per-nucleotide
+    chisqr when log_kdeg is held fixed at the candidate value and log_kappa/
+    log_fmod0 are re-fit independently per nucleotide. A per-nucleotide fit
+    failure contributes `penalty` instead of raising, so a handful of bad sites
+    cannot crash the bounded scalar search over log_kdeg.
+    """
+    total = 0.0
+    for series in selected_series:
+        try:
+            _, diagnostics = _fit_single_site(
+                series.timepoints,
+                series.fmod_values,
+                log_kdeg_initial=log_kdeg_initial,
+                fixed_log_kdeg=log_kdeg,
+            )
+            chisq = _ensure_float(diagnostics.get("chisq"))
+            total += chisq if math.isfinite(chisq) else penalty
+        except Exception:  # noqa: BLE001
+            total += penalty
+    return total
+
+
 @dataclass(slots=True)
 class _SingleFitRecord:
     params: Dict[str, Any]
@@ -196,7 +227,11 @@ class BaselinePythonEngine(TimecourseEngine):
         log_kdeg_initial = self._initial_log_kdeg(request)
 
         # Compute free fits once if needed by downstream rounds.
-        if ROUND_FREE in rounds_requested or ROUND_GLOBAL in rounds_requested:
+        if (
+            ROUND_FREE in rounds_requested
+            or ROUND_GLOBAL in rounds_requested
+            or ROUND_GLOBAL_PROFILED in rounds_requested
+        ):
             for series in request.nucleotides:
                 try:
                     fit_payload = self._compute_single_fit(
@@ -233,6 +268,18 @@ class BaselinePythonEngine(TimecourseEngine):
             round_results.append(global_result)
             if global_result.status == "completed":
                 global_log_kdeg = _ensure_float(global_result.global_params.get("log_kdeg"))
+
+        # Round 2b: profiled (1D scalar) global fit — numerically robust alternative
+        if ROUND_GLOBAL_PROFILED in rounds_requested:
+            profiled_result = self._run_global_fit_profiled(request, single_fit_cache)
+            round_results.append(profiled_result)
+            if profiled_result.status == "completed":
+                profiled_log_kdeg = _ensure_float(profiled_result.global_params.get("log_kdeg"))
+                if profiled_log_kdeg is not None and math.isfinite(profiled_log_kdeg):
+                    # Profiled result takes precedence over round2_global if both
+                    # ran, since a user testing the new mode wants it fed forward
+                    # into round 3.
+                    global_log_kdeg = profiled_log_kdeg
 
         # Round 3: constrained fits (requires log_kdeg from round 2 or overrides)
         if ROUND_CONSTRAINED in rounds_requested:
@@ -307,6 +354,8 @@ class BaselinePythonEngine(TimecourseEngine):
             return ROUND_FREE
         if tokens in {"round2", "global"}:
             return ROUND_GLOBAL
+        if tokens in {"round2b", "global_profiled", "profiled", "round2_profiled"}:
+            return ROUND_GLOBAL_PROFILED
         if tokens in {"round3", "constrained"}:
             return ROUND_CONSTRAINED
         return tokens
@@ -518,6 +567,235 @@ class BaselinePythonEngine(TimecourseEngine):
             },
             notes=note_text,
         )
+
+    # Hard safety clamp for the profiled-round log_kdeg search: exp(30) ~= 1.07e13
+    # and exp(-30) ~= 9.4e-14 are both comfortably inside float64 range (max
+    # ~1.8e308), and exp(10) ~= 2.2e4 / exp(-10) ~= 4.5e-5 give a wide-but-sane
+    # kdeg range in linear space. This clamp is what structurally prevents the
+    # exp() overflow that makes round2_global fragile at scale, so it applies
+    # even to explicit engine_options overrides.
+    _GLOBAL_PROFILED_HARD_LO = -30.0
+    _GLOBAL_PROFILED_HARD_HI = 10.0
+
+    def _resolve_profiled_bounds(
+        self,
+        request: TimecourseRequest,
+        single_fit_cache: Mapping[Tuple[int, Optional[str]], _SingleFitRecord],
+        selected_series: Sequence[NucleotideSeries],
+    ) -> Tuple[float, float]:
+        options = request.options or {}
+        meta = request.global_metadata or {}
+
+        def _clamp(lo: float, hi: float) -> Tuple[float, float]:
+            if lo > hi:
+                lo, hi = hi, lo
+            lo = max(lo, self._GLOBAL_PROFILED_HARD_LO)
+            hi = min(hi, self._GLOBAL_PROFILED_HARD_HI)
+            if lo >= hi:
+                return self._GLOBAL_PROFILED_HARD_LO, self._GLOBAL_PROFILED_HARD_HI
+            return lo, hi
+
+        for src in (options, meta):
+            bounds_val = src.get("global_profiled_bounds")
+            if bounds_val is not None:
+                try:
+                    lo, hi = float(bounds_val[0]), float(bounds_val[1])
+                except (TypeError, ValueError, IndexError):
+                    continue
+                if math.isfinite(lo) and math.isfinite(hi):
+                    return _clamp(lo, hi)
+
+        for src in (options, meta):
+            lo_raw = src.get("global_profiled_bounds_lo")
+            hi_raw = src.get("global_profiled_bounds_hi")
+            if lo_raw is not None or hi_raw is not None:
+                lo = _ensure_float(lo_raw) if lo_raw is not None else self._GLOBAL_PROFILED_HARD_LO
+                hi = _ensure_float(hi_raw) if hi_raw is not None else self._GLOBAL_PROFILED_HARD_HI
+                if math.isfinite(lo) and math.isfinite(hi):
+                    return _clamp(lo, hi)
+
+        log_kdegs: List[float] = []
+        for series in selected_series:
+            record = single_fit_cache.get(self._series_key(series))
+            if record is None or not record.params:
+                continue
+            val = _ensure_float(record.params.get("log_kdeg"))
+            if math.isfinite(val):
+                log_kdegs.append(val)
+
+        pad_decades = _ensure_float(options.get("global_profiled_bounds_pad"), default=3.0)
+        if not math.isfinite(pad_decades) or pad_decades < 0:
+            pad_decades = 3.0
+
+        if log_kdegs:
+            lo = min(log_kdegs) - pad_decades
+            hi = max(log_kdegs) + pad_decades
+        else:
+            center = _safe_log(1e-3)
+            lo = center - pad_decades
+            hi = center + pad_decades
+
+        return _clamp(lo, hi)
+
+    @staticmethod
+    def _estimate_profiled_log_kdeg_stderr(
+        optimal_log_kdeg: float,
+        selected_series: Sequence[NucleotideSeries],
+        log_kdeg_initial: Optional[float],
+        penalty: float,
+        lo: float,
+        hi: float,
+        *,
+        step: float = 1e-3,
+    ) -> Optional[float]:
+        # Skip the estimate entirely if the optimum sits at (or within one step
+        # of) a bound -- the local quadratic approximation is invalid there.
+        if optimal_log_kdeg - step <= lo or optimal_log_kdeg + step >= hi:
+            return None
+        try:
+            f0 = _profiled_objective(optimal_log_kdeg, selected_series, log_kdeg_initial, penalty)
+            f_plus = _profiled_objective(optimal_log_kdeg + step, selected_series, log_kdeg_initial, penalty)
+            f_minus = _profiled_objective(optimal_log_kdeg - step, selected_series, log_kdeg_initial, penalty)
+        except Exception:  # noqa: BLE001
+            return None
+        second_deriv = (f_plus - 2.0 * f0 + f_minus) / (step ** 2)
+        if not math.isfinite(second_deriv) or second_deriv <= 0:
+            return None
+        variance = 2.0 / second_deriv
+        if not math.isfinite(variance) or variance < 0:
+            return None
+        return math.sqrt(variance)
+
+    def _run_global_fit_profiled(
+        self,
+        request: TimecourseRequest,
+        single_fit_cache: Mapping[Tuple[int, Optional[str]], _SingleFitRecord],
+    ) -> RoundResult:
+        selected_series = self._filter_series_for_global(request, single_fit_cache)
+        if not selected_series:
+            return RoundResult(
+                round_id=ROUND_GLOBAL_PROFILED,
+                status="skipped",
+                per_nt=tuple(),
+                global_params={},
+                qc_metrics={},
+                notes="No nucleotides satisfied the selection criteria for profiled global fitting.",
+            )
+
+        lo, hi = self._resolve_profiled_bounds(request, single_fit_cache, selected_series)
+        log_kdeg_initial = self._initial_log_kdeg(request)
+        penalty = 1e12
+
+        try:
+            opt_result = minimize_scalar(
+                _profiled_objective,
+                args=(selected_series, log_kdeg_initial, penalty),
+                method="bounded",
+                bounds=(lo, hi),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return RoundResult(
+                round_id=ROUND_GLOBAL_PROFILED,
+                status="failed",
+                per_nt=tuple(),
+                global_params={},
+                qc_metrics={"bounds_lo": lo, "bounds_hi": hi},
+                notes=f"Profiled global fit failed: {exc}",
+            )
+
+        optimal_log_kdeg = float(opt_result.x)
+
+        # Final pass: fit every selected nucleotide at the optimum to get
+        # per-nucleotide params/diagnostics for output, reusing the same call
+        # round3_constrained uses.
+        final_records: Dict[Tuple[int, Optional[str]], _SingleFitRecord] = {}
+        sse_total = 0.0
+        n_success = 0
+        for series in selected_series:
+            try:
+                fit_payload = self._compute_single_fit(
+                    series,
+                    log_kdeg_initial=optimal_log_kdeg,
+                    fixed_log_kdeg=optimal_log_kdeg,
+                )
+                final_records[self._series_key(series)] = fit_payload
+                chisq = _ensure_float(fit_payload.diagnostics.get("chisq"))
+                if math.isfinite(chisq):
+                    sse_total += chisq
+                n_success += 1
+            except Exception as exc:  # noqa: BLE001
+                final_records[self._series_key(series)] = _SingleFitRecord(
+                    params={},
+                    diagnostics={"status": "failed", "reason": str(exc)},
+                )
+
+        # Aggregate R^2 across all selected nucleotides' pooled residuals.
+        y_true_all: List[float] = []
+        y_pred_all: List[float] = []
+        for series in selected_series:
+            record = final_records.get(self._series_key(series))
+            if record is None or not record.params:
+                continue
+            log_kappa = _ensure_float(record.params.get("log_kobs"))
+            log_fmod0 = _ensure_float(record.params.get("log_fmod0"))
+            if not (math.isfinite(log_kappa) and math.isfinite(log_fmod0)):
+                continue
+            x_arr = np.asarray(series.timepoints, dtype=float)
+            y_arr = np.asarray(series.fmod_values, dtype=float)
+            y_pred = _fmod_model(x_arr, log_kappa, optimal_log_kdeg, log_fmod0)
+            y_true_all.extend(y_arr.tolist())
+            y_pred_all.extend(y_pred.tolist())
+
+        if y_true_all:
+            y_true_arr = np.asarray(y_true_all, dtype=float)
+            y_pred_arr = np.asarray(y_pred_all, dtype=float)
+            ss_res = float(np.sum((y_true_arr - y_pred_arr) ** 2))
+            ss_tot = float(np.sum((y_true_arr - np.mean(y_true_arr)) ** 2))
+            r2 = 1.0 - ss_res / ss_tot if ss_tot else float("nan")
+        else:
+            r2 = float("nan")
+
+        log_kdeg_err = self._estimate_profiled_log_kdeg_stderr(
+            optimal_log_kdeg, selected_series, log_kdeg_initial, penalty, lo, hi,
+        )
+
+        global_params: Dict[str, Any] = {
+            "log_kdeg": optimal_log_kdeg,
+            "kdeg": math.exp(optimal_log_kdeg),
+        }
+        if log_kdeg_err is not None:
+            global_params["log_kdeg_err"] = log_kdeg_err
+
+        qc_metrics = {
+            "r2": r2,
+            "sse": sse_total,
+            "n_sites": len(selected_series),
+            "n_success": n_success,
+            "bounds_lo": lo,
+            "bounds_hi": hi,
+            "nfev": int(getattr(opt_result, "nfev", 0)),
+            "optimizer_success": bool(getattr(opt_result, "success", False)),
+        }
+
+        notes = None
+        near_lo = math.isclose(optimal_log_kdeg, lo, abs_tol=1e-6)
+        near_hi = math.isclose(optimal_log_kdeg, hi, abs_tol=1e-6)
+        if near_lo or near_hi:
+            notes = (
+                f"Optimal log_kdeg landed on a search bound ({lo:.3g}, {hi:.3g}); "
+                "consider widening global_profiled_bounds."
+            )
+
+        round_result = self._round_from_single_fits(
+            ROUND_GLOBAL_PROFILED,
+            final_records,
+            selected_series,
+            notes=notes,
+        )
+        round_result.global_params = global_params
+        round_result.qc_metrics = qc_metrics
+        round_result.status = "completed" if n_success else "failed"
+        return round_result
 
     def _filter_series_for_global(
         self,

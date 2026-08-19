@@ -18,6 +18,7 @@ from .baseline import (
     ROUND_CONSTRAINED,
     ROUND_FREE,
     ROUND_GLOBAL,
+    ROUND_GLOBAL_PROFILED,
 )
 from .ode_fit import OdeFitEngine
 from .r_integration import RIntegrationEngine
@@ -37,5 +38,6 @@ __all__ = [
     "OdeFitEngine",
     "ROUND_FREE",
     "ROUND_GLOBAL",
+    "ROUND_GLOBAL_PROFILED",
     "ROUND_CONSTRAINED",
 ]
