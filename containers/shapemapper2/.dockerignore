@@ -5,6 +5,8 @@
 !LICENSES/**
 !THIRD_PARTY_NOTICES.md
 !PUBLIC_THIRD_PARTY_NOTICES.md
+!patches/
+!patches/python311-open-mode.patch
 !source-manifest.tsv
 !conda-packages.tsv
 !copyleft-conda-packages.tsv
