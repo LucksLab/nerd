@@ -35,6 +35,7 @@ trap cleanup EXIT
   --amplicon \
   --overwrite \
   --output-temp \
+  --verbose \
   --min-depth 1000 \
   --modified --folder example_data/TPPplus \
   --untreated --folder example_data/TPPminus \
