@@ -339,7 +339,8 @@ else
   while test -e "$lock" && test "$n" -lt 60; do sleep 1; n=$((n+1)); done
   test -s "$target" || {{ echo 'container cache preparation lock did not produce an image' >&2; exit 73; }}
 fi
-sha256sum "$target""".format(
+sha256sum "$target"
+""".format(
             target=shlex.quote(target), runtime=shlex.quote(readiness.runtime.command),
             image=shlex.quote("docker://" + immutable),
         )

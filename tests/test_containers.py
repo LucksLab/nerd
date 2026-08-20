@@ -200,6 +200,10 @@ def test_immutable_cache_preparation_uses_temp_lock_and_atomic_rename():
     fake = FakeHost()
     result = prepare_container(_spec(), ExecutorProfile("linux", "local"), {}, fake)
     prep = next(command for command, _ in fake.calls if " pull " in command)
+    syntax_check = subprocess.run(
+        ["bash", "-n"], input=prep, text=True, capture_output=True, check=False
+    )
+    assert syntax_check.returncode == 0, syntax_check.stderr
     assert "sha256-%s.sif" % ("a" * 64) in prep
     assert '.tmp.$$' in prep
     assert 'set -o noclobber' in prep
