@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 import os
 from pathlib import Path
-import re
 from typing import Any, Dict, Mapping, Optional
 
 try:  # Python 3.11+
@@ -14,7 +14,6 @@ except ImportError:  # pragma: no cover - exercised on supported Python 3.8-3.10
     import tomli as tomllib  # type: ignore[no-redef]
 
 
-PROJECT_NAME_PATTERN = re.compile(r"^[A-Z]{3}\.[0-9]{2}\.[0-9]{2}\.[0-9]{3}$")
 PROJECT_FILE = Path(".nerd/project.toml")
 _CREDENTIAL_KEYS = {
     "password", "passphrase", "private_key", "identity_file", "key_file",
@@ -31,13 +30,17 @@ class ProjectConfigError(ValueError):
 
 
 def validate_project_name(name: str) -> str:
-    """Return a canonical project identifier or raise an actionable error."""
-    if not PROJECT_NAME_PATTERN.fullmatch(str(name)):
+    """Return a non-empty project name or raise an actionable error.
+
+    ``XXX.00.00.000`` remains the recommended Lucks Lab convention, but NERD
+    also supports informal names such as ``test``.
+    """
+    if not isinstance(name, str) or not name.strip():
         raise ProjectConfigError(
-            "Invalid NERD project name %r. Use uppercase initials and exactly "
-            "2, 2, and 3 digits, for example EKC.07.00.000." % name
+            "Invalid NERD project name %r. Use a non-empty name. "
+            "Lucks Lab convention: EKC.07.00.000." % name
         )
-    return str(name)
+    return name
 
 
 @dataclass(frozen=True)
@@ -100,7 +103,7 @@ def project_file_for(value: Path, *, require: bool = True) -> Path:
     source = source.resolve()
     if require and not source.is_file():
         raise ContextResolutionError(
-            "No .nerd/project.toml found at %s. Run 'nerd init PATH --name EKC.07.00.000' "
+            "No .nerd/project.toml found at %s. Run 'nerd init PATH --name NAME' "
             "or pass --db PATH for a legacy project." % source
         )
     return source
@@ -237,7 +240,7 @@ class ProjectContext:
             raise ContextResolutionError(str(exc)) from exc
         if required:
             raise ContextResolutionError(
-                "No NERD project found. Run 'nerd init PATH --name EKC.07.00.000' or pass --project PATH."
+                "No NERD project found. Run 'nerd init PATH --name NAME' or pass --project PATH."
             )
         return None
 
@@ -284,7 +287,7 @@ class ProjectContext:
         if candidate is None:
             raise ContextResolutionError(
                 "No NERD database context found. Pass --db PATH or --project PATH, "
-                "set NERD_PROJECT/NERD_DB, run 'nerd init PATH --name EKC.07.00.000', "
+                "set NERD_PROJECT/NERD_DB, run 'nerd init PATH --name NAME', "
                 "or use a config with run.output_dir."
             )
         resolved = candidate.expanduser()
@@ -325,13 +328,13 @@ def render_project_toml(
     output: str = "outputs", default_executor: Optional[str] = "local",
 ) -> str:
     """Deterministically render the small project file controlled by ``nerd init``."""
-    validate_project_name(name)
-    lines = ["[project]", 'name = "%s"' % name]
+    name = validate_project_name(name)
+    lines = ["[project]", "name = %s" % json.dumps(name, ensure_ascii=False)]
     if default_executor:
-        lines.append('default_executor = "%s"' % default_executor)
+        lines.append("default_executor = %s" % json.dumps(default_executor, ensure_ascii=False))
     lines.extend([
-        "", "[paths]", 'database = "%s"' % database.replace('"', '\\"'),
-        'output = "%s"' % output.replace('"', '\\"'),
+        "", "[paths]", "database = %s" % json.dumps(database, ensure_ascii=False),
+        "output = %s" % json.dumps(output, ensure_ascii=False),
     ])
     if default_executor == "local":
         lines.extend(["", "[executors.local]", 'type = "local"'])

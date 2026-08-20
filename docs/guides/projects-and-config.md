@@ -5,7 +5,7 @@ NERD separates stable project context from scientific analysis choices:
 - `.nerd/project.toml` says **where and how the NERD project operates**.
 - YAML plus referenced CSV/TSV sheets says **what scientific analysis runs**.
 
-The project file contains only the canonical project ID, database path, output
+The project file contains only the project name, database path, output
 directory, optional default executor, named executor profiles, and stable
 container settings. Samples, reaction selections, fit parameters, outliers,
 run labels, and credentials do not belong there. Ordinary commands never
@@ -13,19 +13,20 @@ rewrite this file.
 
 ## Initialize a project
 
-Project names use uppercase three-letter researcher initials and exact numeric
-groups: `XXX.00.00.000`.
+Project names may be any non-empty string. NERD uses the directory basename by
+default, so informal names such as `test` work without additional options.
+Lucks Lab members are encouraged to use uppercase three-letter researcher
+initials and exact numeric groups: `XXX.00.00.000`.
 
 ```bash
 nerd init EKC.07.00.000
 cd EKC.07.00.000
 ```
 
-When the directory basename matches the pattern, `--name` is inferred. For an
-existing directory with a different basename, be explicit:
+Use `--name` to override the directory basename. For example:
 
 ```bash
-nerd init analysis-root --name EKC.07.00.000 --existing
+nerd init analysis-root --name test --existing
 ```
 
 `--existing` permits adding NERD assets to a non-empty directory but never

@@ -56,8 +56,9 @@ nerd config init create --output configs/create.yaml
 nerd config validate configs/create.yaml
 ```
 
-The directory name supplies the project ID only when it exactly matches
-`XXX.00.00.000`; otherwise pass `--name EKC.07.00.000`. NERD discovers
+The directory name supplies the project name by default; use `--name` to
+override it. Any non-empty name is accepted, while Lucks Lab members are
+encouraged to follow the `XXX.00.00.000` convention. NERD discovers
 `.nerd/project.toml` from nested directories, so `run` and `task` commands use
 the same database without repeating `--db`.
 

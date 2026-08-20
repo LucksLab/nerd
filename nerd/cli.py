@@ -16,7 +16,7 @@ import yaml
 from nerd.db import api as db_api
 from nerd.pipeline.tasks import TASK_REGISTRY
 from nerd.project import (
-    ContextResolutionError, PROJECT_NAME_PATTERN, ProjectConfigError, ProjectContext,
+    ContextResolutionError, ProjectConfigError, ProjectContext,
     load_project, render_project_toml, validate_project_name,
 )
 from nerd.configuration import (
@@ -755,7 +755,10 @@ def database_info(
 def project_init(
     ctx: typer.Context,
     path: Path = typer.Argument(Path("."), metavar="PATH", help="Directory to initialize."),
-    name: Optional[str] = typer.Option(None, "--name", help="Canonical identifier, for example EKC.07.00.000."),
+    name: Optional[str] = typer.Option(
+        None, "--name",
+        help="Project name (defaults to the directory name; Lucks Lab convention: EKC.07.00.000).",
+    ),
     existing: bool = typer.Option(False, "--existing", help="Allow initialization inside an existing non-empty directory."),
     output_dir: str = typer.Option("outputs", "--output-dir", help="Project-root-relative output directory."),
     database: str = typer.Option(".nerd/nerd.sqlite", "--database", help="Project-root-relative database path."),
@@ -766,13 +769,13 @@ def project_init(
         _set_json_logging(ctx)
     target = path.expanduser().resolve()
     try:
-        inferred = target.name if PROJECT_NAME_PATTERN.fullmatch(target.name) else None
+        inferred = target.name or None
         if name is None and inferred is None:
             raise ProjectConfigError(
-                "Cannot infer a project name from directory %r. Pass --name EKC.07.00.000."
+                "Cannot infer a project name from directory %r. Pass --name NAME."
                 % target.name
             )
-        project_name = validate_project_name(name or inferred or "")
+        project_name = validate_project_name(name if name is not None else inferred or "")
         if target.exists() and not target.is_dir():
             raise ProjectConfigError("Initialization target is not a directory: %s" % target)
         if target.exists() and any(target.iterdir()) and not existing:

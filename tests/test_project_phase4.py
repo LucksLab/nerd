@@ -18,10 +18,15 @@ from nerd.project import (
 from nerd.utils.hashing import config_hash
 
 
-@pytest.mark.parametrize("name", ["ekc.07.00.000", "EK.07.00.000", "EKCC.07.00.000",
-                                  "EKC.7.00.000", "EKC.07.0.000", "EKC.07.00.00"])
-def test_project_identifier_rejects_noncanonical_names(name):
-    with pytest.raises(ProjectConfigError, match="EKC.07.00.000"):
+@pytest.mark.parametrize("name", ["test", "00.5.01.EKC_test", "project with spaces",
+                                  "ekc.07.00.000"])
+def test_project_identifier_accepts_custom_names(name):
+    assert validate_project_name(name) == name
+
+
+@pytest.mark.parametrize("name", ["", "   ", None, 42])
+def test_project_identifier_rejects_empty_or_non_string_names(name):
+    with pytest.raises(ProjectConfigError, match="non-empty"):
         validate_project_name(name)
 
 
@@ -45,21 +50,31 @@ def test_init_infers_matching_basename_and_refuses_overwrite(cli_runner, tmp_pat
     assert (root / ".nerd" / "project.toml").read_text() == before
 
 
-def test_init_nonmatching_name_requires_option_and_existing_is_explicit(cli_runner, tmp_path):
+def test_init_infers_any_basename_and_existing_is_explicit(cli_runner, tmp_path):
     root = tmp_path / "research"
     root.mkdir()
     (root / "notes.txt").write_text("preserve me")
-    missing = cli_runner.invoke(app, ["init", str(root)])
-    assert missing.exit_code == 1
-    assert "--name EKC.07.00.000" in missing.output
-    safe = cli_runner.invoke(app, ["init", str(root), "--name", "EKC.07.00.000"])
+    safe = cli_runner.invoke(app, ["init", str(root)])
     assert safe.exit_code == 1
     assert "--existing" in safe.output
-    created = cli_runner.invoke(app, [
-        "init", str(root), "--name", "EKC.07.00.000", "--existing"
-    ])
+    created = cli_runner.invoke(app, ["init", str(root), "--existing"])
     assert created.exit_code == 0, created.output
     assert (root / "notes.txt").read_text() == "preserve me"
+    assert load_project(root).name == "research"
+
+
+def test_init_accepts_custom_name_and_escapes_it_in_toml(cli_runner, tmp_path):
+    root = tmp_path / "project"
+    custom_name = 'test "quoted" project'
+    created = cli_runner.invoke(app, ["init", str(root), "--name", custom_name])
+    assert created.exit_code == 0, created.output
+    assert load_project(root).name == custom_name
+
+
+def test_init_rejects_explicit_empty_name(cli_runner, tmp_path):
+    created = cli_runner.invoke(app, ["init", str(tmp_path / "project"), "--name", ""])
+    assert created.exit_code == 1
+    assert "non-empty" in created.output
 
 
 def test_project_paths_are_root_relative_and_direct_toml_is_supported(cli_runner, tmp_path):
