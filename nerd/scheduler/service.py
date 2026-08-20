@@ -64,6 +64,7 @@ def _context(
         time=str(resources.get("time", run.get("time", "02:00:00"))),
         label=str(run["label"]),
         output_dir=output_dir or str(run.get("output_dir", "nerd_output")),
+        executor_profile=profile.name,
     )
 
 
@@ -132,8 +133,9 @@ def submit_task(
     step: str,
     config_path: Path,
     profile_name: Optional[str] = None,
+    resolved_config: Optional[Dict[str, Any]] = None,
 ) -> sqlite3.Row:
-    cfg = load_config(config_path)
+    cfg = resolved_config if resolved_config is not None else load_config(config_path)
     run = cfg.get("run", {}) or {}
     if not run.get("label"):
         raise ValueError("Configuration must contain a 'run.label'.")

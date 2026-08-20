@@ -25,7 +25,7 @@ _PATH_KEYS = {
     "output_dir", "fq_dir", "nt_info", "path", "script_path",
     "shapemapper_path", "sif_path", "cache_dir", "samples_yaml",
     "samples_config", "config_path", "yaml", "source", "constructs",
-    "buffers", "sequencing_runs",
+    "buffers", "sequencing_runs", "samples", "kinetic_data_dir", "config",
 }
 _PATH_LIST_KEYS = {"search_roots"}
 

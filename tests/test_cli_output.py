@@ -8,6 +8,8 @@ from nerd.cli import app
 
 TOP_LEVEL_COMMANDS = {
     "run",
+    "init",
+    "config",
     "task",
     "plugin",
     "image",
@@ -21,7 +23,10 @@ TOP_LEVEL_COMMANDS = {
     "doctor",
     "prepare-image",
     "ls",
+    "webui",
 }
+
+PUBLIC_COMMANDS = {"run", "init", "config", "task", "plugin", "image", "db", "webui"}
 
 
 def test_top_level_help_and_command_inventory(cli_runner):
@@ -32,9 +37,9 @@ def test_top_level_help_and_command_inventory(cli_runner):
     assert set(root.commands) == TOP_LEVEL_COMMANDS
     normalized_help = " ".join(result.output.split())
     assert "NERD: A toolkit for quantitative analysis of RNA reactivity, energetics, and kinetics" in normalized_help
-    for command_name in {"run", "task", "plugin", "image", "db"}:
+    for command_name in PUBLIC_COMMANDS:
         assert command_name in normalized_help
-    for hidden_wrapper in TOP_LEVEL_COMMANDS - {"run", "task", "plugin", "image", "db"}:
+    for hidden_wrapper in TOP_LEVEL_COMMANDS - PUBLIC_COMMANDS:
         assert "│ %s " % hidden_wrapper not in result.output
 
 
@@ -57,6 +62,27 @@ def test_relevant_subcommand_help_remains_available(
     normalized_help = " ".join(result.output.split())
     assert "Usage" in normalized_help
     assert semantic_help in normalized_help
+
+
+def test_bare_run_guides_instead_of_erroring(cli_runner):
+    from nerd.cli import RunStep
+
+    result = cli_runner.invoke(app, ["run"])
+
+    assert result.exit_code == 0, result.output
+    normalized_help = " ".join(result.output.split())
+    assert "Error" not in result.output
+    assert "scientific workflow synchronously" in normalized_help
+    for step in RunStep:
+        assert step.value in normalized_help
+
+
+def test_incomplete_run_guides_with_nonzero_exit(cli_runner):
+    result = cli_runner.invoke(app, ["run", "create"])
+
+    assert result.exit_code == 2
+    assert "Error" not in result.output
+    assert "Usage" in " ".join(result.output.split())
 
 
 def test_scheduler_row_output_exposes_durable_identifiers(cli_runner, tmp_path, monkeypatch):

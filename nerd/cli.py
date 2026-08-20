@@ -11,10 +11,18 @@ import time
 from typing import Callable, Optional
 
 import typer
+import yaml
 
 from nerd.db import api as db_api
 from nerd.pipeline.tasks import TASK_REGISTRY
-from nerd.project import ContextResolutionError, ProjectContext
+from nerd.project import (
+    ContextResolutionError, PROJECT_NAME_PATTERN, ProjectConfigError, ProjectContext,
+    load_project, render_project_toml, validate_project_name,
+)
+from nerd.configuration import (
+    ConfigValidationError, redact, resolve_config, resolved_view, validate_config,
+    write_template,
+)
 from nerd.utils.config import load_config
 from nerd.utils.hashing import config_hash
 from nerd.utils.logging import get_logger, setup_logger
@@ -34,6 +42,7 @@ plugin_app = typer.Typer(no_args_is_help=True, help="Advanced scientific plugin 
 plugin_doctor_app = typer.Typer(no_args_is_help=True, help="Check plugin readiness.")
 image_app = typer.Typer(no_args_is_help=True, help="Inspect and prepare immutable tool images.")
 db_app = typer.Typer(no_args_is_help=True, help="Inspect the selected project database.")
+config_app = typer.Typer(no_args_is_help=True, help="Create, validate, and inspect analysis configs.")
 webui_app = typer.Typer(no_args_is_help=True, help="Run the sample-input helper webapp.")
 
 
@@ -53,6 +62,34 @@ class ContainerPlugin(str, enum.Enum):
     shapemapper = "shapemapper"
 
 
+WORKFLOW_SUMMARIES: dict[str, str] = {
+    "create": "Ingest sequencing samples and reactions from a YAML config.",
+    "mut_count": "Count mutations with an external tool and import the profiles.",
+    "nmr_create": "Ingest NMR reactions from a YAML config.",
+    "nmr_kinetic_fit": "Fit NMR degradation or adduction kinetics.",
+    "drop": "Flag sequencing samples so later workflows skip them.",
+    "probe_timecourse": "Fit chemical probing timecourses for reaction groups.",
+    "tempgrad_fit": "Fit Arrhenius or two-state melt models to temperature gradients.",
+}
+
+
+def _workflow_epilog() -> str:
+    """Render the workflow list shown in 'nerd run' help.
+
+    Rich collapses single newlines in an epilog, so each line is its own
+    paragraph and no column padding is used: the text stays readable at any
+    terminal width.
+    """
+    lines = ["Workflows:"]
+    lines.extend(
+        "%s - %s" % (step.value, WORKFLOW_SUMMARIES.get(step.value, ""))
+        for step in RunStep
+    )
+    lines.append("Run 'nerd run WORKFLOW CONFIG_PATH' to execute a workflow, or add "
+                 "--detach to submit it as a durable task and return immediately.")
+    return "\n\n".join(lines)
+
+
 @app.callback()
 def main_callback(
     ctx: typer.Context,
@@ -60,7 +97,7 @@ def main_callback(
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress informational progress."),
     no_color: bool = typer.Option(False, "--no-color", help="Disable colored logging output."),
     db: Optional[Path] = typer.Option(None, "--db", help="SQLite database path."),
-    project: Optional[Path] = typer.Option(None, "--project", help="Project directory containing nerd.sqlite."),
+    project: Optional[Path] = typer.Option(None, "--project", help="Project root or direct .nerd/project.toml path."),
     log_file: Optional[Path] = typer.Option(None, "--log-file", help="Write NERD logs to this file."),
 ):
     """Initialize invocation-scoped project and logging context."""
@@ -115,7 +152,9 @@ def _scheduler_connection(
     read_only: bool = False,
 ):
     """Open the controller database selected by Phase 1 context resolution."""
-    cfg = load_config(config_path) if config_path is not None else None
+    cfg = None
+    if config_path is not None:
+        cfg, _ = resolve_config(config_path, context=context or ProjectContext())
     db_path = (context or ProjectContext()).resolve_database(
         config=cfg, config_path=config_path, must_exist=read_only
     )
@@ -260,8 +299,16 @@ def _submit_handler(
     try:
         if json_output:
             _set_json_logging(ctx)
-        conn = _scheduler_connection(config_path, context=_command_context(ctx, db, project))
-        row = submit_task(conn, workflow.value, config_path, profile)
+        command_context = _command_context(ctx, db, project)
+        cfg, project_cfg = resolve_config(config_path, context=command_context, executor=profile)
+        conn = _scheduler_connection(config_path, context=command_context)
+        if project_cfg is not None:
+            row = submit_task(
+                conn, workflow.value, config_path, profile, resolved_config=cfg
+            )
+        else:
+            # Retain the historical call shape for third-party integrations.
+            row = submit_task(conn, workflow.value, config_path, profile)
         db_path = str(Path(conn.execute("PRAGMA database_list").fetchone()[2]).resolve())
         if json_output:
             _emit_summary(_scheduler_summary(row, db_path), True)
@@ -288,7 +335,7 @@ def _run_sync(
     conn = None
     selected_log = _invocation_context(ctx).get("log_file")
     try:
-        cfg = load_config(config_path)
+        cfg, _ = resolve_config(config_path, context=_command_context(ctx, db, project))
         output_dir = Path(cfg.get("run", {}).get("output_dir", "."))
         invocation = _invocation_context(ctx)
         db_path = _command_context(ctx, db, project).resolve_database(config=cfg, config_path=config_path)
@@ -333,13 +380,16 @@ def _run_sync(
             conn.close()
 
 
-@app.command()
+@app.command(epilog=_workflow_epilog())
 def run(
     ctx: typer.Context,
-    workflow: RunStep = typer.Argument(..., help="Scientific workflow to execute."),
-    config_path: Path = typer.Argument(
-        ..., exists=True, file_okay=True, dir_okay=False, readable=True,
-        resolve_path=True, help="Run configuration file."
+    workflow: Optional[RunStep] = typer.Argument(
+        None, metavar="WORKFLOW", show_default=False,
+        help="Scientific workflow to execute; see the list below."
+    ),
+    config_path: Optional[Path] = typer.Argument(
+        None, metavar="CONFIG_PATH", exists=True, file_okay=True, dir_okay=False,
+        readable=True, resolve_path=True, show_default=False, help="Run configuration file."
     ),
     detach: bool = typer.Option(False, "--detach", help="Submit a durable task and return without waiting."),
     profile: Optional[str] = typer.Option(None, "--profile", "-p", help="Executor profile used with --detach."),
@@ -348,6 +398,11 @@ def run(
     json_output: bool = typer.Option(False, "--json", help="Write only the JSON result to stdout."),
 ):
     """Run a scientific workflow synchronously or submit it with --detach."""
+    if workflow is None or config_path is None:
+        # Guide instead of erroring, like the command groups do. A bare 'nerd run'
+        # is a request for help (exit 0); a half-typed invocation is incomplete.
+        typer.echo(ctx.get_help())
+        raise typer.Exit(code=0 if workflow is None and config_path is None else 2)
     if profile and not detach:
         typer.echo("--profile is only supported with --detach.", err=True)
         raise typer.Exit(code=2)
@@ -696,11 +751,189 @@ def database_info(
         conn.close()
 
 
+@app.command("init")
+def project_init(
+    ctx: typer.Context,
+    path: Path = typer.Argument(Path("."), metavar="PATH", help="Directory to initialize."),
+    name: Optional[str] = typer.Option(None, "--name", help="Canonical identifier, for example EKC.07.00.000."),
+    existing: bool = typer.Option(False, "--existing", help="Allow initialization inside an existing non-empty directory."),
+    output_dir: str = typer.Option("outputs", "--output-dir", help="Project-root-relative output directory."),
+    database: str = typer.Option(".nerd/nerd.sqlite", "--database", help="Project-root-relative database path."),
+    json_output: bool = typer.Option(False, "--json", help="Write only JSON to stdout."),
+):
+    """Initialize a NERD project without overwriting an existing project."""
+    if json_output:
+        _set_json_logging(ctx)
+    target = path.expanduser().resolve()
+    try:
+        inferred = target.name if PROJECT_NAME_PATTERN.fullmatch(target.name) else None
+        if name is None and inferred is None:
+            raise ProjectConfigError(
+                "Cannot infer a project name from directory %r. Pass --name EKC.07.00.000."
+                % target.name
+            )
+        project_name = validate_project_name(name or inferred or "")
+        if target.exists() and not target.is_dir():
+            raise ProjectConfigError("Initialization target is not a directory: %s" % target)
+        if target.exists() and any(target.iterdir()) and not existing:
+            raise ProjectConfigError(
+                "%s is not empty. Re-run with --existing to add only NERD project assets safely." % target
+            )
+        project_file = target / ".nerd" / "project.toml"
+        if project_file.exists():
+            raise ProjectConfigError(
+                "A NERD project already exists at %s; refusing to overwrite it." % project_file
+            )
+        target.mkdir(parents=True, exist_ok=True)
+        project_file.parent.mkdir(parents=True, exist_ok=True)
+        project_file.write_text(
+            render_project_toml(project_name, database=database, output=output_dir),
+            encoding="utf-8",
+        )
+        project_cfg = load_project(project_file)
+        project_cfg.output_dir.mkdir(parents=True, exist_ok=True)
+        conn = db_api.connect(project_cfg.database)
+        try:
+            db_api.init_schema(conn)
+        finally:
+            conn.close()
+        payload = {
+            "schema_version": "1.0", "status": "initialized",
+            "project_id": project_cfg.name, "project_root": str(project_cfg.root),
+            "database": str(project_cfg.database), "output_directory": str(project_cfg.output_dir),
+            "next_command": "nerd config init create --output configs/create.yaml",
+        }
+        if json_output:
+            typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            typer.echo("project_id: %s" % payload["project_id"])
+            typer.echo("project_root: %s" % payload["project_root"])
+            typer.echo("database: %s" % payload["database"])
+            typer.echo("output_directory: %s" % payload["output_directory"])
+            typer.echo("next: %s" % payload["next_command"])
+    except (ContextResolutionError, ProjectConfigError, OSError) as exc:
+        typer.echo("Initialization failed: %s" % exc, err=True)
+        raise typer.Exit(code=1)
+
+
+def _config_context(ctx: typer.Context, project: Optional[Path]) -> ProjectContext:
+    return _command_context(ctx, None, project)
+
+
+@config_app.command("validate")
+def config_validate(
+    ctx: typer.Context,
+    file: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
+    workflow: Optional[RunStep] = typer.Option(None, "--workflow", help="Expected workflow."),
+    project: Optional[Path] = typer.Option(None, "--project", help="Project root or project.toml."),
+    json_output: bool = typer.Option(False, "--json", help="Write only JSON to stdout."),
+):
+    """Validate an analysis config without creating a database or output files."""
+    try:
+        cfg, project_cfg = resolve_config(file, context=_config_context(ctx, project))
+        chosen = validate_config(cfg, workflow=workflow.value if workflow else None)
+        payload = {
+            "schema_version": "1.0", "status": "valid", "workflow": chosen,
+            "config_file": str(cfg.source_path),
+            "project_id": project_cfg.name if project_cfg else None,
+        }
+        if json_output:
+            typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            typer.echo("Valid configuration: %s (%s)" % (cfg.source_path, chosen))
+    except (ContextResolutionError, ConfigValidationError, TypeError, ValueError, OSError, yaml.YAMLError) as exc:
+        if json_output:
+            typer.echo(json.dumps({
+                "schema_version": "1.0", "status": "invalid", "errors": [str(exc)]
+            }, indent=2, ensure_ascii=False))
+        else:
+            typer.echo("Configuration invalid: %s" % exc, err=True)
+        raise typer.Exit(code=1)
+
+
+@config_app.command("show")
+def config_show(
+    ctx: typer.Context,
+    file: Path = typer.Argument(..., exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True),
+    resolved: bool = typer.Option(False, "--resolved", help="Show project defaults and resolved paths."),
+    workflow: Optional[RunStep] = typer.Option(None, "--workflow", help="Expected workflow."),
+    project: Optional[Path] = typer.Option(None, "--project", help="Project root or project.toml."),
+    json_output: bool = typer.Option(False, "--json", help="Write only JSON to stdout."),
+):
+    """Show authored or fully resolved config without mutating project state."""
+    try:
+        command_context = _config_context(ctx, project)
+        cfg, project_cfg = resolve_config(file, context=command_context)
+        chosen = validate_config(cfg, workflow=workflow.value if workflow else None)
+        if not resolved:
+            payload = redact(cfg.hash_data)
+        else:
+            payload = resolved_view(cfg, project_cfg, chosen)
+            try:
+                payload["database"] = str(command_context.resolve_database(
+                    config=cfg, config_path=file, must_exist=False
+                ))
+            except ContextResolutionError:
+                pass
+        if json_output:
+            typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
+        elif not resolved:
+            typer.echo(yaml.safe_dump(payload, sort_keys=False), nl=False)
+        else:
+            typer.echo("project_id: %s" % (payload["project"]["id"] or "-"))
+            typer.echo("project_root: %s" % (payload["project"]["root"] or "-"))
+            typer.echo("database: %s" % (payload.get("database") or "-"))
+            typer.echo("output_directory: %s" % payload["output_directory"])
+            typer.echo("config_base: %s" % payload["config_base"])
+            typer.echo("workflow: %s" % payload["workflow"])
+            typer.echo("task_label: %s" % payload["task_label"])
+            typer.echo("executor: %s (%s)" % (
+                payload["executor"]["name"], payload["executor"]["type"]
+            ))
+            typer.echo("plugin: %s" % (payload["plugin"] or "-"))
+            typer.echo("engine: %s" % (payload["engine"] or "-"))
+            typer.echo("resolved_input_paths:")
+            typer.echo(yaml.safe_dump(payload["resolved_input_paths"], sort_keys=True), nl=False)
+            typer.echo("configured_values:")
+            typer.echo(yaml.safe_dump(payload["configured"], sort_keys=False), nl=False)
+            typer.echo("inherited_defaults:")
+            typer.echo(yaml.safe_dump(payload["inherited_defaults"], sort_keys=False), nl=False)
+    except (ContextResolutionError, ConfigValidationError, TypeError, ValueError, OSError, yaml.YAMLError) as exc:
+        if json_output:
+            typer.echo(json.dumps({
+                "schema_version": "1.0", "status": "invalid", "errors": [str(exc)]
+            }, indent=2, ensure_ascii=False))
+        else:
+            typer.echo("Configuration show failed: %s" % exc, err=True)
+        raise typer.Exit(code=1)
+
+
+@config_app.command("init")
+def config_init(
+    workflow: RunStep = typer.Argument(..., help="Workflow starter to generate."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="YAML output path."),
+):
+    """Generate a safe starter YAML and, for create, a companion sample CSV."""
+    destination = output or Path("%s.yaml" % workflow.value)
+    try:
+        written, companion = write_template(workflow.value, destination)
+        cfg, _ = resolve_config(written)
+        validate_config(cfg, workflow=workflow.value)
+        typer.echo("config: %s" % written)
+        if companion:
+            typer.echo("sample_sheet: %s" % companion)
+        typer.echo("next: nerd config validate %s" % written)
+    except (ConfigValidationError, ContextResolutionError, OSError, ValueError) as exc:
+        typer.echo("Config initialization failed: %s" % exc, err=True)
+        raise typer.Exit(code=1)
+
+
 app.add_typer(task_app, name="task")
 plugin_app.add_typer(plugin_doctor_app, name="doctor")
 app.add_typer(plugin_app, name="plugin")
 app.add_typer(image_app, name="image")
 app.add_typer(db_app, name="db")
+app.add_typer(config_app, name="config")
 app.add_typer(webui_app, name="webui")
 
 
@@ -708,23 +941,20 @@ app.add_typer(webui_app, name="webui")
 @webui_app.command("serve")
 def webui_serve(
     ctx: typer.Context,
-    project: Path = typer.Option(
-        ..., "--project", "-p",
-        help="Label directory to work in (holds configs/, nerd.sqlite and the autosaved draft).",
+    project: Optional[Path] = typer.Option(
+        None, "--project", "-p",
+        help="Project root or direct .nerd/project.toml; defaults to project discovery.",
     ),
     db: Optional[Path] = typer.Option(
-        None, "--db", help="SQLite database path (default: <project>/nerd.sqlite)."
+        None, "--db", help="Database override; otherwise use project.toml or legacy discovery."
     ),
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(8420, "--port"),
     open_browser: bool = typer.Option(True, "--open-browser/--no-open-browser"),
 ):
-    """Launch the sample-input helper.
-
-    A local webapp for building the constructs, buffers, sequencing runs and
-    sample sheet that 'nerd run create' consumes: pair fastq reads, pull
-    metadata out of sample names, fill columns in bulk, and enter reaction
-    times per timecourse.
+    """Launch the sample-input helper: a local webapp for building nerd
+    'create' configs (constructs, buffers, sequencing runs, sample sheets)
+    from a pattern-parsed list of sample names.
 
     Requires the 'webui' extra: pip install -e ".[webui]"
     """
@@ -732,21 +962,44 @@ def webui_serve(
         import uvicorn
     except ImportError:
         typer.echo(
-            'The webui extra is not installed. Run: pip install -e ".[webui]"',
+            "The webui extra isn't installed. Run: pip install -e \".[webui]\"",
             err=True,
         )
         raise typer.Exit(code=1)
 
-    project.mkdir(parents=True, exist_ok=True)
-    typer.echo("nerd sample input helper -> http://%s:%s" % (host, port))
-    typer.echo("project: %s" % project)
+    invocation_context = _command_context(ctx, db, project)
+    selected_project = invocation_context.project
+    try:
+        if selected_project is None:
+            discovered = invocation_context.resolve_project()
+            if discovered is None:
+                raise ContextResolutionError(
+                    "No NERD project found. Pass --project PATH or run this command inside a Phase 4 project."
+                )
+            selected_project = discovered.root
+        selected_db = invocation_context.db
+        if selected_db is not None:
+            selected_db = selected_db.expanduser().resolve()
+
+        import nerd.webui.app as webui_module
+        info = webui_module.session.connect(
+            str(selected_project), str(selected_db) if selected_db else None,
+            webui_module.session.label,
+        )
+    except (ContextResolutionError, ProjectConfigError, OSError, ValueError) as exc:
+        typer.echo("Web UI startup failed: %s" % exc, err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo("Serving nerd sample-input helper at http://%s:%s" % (host, port))
+    typer.echo("project: %s" % info["project_dir"])
+    typer.echo("database: %s" % info["db_path"])
+    typer.echo("output_directory: %s" % info["output_dir"])
 
     if open_browser:
         import threading
         import webbrowser
-        threading.Timer(1.0, lambda: webbrowser.open("http://%s:%s/" % (host, port))).start()
+        threading.Timer(1.0, lambda: webbrowser.open(f"http://{host}:{port}/")).start()
 
-    import nerd.webui.app as webui_module
     uvicorn.run(webui_module.app, host=host, port=port, log_level="info")
 
 

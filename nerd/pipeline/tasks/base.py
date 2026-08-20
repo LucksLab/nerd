@@ -33,6 +33,7 @@ class TaskContext:
     time: str
     label: str
     output_dir: str
+    executor_profile: Optional[str] = None
 
 
 @dataclass
