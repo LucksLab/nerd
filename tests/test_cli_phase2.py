@@ -35,7 +35,7 @@ def test_phase2_group_inventory_and_help(cli_runner):
     task = root.commands["task"]
 
     assert set(task.commands) == {
-        "list", "show", "logs", "wait", "collect", "cancel", "retry"
+        "list", "show", "logs", "wait", "watch", "collect", "cancel", "retry"
     }
     assert set(root.commands["image"].commands) == {"inspect", "prepare"}
     assert set(root.commands["plugin"].commands["doctor"].commands) == {"shapemapper"}

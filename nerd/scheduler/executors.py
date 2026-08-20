@@ -49,6 +49,10 @@ class Executor(ABC):
     def collect(self, handle: JobHandle, spec: JobSpec) -> JobStatus:
         raise NotImplementedError
 
+    def collect_diagnostics(self, handle: JobHandle, spec: JobSpec) -> None:
+        """Best-effort synchronization of terminal-job diagnostics."""
+        spec.workdir.mkdir(parents=True, exist_ok=True)
+
 
 def _tail(path: Path, count: int) -> str:
     if not path.exists():
@@ -336,6 +340,9 @@ class SSHSlurmExecutor(SlurmExecutor):
         return _slurm_status_from_output(accounting.stdout)
 
     def logs(self, handle: JobHandle, spec: JobSpec, tail: int = 100) -> str:
+        local_log = spec.workdir / "command.log"
+        if local_log.is_file():
+            return _tail(local_log, tail)
         path = str(Path(self._script_workdir(spec)) / "command.log")
         cp = self._remote(["tail", "-n", str(max(0, tail)), path])
         if cp.returncode != 0:
@@ -361,6 +368,24 @@ class SSHSlurmExecutor(SlurmExecutor):
             if cp.returncode != 0 and pattern in {"command.log", RESULT_FILE}:
                 raise ExecutorError((cp.stderr or "Could not collect required remote output.").strip())
         return status
+
+    def collect_diagnostics(self, handle: JobHandle, spec: JobSpec) -> None:
+        remote_dir = self._script_workdir(spec)
+        spec.workdir.mkdir(parents=True, exist_ok=True)
+        copied_log = False
+        for pattern in (
+            "command.log", RESULT_FILE, STARTED_FILE,
+            "artifacts/**/*.log", "artifacts/**/stderr*", "artifacts/**/stdout*",
+        ):
+            cp = self._run([
+                "rsync", "-az", "--relative", "--prune-empty-dirs",
+                "%s:%s/./%s" % (self._destination(), remote_dir, pattern),
+                "%s/" % spec.workdir,
+            ])
+            if pattern == "command.log" and cp.returncode == 0:
+                copied_log = True
+        if not copied_log:
+            raise ExecutorError("Could not collect remote command.log for failed job %s." % handle.scheduler_id)
 
 
 def executor_for(profile: ExecutorProfile) -> Executor:

@@ -6,12 +6,13 @@ Parent samples only (no derived materialization yet).
 
 from pathlib import Path
 from datetime import datetime
+import copy
 import math
 import re
 import shutil
 from typing import Any, Dict, Tuple, Optional, List, Set
 
-from .base import Task, TaskContext, TaskScope, TaskScopeMember
+from .base import Task, TaskContext, TaskScope, TaskScopeMember, WorkUnit
 from nerd.utils.logging import get_logger
 from nerd.pipeline.runners.local import LocalRunner
 from nerd.pipeline.tasks.derived import (
@@ -40,6 +41,74 @@ class MutCountTask(Task):
         super().__init__()
         self._stage_in: List[Dict[str, str]] = []  # list of {src, dst} relative to remote workdir
         self._stage_out_extra: List[str] = []
+
+    def plan_work_units(
+        self,
+        ctx: TaskContext,
+        cfg: Dict[str, Any],
+        inputs: Dict[str, Any],
+        params: Dict[str, Any],
+    ) -> List[WorkUnit]:
+        """Fan a multi-reaction-group request into one scheduler job per group."""
+        configured = inputs.get("reaction_group")
+        if not isinstance(configured, (list, tuple, set)) or len(configured) < 2:
+            return super().plan_work_units(ctx, cfg, inputs, params)
+
+        from nerd.utils.config import LoadedConfig
+
+        def _clone_config() -> Dict[str, Any]:
+            data = copy.deepcopy(dict(cfg))
+            source = getattr(cfg, "source_path", None)
+            return LoadedConfig(data, Path(source)) if source is not None else data
+
+        units: List[WorkUnit] = []
+        grouped_samples: Set[str] = set()
+        for value in configured:
+            info = self._fetch_reaction_group_info(ctx, value)
+            if info is None:
+                continue
+            rg_id, rg_label, samples = info
+            grouped_samples.update(str(sample) for sample in samples)
+            unit_cfg = _clone_config()
+            block = dict(unit_cfg.get(self.name) or {})
+            # Explicit samples are scheduled once in a separate residual unit below.
+            block.pop("samples", None)
+            block.pop("derived_samples", None)
+            block.pop("reaction_groups", None)
+            block["reaction_group"] = rg_id
+            unit_cfg[self.name] = block
+            if hasattr(unit_cfg, "hash_data"):
+                unit_cfg.hash_data = copy.deepcopy(dict(unit_cfg))
+            safe_label = str(rg_label or rg_id)
+            units.append(WorkUnit(
+                key="rg-%s" % rg_id,
+                label=safe_label,
+                config=unit_cfg,
+                scope_kind="rg",
+                scope_id=int(rg_id),
+            ))
+
+        original = cfg.get(self.name) or {}
+        explicit_samples = [
+            sample for sample in list(original.get("samples") or [])
+            if str(sample) not in grouped_samples
+        ]
+        explicit_derived = list(original.get("derived_samples") or [])
+        if explicit_samples or explicit_derived:
+            residual_cfg = _clone_config()
+            residual = dict(residual_cfg.get(self.name) or {})
+            residual.pop("reaction_group", None)
+            residual.pop("reaction_groups", None)
+            residual["samples"] = explicit_samples
+            residual["derived_samples"] = explicit_derived
+            residual_cfg[self.name] = residual
+            if hasattr(residual_cfg, "hash_data"):
+                residual_cfg.hash_data = copy.deepcopy(dict(residual_cfg))
+            units.append(WorkUnit(
+                key="ungrouped", label="ungrouped", config=residual_cfg,
+                scope_kind="sample_batch", scope_id=None,
+            ))
+        return units or super().plan_work_units(ctx, cfg, inputs, params)
 
     def resolve_scope(self, ctx: Optional[TaskContext], inputs: Any) -> TaskScope:
         if ctx is None or inputs is None:
@@ -302,7 +371,7 @@ class MutCountTask(Task):
         # Accept either parent sample names under 'samples' or derived child_names under 'derived_samples'
         samples = list(mc.get("samples", []) or [])
         derived = list(mc.get("derived_samples", []) or [])
-        rg_cfg = mc.get("reaction_group")
+        rg_cfg = mc.get("reaction_group", mc.get("reaction_groups"))
         if isinstance(rg_cfg, (list, tuple, set)):
             reaction_groups = [str(item).strip() for item in rg_cfg if str(item).strip()]
         elif rg_cfg not in (None, ""):
@@ -315,6 +384,7 @@ class MutCountTask(Task):
         mc = {**mc, "samples": merged}
         if reaction_groups:
             mc["reaction_group"] = reaction_groups if len(reaction_groups) > 1 else reaction_groups[0]
+        mc.pop("reaction_groups", None)
 
         # Resolve parent samples from DB now so command() can run everything; no derived support yet
         from nerd.db import api as db_api  # local import

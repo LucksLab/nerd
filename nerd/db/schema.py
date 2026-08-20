@@ -327,6 +327,10 @@ CREATE TABLE IF NOT EXISTS nmr_fit_params (
 CREATE_CORE_TASKS = """
 CREATE TABLE IF NOT EXISTS core_tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_task_id INTEGER,
+    unit_key TEXT,
+    unit_label TEXT,
+    unit_index INTEGER,
     task_name TEXT NOT NULL,
     scope_kind TEXT NOT NULL,
     scope_id INTEGER,
@@ -340,7 +344,8 @@ CREATE TABLE IF NOT EXISTS core_tasks (
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
     ended_at TEXT,
     state TEXT NOT NULL DEFAULT 'pending',
-    message TEXT
+    message TEXT,
+    FOREIGN KEY(parent_task_id) REFERENCES core_tasks(id) ON DELETE CASCADE
 );
 """
 
@@ -455,6 +460,10 @@ CREATE_INDEX_CORE_TASKS_SCOPE = """
 CREATE INDEX IF NOT EXISTS idx_core_tasks_scope ON core_tasks (scope_kind, scope_id);
 """
 
+CREATE_INDEX_CORE_TASKS_PARENT = """
+CREATE INDEX IF NOT EXISTS idx_core_tasks_parent ON core_tasks (parent_task_id, unit_index);
+"""
+
 CREATE_INDEX_CORE_TASK_ATTEMPTS = """
 CREATE INDEX IF NOT EXISTS idx_core_task_attempts_task ON core_task_attempts (task_id, try_index);
 """
@@ -535,6 +544,7 @@ ALL_TABLES = [
 ALL_INDEXES = [
     CREATE_INDEX_CORE_TASKS_LABEL,
     CREATE_INDEX_CORE_TASKS_SCOPE,
+    CREATE_INDEX_CORE_TASKS_PARENT,
     CREATE_INDEX_CORE_TASK_ATTEMPTS,
     CREATE_INDEX_CORE_ARTIFACTS,
     CREATE_INDEX_CORE_TASK_SCOPE_MEMBERS,

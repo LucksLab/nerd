@@ -39,6 +39,17 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_sequencing_samples_source "
         "ON sequencing_samples (seqrun_id, sample_name, fq_source, fq_dir)"
     )
+    task_columns = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(core_tasks)")
+    }
+    for name, declaration in (
+        ("parent_task_id", "INTEGER REFERENCES core_tasks(id) ON DELETE CASCADE"),
+        ("unit_key", "TEXT"),
+        ("unit_label", "TEXT"),
+        ("unit_index", "INTEGER"),
+    ):
+        if task_columns and name not in task_columns:
+            conn.execute("ALTER TABLE core_tasks ADD COLUMN %s %s" % (name, declaration))
 
 
 def _is_lock_error(err: sqlite3.Error) -> bool:

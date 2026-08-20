@@ -32,6 +32,7 @@ class TaskState(str, Enum):
     COLLECTING = "collecting"
     CANCEL_REQUESTED = "cancel_requested"
     COMPLETED = "completed"
+    PARTIAL_SUCCESS = "partial_success"
     FAILED = "failed"
     CANCELLED = "cancelled"
 

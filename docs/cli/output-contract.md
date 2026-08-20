@@ -32,7 +32,8 @@ new optional workflow metrics may be added. A future incompatible change will
 increment the major schema version.
 
 `task list --json` returns an object with `schema_version` and a `tasks` array of
-compact task records rather than one task summary.
+compact task records rather than one task summary. Batch-capable records include
+`completed_units` and `total_units`; both are zero for ordinary single-job tasks.
 
 ## Examples
 

@@ -7,12 +7,14 @@ import pytest
 
 from nerd.db import api as db_api
 from nerd.pipeline.tasks import TASK_REGISTRY
-from nerd.pipeline.tasks.base import Task, TaskScope
+from nerd.pipeline.tasks.base import Task, TaskContext, TaskScope, WorkUnit
 from nerd.scheduler import store
 from nerd.scheduler.executors import LocalProcessExecutor, SlurmExecutor, SSHSlurmExecutor
 from nerd.scheduler.models import AttemptState, JobSpec
 from nerd.scheduler.profiles import ExecutorProfile, load_executor_profile
-from nerd.scheduler.service import cancel_task, collect_task, reconcile, retry_task, submit_task
+from nerd.scheduler.service import (
+    cancel_task, collect_task, reconcile, retry_task, submit_task, watch_task,
+)
 
 
 def _db(path: Path) -> sqlite3.Connection:
@@ -160,6 +162,24 @@ class _MissingOutputTask(_AsyncFileTask):
         return "true"
 
 
+class _FanoutTask(_AsyncFileTask):
+    name = "_scheduler_fanout_test"
+
+    def plan_work_units(self, ctx, cfg, inputs, params):
+        units = []
+        for index in range(2):
+            unit_cfg = dict(cfg)
+            unit_cfg[self.name] = {"unit": index}
+            units.append(WorkUnit(
+                key="unit-%s" % index, label="unit %s" % index,
+                config=unit_cfg, scope_kind="unit", scope_id=index,
+            ))
+        return units
+
+    def prepare(self, cfg):
+        return dict(cfg.get(self.name) or {}), {}
+
+
 def test_scientific_task_is_only_completed_after_collection(tmp_path, monkeypatch):
     monkeypatch.setitem(TASK_REGISTRY, _AsyncFileTask.name, _AsyncFileTask)
     output = tmp_path / "output"
@@ -254,3 +274,98 @@ def test_wait_for_task_can_collect_when_scheduler_finishes(monkeypatch):
 
     assert service.wait_for_task(object(), 17, collect=True, poll_interval=0.25) is collected
     assert sleeps == [0.25]
+
+
+def test_fanout_parent_watches_and_collects_independent_units(tmp_path, monkeypatch):
+    monkeypatch.setitem(TASK_REGISTRY, _FanoutTask.name, _FanoutTask)
+    output = tmp_path / "output"
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "run:\n  label: fanout\n  output_dir: %s\n  executor: laptop\n"
+        "executors:\n  laptop:\n    type: local\n%s:\n  enabled: true\n"
+        % (output, _FanoutTask.name)
+    )
+    conn = _db(output / "nerd.sqlite")
+    submitted = submit_task(conn, _FanoutTask.name, config)
+    assert submitted["is_parent"] is True
+    assert submitted["total_units"] == 2
+    assert len(store.child_task_ids(conn, submitted["task_id"])) == 2
+
+    finished = watch_task(
+        conn, submitted["task_id"], collect=True, poll_interval=0.02
+    )
+    assert finished["task_state"] == "completed"
+    assert finished["counts"] == {"completed": 2}
+    conn.close()
+
+
+def test_reconcile_failed_job_syncs_diagnostics_locally(tmp_path, monkeypatch):
+    from nerd.scheduler import service
+    from nerd.scheduler.models import JobHandle, JobStatus
+
+    conn = _db(tmp_path / "nerd.sqlite")
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "run:\n  label: failed\n  executor: laptop\n"
+        "executors:\n  laptop:\n    type: local\n"
+    )
+    task_id = db_api.begin_task(
+        conn, "example", "global", None, "laptop", str(tmp_path), "failed", "key"
+    )
+    spec = JobSpec("false", tmp_path / "work")
+    attempt = store.create_attempt(conn, task_id, "laptop", "local", spec, config)
+    store.transition_attempt(
+        conn, attempt["scheduler_attempt_id"], AttemptState.QUEUED,
+        handle=JobHandle("123"),
+    )
+
+    class FailedExecutor:
+        def status(self, handle, received_spec):
+            return JobStatus(
+                AttemptState.SCHEDULER_FAILED, exit_code=9, message="FAILED"
+            )
+
+        def collect_diagnostics(self, handle, received_spec):
+            received_spec.workdir.mkdir(parents=True, exist_ok=True)
+            (received_spec.workdir / "command.log").write_text("shape failed\n")
+
+    monkeypatch.setattr(service, "executor_for", lambda profile: FailedExecutor())
+    failed = reconcile(conn, task_id)
+    assert failed["task_state"] == "failed"
+    assert failed["exit_code"] == 9
+    assert (spec.workdir / "command.log").read_text() == "shape failed\n"
+    payload = __import__("json").loads((spec.workdir / "failure.json").read_text())
+    assert payload["slurm_state"] == "FAILED"
+    conn.close()
+
+
+def test_mut_count_plans_one_unit_per_reaction_group_without_duplicate_samples(
+    tmp_path, monkeypatch
+):
+    from nerd.pipeline.tasks.mut_count import MutCountTask
+
+    task = MutCountTask()
+    groups = {
+        "first": (11, "first", ["sample-a", "sample-b"]),
+        "second": (12, "second", ["sample-c"]),
+    }
+    monkeypatch.setattr(task, "_fetch_reaction_group_info", lambda ctx, value: groups[value])
+    cfg = {
+        "run": {"label": "fanout", "output_dir": str(tmp_path)},
+        "mut_count": {
+            "plugin": "shapemapper", "reaction_groups": ["first", "second"],
+            "samples": ["sample-a", "standalone"],
+        },
+    }
+    ctx = TaskContext(
+        db=object(), backend="ssh_slurm", workdir=tmp_path, threads=1,
+        mem_gb=1, time="00:10:00", label="fanout", output_dir=str(tmp_path),
+        executor_profile="quest",
+    )
+    prepared, params = task.prepare(cfg)
+    units = task.plan_work_units(ctx, cfg, prepared, params)
+    assert [unit.key for unit in units] == ["rg-11", "rg-12", "ungrouped"]
+    assert units[0].config["mut_count"]["reaction_group"] == 11
+    assert units[1].config["mut_count"]["reaction_group"] == 12
+    assert units[2].config["mut_count"]["samples"] == ["standalone"]
+    assert "reaction_groups" not in units[2].config["mut_count"]

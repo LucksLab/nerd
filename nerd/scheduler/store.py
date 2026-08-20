@@ -14,6 +14,7 @@ from .models import AttemptState, JobHandle, JobSpec, JobStatus, TaskState
 
 TERMINAL_TASK_STATES = {
     TaskState.COMPLETED.value,
+    TaskState.PARTIAL_SUCCESS.value,
     TaskState.FAILED.value,
     TaskState.CANCELLED.value,
 }
@@ -169,7 +170,8 @@ def get_attempt(conn: sqlite3.Connection, scheduler_attempt_id: int) -> sqlite3.
                sa.job_spec_json, sa.config_path, t.task_name, t.state AS task_state,
                t.label, t.output_dir, t.message AS task_message,
                t.started_at AS task_started_at, t.ended_at AS task_ended_at,
-               t.tool, t.tool_version
+               t.tool, t.tool_version, t.parent_task_id, t.unit_key,
+               t.unit_label, t.unit_index
         FROM core_scheduler_attempts sa
         JOIN core_task_attempts a ON a.id=sa.attempt_id
         JOIN core_tasks t ON t.id=a.task_id
@@ -194,6 +196,126 @@ def latest_attempt_for_task(conn: sqlite3.Connection, task_id: int) -> sqlite3.R
     if row is None:
         raise ValueError("Task %s has no asynchronous attempts." % task_id)
     return get_attempt(conn, int(row[0]))
+
+
+def task_record(conn: sqlite3.Connection, task_id: int) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM core_tasks WHERE id=?", (task_id,)).fetchone()
+    if row is None:
+        raise ValueError("Task %s does not exist." % task_id)
+    return row
+
+
+def attach_child(
+    conn: sqlite3.Connection,
+    child_id: int,
+    parent_id: int,
+    unit_key: str,
+    unit_label: str,
+    unit_index: int,
+) -> None:
+    with conn:
+        conn.execute(
+            "UPDATE core_tasks SET parent_task_id=?, unit_key=?, unit_label=?, unit_index=? "
+            "WHERE id=?",
+            (parent_id, unit_key, unit_label, unit_index, child_id),
+        )
+
+
+def child_task_ids(conn: sqlite3.Connection, parent_id: int) -> List[int]:
+    return [
+        int(row[0]) for row in conn.execute(
+            "SELECT id FROM core_tasks WHERE parent_task_id=? ORDER BY unit_index, id",
+            (parent_id,),
+        ).fetchall()
+    ]
+
+
+def is_parent_task(conn: sqlite3.Connection, task_id: int) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM core_tasks WHERE parent_task_id=? LIMIT 1", (task_id,)
+    ).fetchone() is not None
+
+
+def rollup_parent(conn: sqlite3.Connection, parent_id: int) -> sqlite3.Row:
+    children = conn.execute(
+        "SELECT state FROM core_tasks WHERE parent_task_id=?", (parent_id,)
+    ).fetchall()
+    if not children:
+        return task_record(conn, parent_id)
+    states = [str(row[0]) for row in children]
+    terminal = {
+        TaskState.COMPLETED.value, TaskState.PARTIAL_SUCCESS.value,
+        TaskState.FAILED.value, TaskState.CANCELLED.value,
+    }
+    successes = sum(state == TaskState.COMPLETED.value for state in states)
+    failures = sum(state in {TaskState.FAILED.value, TaskState.CANCELLED.value} for state in states)
+    if all(state == TaskState.COMPLETED.value for state in states):
+        state = TaskState.COMPLETED
+    elif all(item in terminal for item in states):
+        if successes and failures:
+            state = TaskState.PARTIAL_SUCCESS
+        elif failures == len(states):
+            state = TaskState.FAILED
+        else:
+            state = TaskState.COMPLETED
+    elif any(item in {TaskState.RUNNING.value, TaskState.COLLECTING.value} for item in states):
+        state = TaskState.RUNNING
+    elif any(item == TaskState.AWAITING_COLLECTION.value for item in states):
+        state = TaskState.AWAITING_COLLECTION
+    elif any(item == TaskState.CANCEL_REQUESTED.value for item in states):
+        state = TaskState.CANCEL_REQUESTED
+    else:
+        state = TaskState.SUBMITTED
+    message = "%s/%s completed; %s failed" % (successes, len(states), failures)
+    current = task_record(conn, parent_id)
+    if str(current["state"]) != state.value or str(current["message"] or "") != message:
+        transition_task(conn, parent_id, state, message)
+    return task_record(conn, parent_id)
+
+
+def task_overview(conn: sqlite3.Connection, task_id: int) -> Dict[str, Any]:
+    task = task_record(conn, task_id)
+    child_ids = child_task_ids(conn, task_id)
+    if not child_ids:
+        return dict(latest_attempt_for_task(conn, task_id))
+    rollup_parent(conn, task_id)
+    task = task_record(conn, task_id)
+    children = [dict(latest_attempt_for_task(conn, child_id)) for child_id in child_ids]
+    counts: Dict[str, int] = {}
+    for child in children:
+        state = str(child["task_state"])
+        counts[state] = counts.get(state, 0) + 1
+    first = children[0] if children else {}
+    return {
+        "is_parent": True,
+        "task_id": task_id,
+        "task_name": task["task_name"],
+        "task_state": task["state"],
+        "task_message": task["message"],
+        "label": task["label"],
+        "output_dir": task["output_dir"],
+        "task_started_at": task["started_at"],
+        "task_ended_at": task["ended_at"],
+        "tool": task["tool"],
+        "tool_version": task["tool_version"],
+        "try_index": None,
+        "scheduler_attempt_id": None,
+        "scheduler_state": "batch",
+        "executor_profile": first.get("executor_profile"),
+        "executor_type": first.get("executor_type"),
+        "scheduler_id": None,
+        "exit_code": None,
+        "error": task["message"] if task["state"] in {"failed", "partial_success"} else None,
+        "submitted_at": task["started_at"],
+        "scheduler_started_at": None,
+        "scheduler_finished_at": None,
+        "collected_at": task["ended_at"],
+        "log_path": None,
+        "remote_workdir": None,
+        "children": children,
+        "counts": counts,
+        "total_units": len(children),
+    }
 
 
 def job_spec(row: sqlite3.Row) -> JobSpec:
@@ -231,7 +353,10 @@ def list_tasks(
         raise ValueError("Task list limit must be at least 1.")
     sql = """
         SELECT t.id, t.task_name, t.label, t.state, t.backend, t.started_at, t.ended_at,
-               a.try_index, sa.executor_profile, sa.scheduler_id, sa.state AS attempt_state
+               a.try_index, sa.executor_profile, sa.scheduler_id, sa.state AS attempt_state,
+               (SELECT COUNT(*) FROM core_tasks c WHERE c.parent_task_id=t.id) AS total_units,
+               (SELECT COUNT(*) FROM core_tasks c WHERE c.parent_task_id=t.id AND c.state='completed') AS completed_units,
+               (SELECT COUNT(*) FROM core_tasks c WHERE c.parent_task_id=t.id AND c.state='failed') AS failed_units
         FROM core_tasks t
         LEFT JOIN core_task_attempts a ON a.id=(
             SELECT a2.id FROM core_task_attempts a2 WHERE a2.task_id=t.id
@@ -239,7 +364,7 @@ def list_tasks(
         )
         LEFT JOIN core_scheduler_attempts sa ON sa.attempt_id=a.id
     """
-    filters = []
+    filters = ["t.parent_task_id IS NULL"]
     params: List[Any] = []
     if label:
         filters.append("t.label=?")
@@ -250,8 +375,7 @@ def list_tasks(
     if task_name:
         filters.append("t.task_name=?")
         params.append(task_name)
-    if filters:
-        sql += " WHERE " + " AND ".join(filters)
+    sql += " WHERE " + " AND ".join(filters)
     sql += " ORDER BY t.id DESC LIMIT ?"
     params.append(limit)
     return list(conn.execute(sql, params).fetchall())

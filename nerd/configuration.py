@@ -207,7 +207,9 @@ def _validate_required(workflow: str, block: Mapping[str, Any]) -> None:
             "create requires at least one sample or metadata record/sheet."
         )
     if workflow == "mut_count" and not any(
-        block.get(key) for key in ("samples", "sample_names", "derived_samples", "reaction_group")
+        block.get(key) for key in (
+            "samples", "sample_names", "derived_samples", "reaction_group", "reaction_groups"
+        )
     ):
         raise ConfigValidationError(
             "mut_count requires samples, derived_samples, or reaction_group."

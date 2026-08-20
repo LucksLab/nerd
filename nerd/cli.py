@@ -158,8 +158,9 @@ def _scheduler_connection(
         config=cfg, config_path=config_path, must_exist=read_only
     )
     conn = db_api.connect(db_path)
-    if not read_only:
-        db_api.init_schema(conn)
+    # Existing task commands reconcile scheduler state and therefore require a
+    # writable, migrated schema even though they never create a missing DB.
+    db_api.init_schema(conn)
     return conn
 
 
@@ -176,10 +177,12 @@ def _next_actions(row) -> list[str]:
     attempt_state = row["scheduler_state"]
     actions = ["nerd task logs %s" % task_id]
     if task_state in {"pending", "submitted", "running", "cancel_requested"}:
-        actions.extend(["nerd task wait %s" % task_id, "nerd task cancel %s" % task_id])
+        actions.extend(["nerd task watch %s" % task_id, "nerd task cancel %s" % task_id])
     elif task_state == "awaiting_collection" or attempt_state == "scheduler_completed":
         actions.extend(["nerd task collect %s" % task_id, "nerd task wait %s --collect" % task_id])
-    elif attempt_state in {"scheduler_failed", "submission_failed", "cancelled", "validation_failed"}:
+    elif task_state == "partial_success" or attempt_state in {
+        "scheduler_failed", "submission_failed", "cancelled", "validation_failed"
+    }:
         actions.append("nerd task retry %s" % task_id)
     return actions
 
@@ -212,8 +215,9 @@ def _scheduler_summary(row, database_path: Optional[str] = None) -> TaskSummary:
     started = _row_value(row, "scheduler_started_at")
     finished = _row_value(row, "scheduler_finished_at")
     collected = _row_value(row, "collected_at") or _row_value(row, "task_ended_at")
+    attempt = row["try_index"]
     metrics = {
-        "attempt": int(row["try_index"]),
+        "attempt": int(attempt) if attempt is not None else None,
         "attempt_state": attempt_state,
         "executor": row["executor_profile"],
         "executor_type": _row_value(row, "executor_type"),
@@ -231,6 +235,8 @@ def _scheduler_summary(row, database_path: Optional[str] = None) -> TaskSummary:
     if output_dir:
         from nerd.reporting.summary import ArtifactReference
         artifacts.append(ArtifactReference("output_directory", str(output_dir)))
+    parent_counts = _row_value(row, "counts") or {}
+    attempted = int(_row_value(row, "total_units", 1) or 1)
     return TaskSummary(
         status=status, workflow=str(row["task_name"]), task_id=int(row["task_id"]),
         source_task_id=source_task_id,
@@ -238,8 +244,10 @@ def _scheduler_summary(row, database_path: Optional[str] = None) -> TaskSummary:
         version=_row_value(row, "tool_version"), started_at=started or submitted,
         ended_at=collected or finished, duration_seconds=_seconds_between(submitted, collected or finished),
         timings=timings,
-        counts={"attempted": 1, "succeeded": 1 if status == "completed" else 0,
-                "failed": 1 if status in {"failed", "cancelled"} else 0, "skipped": 0},
+        counts={"attempted": attempted,
+                "succeeded": int(parent_counts.get("completed", 1 if status == "completed" else 0)),
+                "failed": int(parent_counts.get("failed", 1 if status in {"failed", "cancelled"} else 0)),
+                "skipped": 0},
         metrics=metrics,
         failures=([TaskIssue("scheduler_error", str(error))]
                   if error and status in {"failed", "cancelled"} else []),
@@ -250,6 +258,26 @@ def _scheduler_summary(row, database_path: Optional[str] = None) -> TaskSummary:
 
 def _show_scheduler_row(row, *, detailed: bool = False) -> None:
     """Render stable human fields available before Phase 3's output contract."""
+    if _row_value(row, "is_parent", False):
+        counts = _row_value(row, "counts", {}) or {}
+        total = int(_row_value(row, "total_units", 0) or 0)
+        completed = int(counts.get("completed", 0))
+        failed = int(counts.get("failed", 0)) + int(counts.get("cancelled", 0))
+        typer.echo("task_id: %s" % row["task_id"])
+        typer.echo("task: %s" % row["task_name"])
+        typer.echo("task_state: %s" % row["task_state"])
+        typer.echo("progress: %s/%s completed; %s failed" % (completed, total, failed))
+        typer.echo("UNIT\tSTATE\tTASK ID\tSCHEDULER ID\tLOG")
+        for child in row["children"]:
+            typer.echo("%s\t%s\t%s\t%s\t%s" % (
+                child.get("unit_label") or child.get("unit_key"),
+                child["task_state"], child["task_id"],
+                child.get("scheduler_id") or "-", child.get("log_path") or "-",
+            ))
+        if detailed:
+            typer.echo("output_dir: %s" % row["output_dir"])
+            typer.echo("next_actions: %s" % ", ".join(_next_actions(row)))
+        return
     typer.echo("task_id: %s" % row["task_id"])
     typer.echo("task: %s" % row["task_name"])
     typer.echo("task_state: %s" % row["task_state"])
@@ -446,13 +474,14 @@ def _action_handler(
 
 def _logs_handler(
     ctx: typer.Context, task_id: int, tail: int,
-    db: Optional[Path], project: Optional[Path],
+    db: Optional[Path], project: Optional[Path], unit: Optional[str] = None,
+    failed_only: bool = False,
 ) -> None:
     from nerd.scheduler.service import task_logs
 
     conn = _open_existing(ctx, db, project, "Logs")
     try:
-        typer.echo(task_logs(conn, task_id, tail))
+        typer.echo(task_logs(conn, task_id, tail, unit=unit, failed_only=failed_only))
     except Exception as exc:
         typer.echo("Logs failed: %s" % exc, err=True)
         raise typer.Exit(code=1)
@@ -463,16 +492,17 @@ def _logs_handler(
 def _list_handler(
     ctx: typer.Context, label: Optional[str], state: Optional[str], workflow: Optional[RunStep],
     limit: int, db: Optional[Path], project: Optional[Path], json_output: bool = False,
+    refresh: bool = True,
 ) -> None:
-    from nerd.scheduler import store
+    from nerd.scheduler.service import list_tasks
 
     if json_output:
         _set_json_logging(ctx)
     conn = _open_existing(ctx, db, project, "List")
     try:
-        rows = store.list_tasks(
+        rows = list_tasks(
             conn, label=label, state=state,
-            task_name=workflow.value if workflow else None, limit=limit,
+            task_name=workflow.value if workflow else None, limit=limit, refresh=refresh,
         )
         if json_output:
             payload = {
@@ -482,6 +512,7 @@ def _list_handler(
                     "status": row["state"], "attempt": row["try_index"],
                     "executor": row["executor_profile"], "scheduler_id": row["scheduler_id"],
                     "started_at": row["started_at"], "ended_at": row["ended_at"],
+                    "completed_units": row["completed_units"], "total_units": row["total_units"],
                 } for row in rows],
             }
             typer.echo(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -489,11 +520,13 @@ def _list_handler(
         if not rows:
             typer.echo("No tasks found.")
             return
-        typer.echo("ID\tTASK\tLABEL\tSTATE\tATTEMPT\tEXECUTOR\tSCHEDULER ID")
+        typer.echo("ID\tTASK\tLABEL\tSTATE\tPROGRESS\tATTEMPT\tEXECUTOR\tSCHEDULER ID")
         for row in rows:
-            typer.echo("%s\t%s\t%s\t%s\t%s\t%s\t%s" % (
+            total = int(row["total_units"] or 0)
+            progress = "%s/%s" % (row["completed_units"], total) if total else "-"
+            typer.echo("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (
                 row["id"], row["task_name"], row["label"], row["state"],
-                row["try_index"] or "-", row["executor_profile"] or "-", row["scheduler_id"] or "-",
+                progress, row["try_index"] or "-", row["executor_profile"] or "-", row["scheduler_id"] or "-",
             ))
     finally:
         conn.close()
@@ -509,9 +542,11 @@ def task_list(
     db: Optional[Path] = typer.Option(None, "--db", help="Existing controller database."),
     project: Optional[Path] = typer.Option(None, "--project", help="Project directory."),
     json_output: bool = typer.Option(False, "--json", help="Write only JSON to stdout."),
+    no_refresh: bool = typer.Option(False, "--no-refresh", help="Show stored state without contacting executors."),
 ):
     """List durable tasks, newest first."""
-    _list_handler(ctx, label, state, workflow, limit, db, project, json_output)
+    _list_handler(ctx, label, state, workflow, limit, db, project, json_output,
+                  refresh=not no_refresh)
 
 
 @task_app.command("show")
@@ -535,9 +570,11 @@ def task_logs_command(
     tail: int = typer.Option(100, "--tail", "-n", min=0, help="Number of lines to show."),
     db: Optional[Path] = typer.Option(None, "--db", help="Existing controller database."),
     project: Optional[Path] = typer.Option(None, "--project", help="Project directory."),
+    unit: Optional[str] = typer.Option(None, "--unit", help="Work-unit key or label for a batch task."),
+    failed_only: bool = typer.Option(False, "--failed", help="Show logs only for failed work units."),
 ):
     """Read logs for the latest task attempt."""
-    _logs_handler(ctx, task_id, tail, db, project)
+    _logs_handler(ctx, task_id, tail, db, project, unit=unit, failed_only=failed_only)
 
 
 @task_app.command("wait")
@@ -557,6 +594,56 @@ def task_wait(
     )
     _action_handler(ctx, task_id, db, project, action, "Wait", detailed=True,
                     json_output=json_output)
+
+
+@task_app.command("watch")
+def task_watch(
+    ctx: typer.Context,
+    task_id: int = typer.Argument(..., min=1, help="Durable task ID."),
+    collect: bool = typer.Option(False, "--collect", help="Collect successful work units as they finish."),
+    poll_interval: float = typer.Option(2.0, "--poll-interval", min=0.05, help="Seconds between checks."),
+    db: Optional[Path] = typer.Option(None, "--db", help="Existing controller database."),
+    project: Optional[Path] = typer.Option(None, "--project", help="Project directory."),
+):
+    """Watch scheduler progress in the foreground without owning the remote jobs."""
+    from nerd.scheduler.service import watch_task
+
+    conn = _open_existing(ctx, db, project, "Watch")
+    last_signature = None
+
+    def display(row) -> None:
+        nonlocal last_signature
+        children = _row_value(row, "children", []) or []
+        signature = (
+            row["task_state"],
+            tuple((child["task_id"], child["task_state"], child["scheduler_state"])
+                  for child in children),
+        )
+        if signature == last_signature:
+            return
+        if last_signature is not None:
+            typer.echo("")
+        _show_scheduler_row(row, detailed=False)
+        last_signature = signature
+
+    try:
+        row = watch_task(
+            conn, task_id, collect=collect, poll_interval=poll_interval,
+            on_update=display,
+        )
+    except KeyboardInterrupt:
+        typer.echo("\nStopped watching; remote jobs continue running.", err=True)
+        raise typer.Exit(code=130)
+    except Exception as exc:
+        typer.echo("Watch failed: %s" % exc, err=True)
+        raise typer.Exit(code=1)
+    finally:
+        conn.close()
+    counts = _row_value(row, "counts", {}) or {}
+    if row["task_state"] == "partial_success" or int(counts.get("failed", 0)) > 0:
+        raise typer.Exit(code=2)
+    if row["task_state"] in {"failed", "cancelled"}:
+        raise typer.Exit(code=1)
 
 
 def _lifecycle_command(name: str, action_name: str, help_text: str):

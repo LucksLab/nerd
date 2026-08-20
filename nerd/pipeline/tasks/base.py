@@ -62,12 +62,33 @@ class TaskScope:
         return self
 
 
+@dataclass
+class WorkUnit:
+    """One independently schedulable slice of a scientific task."""
+
+    key: str
+    label: str
+    config: Dict[str, Any]
+    scope_kind: Optional[str] = None
+    scope_id: Optional[int] = None
+
+
 class Task(abc.ABC):
     """
     An abstract base class for a runnable task in the pipeline.
     """
     name: str = "base_task"
     scope_kind: str = "sample"  # Default scope; tasks may override resolve_scope()
+
+    def plan_work_units(
+        self,
+        ctx: TaskContext,
+        cfg: Dict[str, Any],
+        inputs: Any,
+        params: Any,
+    ) -> List[WorkUnit]:
+        """Return independently schedulable units; workflows are single-unit by default."""
+        return [WorkUnit("main", self.name, cfg)]
 
     def exec(self, db_conn: sqlite3.Connection, cfg: Dict[str, Any], verbose: bool = False):
         """

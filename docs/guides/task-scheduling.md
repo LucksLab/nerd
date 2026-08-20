@@ -80,6 +80,7 @@ create a missing database. The selectors work naturally after the command:
 ```bash
 nerd task show 42 --db results/nerd.sqlite
 nerd task logs 42 --db results/nerd.sqlite --tail 200
+nerd task watch 42 --db results/nerd.sqlite
 nerd task wait 42 --project EKC.07.00.000
 nerd task cancel 42 --project EKC.07.00.000
 nerd task collect 42 --project EKC.07.00.000
@@ -87,11 +88,33 @@ nerd task retry 42 --project EKC.07.00.000
 nerd task list --project EKC.07.00.000 --state failed --limit 20
 ```
 
-`task show` first asks Slurm (or the local executor) and then records the observed
-state in SQLite. There is no required daemon. An SSH or controller disconnect
-does not stop a Slurm job; run `task show` after reconnecting. `task wait`
-polls until the executor reaches a terminal or collection-ready state; add
-`--collect` to import successful output before returning.
+`task show`, `task list`, `task logs`, and `task watch` ask Slurm (or the local
+executor) and record the observed state in SQLite. Use `task list --no-refresh`
+for a database-only snapshot. There is no required daemon. An SSH or controller
+disconnect does not stop a Slurm job; run `task watch` again after reconnecting
+to catch up from `sacct`. `task wait` polls until the executor reaches a terminal
+or collection-ready state; add `--collect` to import successful output before
+returning.
+
+`task watch` is the foreground progress view. It can be interrupted without
+cancelling remote work. Add `--collect` to collect and validate successful work
+units as they finish. Terminal failures always trigger a best-effort diagnostic
+sync, including `command.log`, `failure.json`, and available tool logs. If the
+transfer is interrupted, a later status command retries it.
+
+Workflows may divide a durable request into independent work units. `mut_count`
+does this when more than one `reaction_group` is selected: each group receives
+its own task row, work directory, Slurm job, log, collection lifecycle, and retry
+history beneath one parent task ID. The scheduler can run those jobs in parallel
+as resources become available. Parent commands aggregate the children:
+
+```bash
+nerd task show 42
+nerd task logs 42 --unit 65_1
+nerd task logs 42 --failed
+nerd task retry 42        # retries failed units only
+nerd task cancel 42       # cancels active units
+```
 
 `task collect` is deliberately separate from scheduler completion. A successful
 Slurm exit moves the task to `awaiting_collection`. Collection stages remote
