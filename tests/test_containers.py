@@ -6,6 +6,7 @@ import pytest
 
 from nerd.containers import (
     ContainerError,
+    ContainerReadiness,
     ContainerSpec,
     HostCommands,
     RuntimeInfo,
@@ -16,6 +17,7 @@ from nerd.containers import (
     render_container_exec,
     shapemapper_container_spec,
 )
+from nerd.cli import app
 from nerd.db import api as db_api
 from nerd.pipeline.plugins.mutcount.shapemapper import ShapeMapperPlugin
 from nerd.pipeline.tasks.mut_count import MutCountTask
@@ -91,6 +93,57 @@ def test_doctor_reports_placeholder_and_missing_runtime_without_network():
     assert not result.ready
     assert {c["name"] for c in result.checks if not c["ok"]} == {"runtime", "image"}
     assert not any(" pull " in command for command, _ in fake.calls)
+
+
+def test_plugin_doctor_inherits_requested_executor_from_project_toml(
+    cli_runner, tmp_path, monkeypatch
+):
+    project = tmp_path / "project"
+    config_dir = project / "configs"
+    nerd_dir = project / ".nerd"
+    config_dir.mkdir(parents=True)
+    nerd_dir.mkdir()
+    (nerd_dir / "project.toml").write_text(
+        "[project]\n"
+        "name = 'test'\n"
+        "default_executor = 'local'\n"
+        "[paths]\n"
+        "database = '.nerd/nerd.sqlite'\n"
+        "output = 'outputs'\n"
+        "[executors.local]\n"
+        "type = 'local'\n"
+        "[executors.quest]\n"
+        "type = 'ssh_slurm'\n"
+        "host = 'quest'\n"
+        "remote_base_dir = '/scratch/test/nerd-runs'\n"
+    )
+    config = config_dir / "mut_count.yaml"
+    config.write_text(
+        "mut_count:\n"
+        "  plugin: shapemapper\n"
+        "  tool:\n"
+        "    execution: container\n"
+    )
+    observed = {}
+
+    def fake_inspect(spec, profile, tool_cfg):
+        observed["profile"] = profile
+        return ContainerReadiness(
+            True, profile.name, profile.executor_type, profile.options["host"]
+        )
+
+    monkeypatch.chdir(project)
+    monkeypatch.setattr("nerd.containers.inspect_container", fake_inspect)
+    result = cli_runner.invoke(
+        app,
+        ["plugin", "doctor", "shapemapper", str(config), "--profile", "quest"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert observed["profile"].name == "quest"
+    assert observed["profile"].executor_type == "ssh_slurm"
+    assert observed["profile"].options["remote_base_dir"] == "/scratch/test/nerd-runs"
+    assert "executor: quest (ssh_slurm)" in result.output
 
 
 def test_submit_rejects_placeholder_before_creating_task_or_run_directory(tmp_path):

@@ -23,7 +23,6 @@ from nerd.configuration import (
     ConfigValidationError, redact, resolve_config, resolved_view, validate_config,
     write_template,
 )
-from nerd.utils.config import load_config
 from nerd.utils.hashing import config_hash
 from nerd.utils.logging import get_logger, setup_logger
 from nerd.reporting.summary import (
@@ -583,11 +582,15 @@ task_collect = _lifecycle_command("collect", "collect_task", "Collect and valida
 task_retry = _lifecycle_command("retry", "retry_task", "Retry a failed or cancelled task.")
 
 
-def _container_cli_context(config_path: Path, profile_name: Optional[str]):
+def _container_cli_context(
+    config_path: Path,
+    profile_name: Optional[str],
+    context: Optional[ProjectContext] = None,
+):
     from nerd.containers import container_requested, shapemapper_container_spec
     from nerd.scheduler.profiles import load_executor_profile
 
-    cfg = load_config(config_path)
+    cfg, _ = resolve_config(config_path, context=context, executor=profile_name)
     block = cfg.get("mut_count") or {}
     if str(block.get("plugin", "")).lower() != "shapemapper":
         raise ValueError("This command requires the ShapeMapper mut_count plugin.")
@@ -630,10 +633,15 @@ def _readiness_summary(result, spec, workflow: str) -> TaskSummary:
     )
 
 
-def _inspect_shapemapper(config_path: Path, profile: Optional[str], json_output: bool = False) -> None:
+def _inspect_shapemapper(
+    config_path: Path,
+    profile: Optional[str],
+    json_output: bool = False,
+    context: Optional[ProjectContext] = None,
+) -> None:
     from nerd.containers import inspect_container
     try:
-        spec, executor_profile, tool_cfg = _container_cli_context(config_path, profile)
+        spec, executor_profile, tool_cfg = _container_cli_context(config_path, profile, context)
         result = inspect_container(spec, executor_profile, tool_cfg)
         if json_output:
             _emit_summary(_readiness_summary(result, spec, "container_inspect"), True)
@@ -651,10 +659,15 @@ def _inspect_shapemapper(config_path: Path, profile: Optional[str], json_output:
         raise typer.Exit(code=1)
 
 
-def _prepare_shapemapper(config_path: Path, profile: Optional[str], json_output: bool = False) -> None:
+def _prepare_shapemapper(
+    config_path: Path,
+    profile: Optional[str],
+    json_output: bool = False,
+    context: Optional[ProjectContext] = None,
+) -> None:
     from nerd.containers import prepare_container
     try:
-        spec, executor_profile, tool_cfg = _container_cli_context(config_path, profile)
+        spec, executor_profile, tool_cfg = _container_cli_context(config_path, profile, context)
         result = prepare_container(spec, executor_profile, tool_cfg)
         if json_output:
             _emit_summary(_readiness_summary(result, spec, "container_prepare"), True)
@@ -672,6 +685,7 @@ def _prepare_shapemapper(config_path: Path, profile: Optional[str], json_output:
 
 @plugin_doctor_app.command("shapemapper")
 def plugin_doctor_shapemapper(
+    ctx: typer.Context,
     config_path: Path = typer.Argument(
         ..., exists=True, file_okay=True, dir_okay=False, readable=True,
         resolve_path=True, help="ShapeMapper run configuration file."
@@ -680,11 +694,14 @@ def plugin_doctor_shapemapper(
     json_output: bool = typer.Option(False, "--json", help="Write only JSON to stdout."),
 ):
     """Check ShapeMapper runtime and immutable-image readiness."""
-    _inspect_shapemapper(config_path, profile, json_output)
+    _inspect_shapemapper(
+        config_path, profile, json_output, _command_context(ctx, None, None)
+    )
 
 
 @image_app.command("inspect")
 def image_inspect(
+    ctx: typer.Context,
     plugin: ContainerPlugin = typer.Argument(..., help="Containerized plugin."),
     config_path: Path = typer.Argument(
         ..., exists=True, file_okay=True, dir_okay=False, readable=True,
@@ -694,11 +711,14 @@ def image_inspect(
     json_output: bool = typer.Option(False, "--json", help="Write only JSON to stdout."),
 ):
     """Inspect an immutable plugin image without preparing it."""
-    _inspect_shapemapper(config_path, profile, json_output)
+    _inspect_shapemapper(
+        config_path, profile, json_output, _command_context(ctx, None, None)
+    )
 
 
 @image_app.command("prepare")
 def image_prepare(
+    ctx: typer.Context,
     plugin: ContainerPlugin = typer.Argument(..., help="Containerized plugin."),
     config_path: Path = typer.Argument(
         ..., exists=True, file_okay=True, dir_okay=False, readable=True,
@@ -708,7 +728,9 @@ def image_prepare(
     json_output: bool = typer.Option(False, "--json", help="Write only JSON to stdout."),
 ):
     """Prepare and smoke-test an immutable plugin image."""
-    _prepare_shapemapper(config_path, profile, json_output)
+    _prepare_shapemapper(
+        config_path, profile, json_output, _command_context(ctx, None, None)
+    )
 
 
 def _resolved_existing_database(ctx: typer.Context, db: Optional[Path], project: Optional[Path]) -> Path:
@@ -1093,6 +1115,7 @@ _legacy_action("retry", "task retry", task_retry)
 
 @app.command("doctor", hidden=True)
 def legacy_doctor(
+    ctx: typer.Context,
     config_path: Path = typer.Argument(
         ..., exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True
     ),
@@ -1100,11 +1123,14 @@ def legacy_doctor(
 ):
     """Deprecated compatibility wrapper for plugin doctor shapemapper."""
     _deprecated("doctor", "plugin doctor shapemapper")
-    _inspect_shapemapper(config_path, profile)
+    _inspect_shapemapper(
+        config_path, profile, context=_command_context(ctx, None, None)
+    )
 
 
 @app.command("prepare-image", hidden=True)
 def legacy_prepare_image(
+    ctx: typer.Context,
     config_path: Path = typer.Argument(
         ..., exists=True, file_okay=True, dir_okay=False, readable=True, resolve_path=True
     ),
@@ -1112,7 +1138,9 @@ def legacy_prepare_image(
 ):
     """Deprecated compatibility wrapper for image prepare shapemapper."""
     _deprecated("prepare-image", "image prepare shapemapper")
-    _prepare_shapemapper(config_path, profile)
+    _prepare_shapemapper(
+        config_path, profile, context=_command_context(ctx, None, None)
+    )
 
 
 if __name__ == "__main__":
