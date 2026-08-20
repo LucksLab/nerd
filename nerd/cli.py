@@ -34,6 +34,7 @@ plugin_app = typer.Typer(no_args_is_help=True, help="Advanced scientific plugin 
 plugin_doctor_app = typer.Typer(no_args_is_help=True, help="Check plugin readiness.")
 image_app = typer.Typer(no_args_is_help=True, help="Inspect and prepare immutable tool images.")
 db_app = typer.Typer(no_args_is_help=True, help="Inspect the selected project database.")
+webui_app = typer.Typer(no_args_is_help=True, help="Run the sample-input helper webapp.")
 
 
 class RunStep(str, enum.Enum):
@@ -700,6 +701,53 @@ plugin_app.add_typer(plugin_doctor_app, name="doctor")
 app.add_typer(plugin_app, name="plugin")
 app.add_typer(image_app, name="image")
 app.add_typer(db_app, name="db")
+app.add_typer(webui_app, name="webui")
+
+
+
+@webui_app.command("serve")
+def webui_serve(
+    ctx: typer.Context,
+    project: Path = typer.Option(
+        ..., "--project", "-p",
+        help="Label directory to work in (holds configs/, nerd.sqlite and the autosaved draft).",
+    ),
+    db: Optional[Path] = typer.Option(
+        None, "--db", help="SQLite database path (default: <project>/nerd.sqlite)."
+    ),
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8420, "--port"),
+    open_browser: bool = typer.Option(True, "--open-browser/--no-open-browser"),
+):
+    """Launch the sample-input helper.
+
+    A local webapp for building the constructs, buffers, sequencing runs and
+    sample sheet that 'nerd run create' consumes: pair fastq reads, pull
+    metadata out of sample names, fill columns in bulk, and enter reaction
+    times per timecourse.
+
+    Requires the 'webui' extra: pip install -e ".[webui]"
+    """
+    try:
+        import uvicorn
+    except ImportError:
+        typer.echo(
+            'The webui extra is not installed. Run: pip install -e ".[webui]"',
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    project.mkdir(parents=True, exist_ok=True)
+    typer.echo("nerd sample input helper -> http://%s:%s" % (host, port))
+    typer.echo("project: %s" % project)
+
+    if open_browser:
+        import threading
+        import webbrowser
+        threading.Timer(1.0, lambda: webbrowser.open("http://%s:%s/" % (host, port))).start()
+
+    import nerd.webui.app as webui_module
+    uvicorn.run(webui_module.app, host=host, port=port, log_level="info")
 
 
 def _deprecated(old: str, replacement: str) -> None:

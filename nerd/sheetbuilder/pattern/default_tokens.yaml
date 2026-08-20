@@ -1,0 +1,86 @@
+# Default token vocabulary for the sample-name pattern engine.
+#
+# Most tokens deliberately have no `match`: the compiler derives one from
+# the literal the user typed after the token, so a token consumes
+# everything up to the next delimiter. That is why a buffer value like
+# "0mM-THF" works without anyone widening a character class.
+#
+# Add a token here (or from the token panel in the webapp) to extend the
+# vocabulary without touching code.
+tokens:
+  id:
+    description: Leading sample/tube number. Parsed for context, not written to the sheet.
+  doneby:
+    maps_to: done_by
+    description: Experimenter initials.
+  construct:
+    maps_to: construct
+    description: Construct disp_name, resolved against the nerd DB.
+  construct_family:
+    description: Construct family, for names that split family and variant.
+  construct_name:
+    description: Construct variant name, for names that split family and variant.
+  temp:
+    maps_to: temperature
+    normalize: float
+    description: Reaction temperature; trailing C/c is stripped (25c -> 25).
+  replicate:
+    maps_to: replicate
+    description: Replicate label (a/b/1/2...).
+  tp_num:
+    normalize: int
+    description: >-
+      Timepoint INDEX within a reaction group (tp1, tp2, ... or 1, 2, ...).
+      Deliberately not written to reaction_time: tp2 means "the second
+      timepoint", not "2 seconds". The actual seconds come from the reaction
+      group's time ladder, which you enter once per group.
+  reaction_time:
+    maps_to: reaction_time
+    normalize: int
+    description: Reaction time in SECONDS, when the name carries it directly.
+  time_min:
+    maps_to: reaction_time
+    normalize: int
+    scale: 60
+    description: >-
+      Reaction time written in MINUTES in the sample name; converted to
+      seconds (the "-stop-25" style, where 25 means 25 min / 1500 s).
+  time_hr:
+    maps_to: reaction_time
+    normalize: int
+    scale: 3600
+    description: Reaction time written in hours in the sample name.
+  treated:
+    maps_to: treated
+    normalize: int
+    description: "1 = plus/treated, 0 = minus/untreated, 2 = legacy mixed (demuxable)."
+    value_map:
+      p: "1"
+      plus: "1"
+      treated: "1"
+      t: "1"
+      m: "0"
+      minus: "0"
+      untreated: "0"
+      mock: "0"
+      u: "0"
+      pm: "2"
+      mix: "2"
+      mixed: "2"
+  buffer:
+    maps_to: buffer
+    description: Buffer name or disp_name, resolved against the nerd DB.
+  probe:
+    maps_to: probe
+    description: Probe reagent (dms, etoh, ...).
+  probe_conc:
+    maps_to: probe_concentration
+    description: Probe concentration, if encoded in the name.
+  rt:
+    maps_to: RT
+    description: Reverse-transcription protocol (SSIII, MRT, ...).
+  reaction_group:
+    maps_to: reaction_group
+    description: Reaction-group label, if encoded in the name.
+  "*":
+    description: Ignore this segment (matches anything, writes nothing).

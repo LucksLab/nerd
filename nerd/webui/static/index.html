@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nerd · sample input</title>
+<link rel="stylesheet" href="/static/vendor/tabulator/tabulator.min.css">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="brand-mark">nerd</span><span class="brand-sub">sample input</span></div>
+  <div class="connect-bar">
+    <input id="projectDir" class="input" placeholder="Project folder" size="30">
+    <input id="dbPath" class="input" placeholder="DB path (optional)" size="20">
+    <input id="labelInput" class="input" placeholder="label" value="sample_import" size="12">
+    <button id="connectBtn" class="btn btn-primary">Connect</button>
+    <span id="connectStatus" class="pill pill-idle">not connected</span>
+  </div>
+</header>
+
+<div id="stepBar" class="step-bar">
+  <button class="step" data-panel="ingestPanel"><span class="step-num">1</span> Load samples</button>
+  <button class="step" data-panel="patternPanel"><span class="step-num">2</span> Extract from names</button>
+  <button class="step" data-panel="batchPanel"><span class="step-num">3</span> Fill columns</button>
+  <button class="step" data-panel="groupPanel"><span class="step-num">4</span> Timecourses <span id="groupCount" class="mini-badge"></span></button>
+  <button class="step" data-panel="tokenPanel"><span class="step-num">·</span> Tokens</button>
+  <button class="step" data-panel="stagedPanel"><span class="step-num">·</span> New entries <span id="stagedCount" class="mini-badge"></span></button>
+</div>
+
+<!-- ---------- collapsible panels ---------- -->
+<section id="ingestPanel" class="panel">
+  <div class="panel-grid">
+    <label class="field">fastq folder (the path nerd will use as fq_dir)
+      <input id="fqDir" class="input input-mono" placeholder="/projects/b1044/Sequencing/.../run_name">
+    </label>
+    <label class="field">Paste the folder listing (output of <code>ls</code>, local or on Quest)
+      <textarea id="fqListing" class="input input-mono" rows="5"
+        placeholder="001_fourU_WT_18c_a_1_p_S97.sub5k_R1.fastq.gz&#10;001_fourU_WT_18c_a_1_p_S97.sub5k_R2.fastq.gz&#10;..."></textarea>
+    </label>
+  </div>
+  <div class="panel-actions">
+    <button id="ingestFastqBtn" class="btn btn-primary">Pair reads &amp; build rows</button>
+    <button id="scanLocalBtn" class="btn btn-ghost">Scan folder on this machine</button>
+    <span class="hint">R1/R2 are paired automatically; sample_name, fq_dir, r1_file, r2_file get filled.</span>
+  </div>
+  <details class="fallback">
+    <summary>No fastq files — just paste sample names</summary>
+    <textarea id="plainNames" class="input input-mono" rows="4" placeholder="one sample name per line"></textarea>
+    <button id="ingestNamesBtn" class="btn btn-ghost">Build rows from names</button>
+  </details>
+  <div id="ingestResult" class="panel-result"></div>
+</section>
+
+<section id="patternPanel" class="panel">
+  <div id="tokenPalette" class="token-palette"></div>
+  <div class="pattern-row">
+    <input id="patternInput" class="input input-mono" placeholder="click a token above, then type your own delimiters between them">
+    <button id="applyPatternBtn" class="btn btn-primary">Apply to table</button>
+  </div>
+  <label class="checkline"><input type="checkbox" id="forcePattern"> overwrite cells I edited by hand</label>
+  <div id="patternPreview" class="preview"></div>
+</section>
+
+<section id="batchPanel" class="panel">
+  <div class="panel-actions">
+    <select id="batchColumn" class="input"></select>
+    <input id="batchValue" class="input" placeholder="value">
+    <button id="batchAllBtn" class="btn btn-primary">Set on all rows</button>
+    <button id="batchSelBtn" class="btn btn-secondary">Set on selected rows</button>
+    <span class="hint">For columns that are the same across a run — probe, RT, done_by, buffer, sequencing run.</span>
+  </div>
+</section>
+
+<section id="groupPanel" class="panel">
+  <div class="panel-actions">
+    <button id="deriveGroupsBtn" class="btn btn-primary">Find timecourses</button>
+    <label class="field-inline">label pattern
+      <input id="labelTemplate" class="input input-sm input-mono" value="{temperature}_{n}" size="20">
+    </label>
+    <button id="relabelBtn" class="btn btn-ghost btn-sm">Re-label all</button>
+    <span class="hint">Groups are the unique combinations of buffer, replicate, temperature and construct.</span>
+  </div>
+
+  <div class="group-layout">
+    <div class="group-table-wrap">
+      <table class="group-table">
+        <thead><tr>
+          <th>label</th><th>conditions</th><th>samples</th><th>timepoints</th><th>reaction times</th><th></th>
+        </tr></thead>
+        <tbody id="groupRows"></tbody>
+      </table>
+    </div>
+    <aside class="ladder-side">
+      <h4>Saved time ladders</h4>
+      <div id="ladderList" class="ladder-list"></div>
+      <div class="ladder-new">
+        <input id="newLadderName" class="input input-sm" placeholder="name, e.g. 45C standard">
+        <textarea id="newLadderTimes" class="input input-sm input-mono" rows="2"
+          placeholder="30, 60, 120, 300  ·  or 3min, 6min, 10min"></textarea>
+        <button id="newLadderBtn" class="btn btn-secondary btn-sm">Save ladder</button>
+      </div>
+      <details class="paste-grid">
+        <summary>Paste times for many groups at once</summary>
+        <p class="hint">One line per group, in the order listed on the left. Tabs, commas or spaces between times; bare numbers are seconds.</p>
+        <textarea id="gridPaste" class="input input-sm input-mono" rows="5"
+          placeholder="30&#9;60&#9;1200&#9;2400&#10;180&#9;360&#9;600&#9;1500"></textarea>
+        <button id="gridApplyBtn" class="btn btn-secondary btn-sm">Apply to listed groups</button>
+      </details>
+    </aside>
+  </div>
+  <div id="groupResult" class="panel-result"></div>
+</section>
+
+<section id="tokenPanel" class="panel">
+  <div class="panel-actions">
+    <input id="newTokenName" class="input input-sm" placeholder="token name" size="14">
+    <select id="newTokenColumn" class="input input-sm"></select>
+    <select id="newTokenNormalize" class="input input-sm">
+      <option value="">text</option><option value="int">whole number</option><option value="float">number</option>
+    </select>
+    <button id="addTokenBtn" class="btn btn-secondary">Add token</button>
+    <span class="hint">A token matches everything up to the next delimiter you type.</span>
+  </div>
+  <div id="tokenList" class="token-list"></div>
+</section>
+
+<section id="stagedPanel" class="panel">
+  <div id="stagedList" class="staged-list"></div>
+  <div class="panel-actions">
+    <button class="btn btn-ghost" data-new-entity="construct">+ Construct</button>
+    <button class="btn btn-ghost" data-new-entity="buffer">+ Buffer</button>
+    <button class="btn btn-ghost" data-new-entity="sequencing_run">+ Sequencing run</button>
+  </div>
+</section>
+
+<!-- ---------- the table ---------- -->
+<main class="table-wrap">
+  <div class="table-head">
+    <div class="issue-bar" id="issueBar"></div>
+    <div class="table-actions">
+      <span id="rowCount" class="hint"></span>
+      <button id="addRowBtn" class="btn btn-ghost btn-sm">+ Row</button>
+      <button id="delRowBtn" class="btn btn-ghost btn-sm">Delete selected</button>
+      <button id="generateBtn" class="btn btn-primary">Create samples</button>
+    </div>
+  </div>
+  <div id="grid"></div>
+  <div class="legend">
+    <span class="legend-item"><i class="sw sw-fastq"></i>from fastq</span>
+    <span class="legend-item"><i class="sw sw-pattern"></i>from name pattern</span>
+    <span class="legend-item"><i class="sw sw-group"></i>from timecourse</span>
+    <span class="legend-item"><i class="sw sw-batch"></i>filled in bulk</span>
+    <span class="legend-item"><i class="sw sw-manual"></i>typed by hand (protected)</span>
+  </div>
+</main>
+
+<!-- ---------- entity wizard ---------- -->
+<dialog id="entityModal" class="modal">
+  <form id="entityForm" method="dialog">
+    <div class="modal-head">
+      <h3 id="entityTitle">New entry</h3>
+      <button type="button" class="modal-close" data-close>&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="entityQueueNote" class="queue-note"></div>
+      <div id="entityFields" class="form-grid"></div>
+      <div id="ntBlock" class="nt-block">
+        <div class="nt-head">
+          <h4>Sequence numbering</h4>
+          <span class="hint">Defaults to 1, 2, 3… Edit to match canonical numbering (negative and skipped positions are fine).</span>
+        </div>
+        <div class="nt-actions">
+          <button type="button" id="ntDefaultBtn" class="btn btn-secondary btn-sm">Reset to 1-based</button>
+          <input id="ntCopyFrom" class="input input-sm" placeholder="copy from construct…" size="18">
+          <button type="button" id="ntCopyBtn" class="btn btn-secondary btn-sm">Copy</button>
+          <span id="ntSummary" class="hint"></span>
+        </div>
+        <div id="ntGridWrap" class="nt-grid-wrap"><table id="ntGrid">
+          <thead><tr><th>site</th><th>base</th><th>region</th></tr></thead><tbody></tbody>
+        </table></div>
+      </div>
+      <div id="entityError" class="form-error"></div>
+    </div>
+    <div class="modal-foot">
+      <span id="queueProgress" class="hint"></span>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+      <button type="submit" class="btn btn-primary">Create</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ---------- generate review ---------- -->
+<dialog id="reviewModal" class="modal modal-wide">
+  <div class="modal-head">
+    <h3>Review &amp; create</h3>
+    <button type="button" class="modal-close" data-close>&times;</button>
+  </div>
+  <div class="modal-body" id="reviewBody"></div>
+  <div class="modal-foot">
+    <label class="checkline"><input type="checkbox" id="csvOnlyMode"> write every table as CSV instead</label>
+    <span class="spacer"></span>
+    <button type="button" class="btn btn-ghost" data-close>Back</button>
+    <button type="button" id="confirmGenerateBtn" class="btn btn-primary">Write config files</button>
+  </div>
+</dialog>
+
+<div id="toasts" class="toasts"></div>
+<script src="/static/vendor/tabulator/tabulator.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
