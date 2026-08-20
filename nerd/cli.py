@@ -26,7 +26,7 @@ from nerd.reporting.summary import (
 
 app = typer.Typer(
     no_args_is_help=True,
-    help="NERD: run scientific workflows and manage durable tasks.",
+    help="NERD: A toolkit for quantitative analysis of RNA reactivity, energetics, and kinetics.",
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 task_app = typer.Typer(no_args_is_help=True, help="Inspect and manage durable tasks.")

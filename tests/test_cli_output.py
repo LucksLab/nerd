@@ -31,7 +31,7 @@ def test_top_level_help_and_command_inventory(cli_runner):
     assert result.exit_code == 0
     assert set(root.commands) == TOP_LEVEL_COMMANDS
     normalized_help = " ".join(result.output.split())
-    assert "NERD: run scientific workflows and manage durable tasks" in normalized_help
+    assert "NERD: A toolkit for quantitative analysis of RNA reactivity, energetics, and kinetics" in normalized_help
     for command_name in {"run", "task", "plugin", "image", "db"}:
         assert command_name in normalized_help
     for hidden_wrapper in TOP_LEVEL_COMMANDS - {"run", "task", "plugin", "image", "db"}:
