@@ -14,7 +14,7 @@ from nerd.cli import app
 from nerd.configuration import resolve_config, validate_config
 from nerd.project import ProjectContext, load_project
 from nerd.sheetbuilder.catalog import EntityCatalog
-from nerd.sheetbuilder.export import export, validate_primer_annotations
+from nerd.sheetbuilder.export import default_nt_rows, export, validate_primer_annotations
 from nerd.sheetbuilder.model import Sheet
 from nerd.sheetbuilder.session import Session
 
@@ -64,6 +64,28 @@ def test_construct_primer_annotations_allow_target_and_rt_primer_without_five_pr
     ]
 
     validate_primer_annotations(rows)
+
+
+def test_default_nt_rows_detects_lower_upper_lower_construct_regions():
+    sequence = "ggcacctcataacataacTAAGGCAGATCTGAGCCTGGGAGCTCTCTGCCAATCCactaacctcactcacaatc"
+
+    rows = default_nt_rows(sequence)
+
+    first_target = sequence.index("T")
+    first_rt_primer = first_target + len("TAAGGCAGATCTGAGCCTGGGAGCTCTCTGCCAATCC")
+    assert [row["base_region"] for row in rows[:first_target]] == ["0"] * first_target
+    assert [row["base_region"] for row in rows[first_target:first_rt_primer]] == ["1"] * (
+        first_rt_primer - first_target
+    )
+    assert [row["base_region"] for row in rows[first_rt_primer:]] == ["2"] * (
+        len(sequence) - first_rt_primer
+    )
+
+
+def test_default_nt_rows_detects_target_and_rt_primer_without_five_prime_primer():
+    rows = default_nt_rows("ACGUacgu")
+
+    assert [row["base_region"] for row in rows] == ["1"] * 4 + ["2"] * 4
 
 
 def test_session_uses_phase4_database_output_and_draft_location(cli_runner, tmp_path):

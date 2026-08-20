@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from nerd.db.api import generate_nt_rows_default
 from nerd.project import ProjectConfig
 
 from .catalog import EntityCatalog
@@ -49,11 +50,8 @@ def write_nt_info(path: Path, nt_rows: List[Dict[str, Any]]) -> None:
 
 
 def default_nt_rows(sequence: str) -> List[Dict[str, Any]]:
-    """1-based numbering over the sequence, matching nerd's own fallback."""
-    return [
-        {"site": index + 1, "base": base.upper(), "base_region": "1"}
-        for index, base in enumerate(sequence or "")
-    ]
+    """Build 1-based rows, using sequence case to identify construct regions."""
+    return generate_nt_rows_default(sequence)
 
 
 def validate_primer_annotations(nt_rows: List[Dict[str, Any]]) -> None:

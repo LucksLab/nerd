@@ -525,8 +525,10 @@ def create_entity(req: EntityCreate) -> Dict[str, Any]:
         raise HTTPException(409, collision)
 
     if req.entity_type == "construct":
-        record["nt_rows"] = req.nt_rows or export_mod.default_nt_rows(record.get("sequence", ""))
         try:
+            record["nt_rows"] = req.nt_rows or export_mod.default_nt_rows(
+                record.get("sequence", "")
+            )
             export_mod.validate_primer_annotations(record["nt_rows"])
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -556,7 +558,11 @@ def nt_rows(
 ) -> Dict[str, Any]:
     """Seed the numbering grid: default 1-based, or copy an existing construct's."""
     if sequence:
-        return {"nt_rows": export_mod.default_nt_rows(sequence), "source": "default"}
+        try:
+            rows = export_mod.default_nt_rows(sequence)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"nt_rows": rows, "source": "case-detected"}
     if construct_id is not None:
         active = _require_session()
         rows = active.conn.execute(

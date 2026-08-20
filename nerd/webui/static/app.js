@@ -1104,6 +1104,27 @@ function openEntityWizard(type, prefill, existing) {
   const isConstruct = type === "construct";
   $("ntBlock").classList.toggle("hidden", !isConstruct);
   renderNtGrid(currentEntity.ntRows || []);
+  if (isConstruct) {
+    const sequenceInput = container.querySelector('[name="sequence"]');
+    const detectRegions = debounce(async () => {
+      const sequence = sequenceInput?.value.trim() || "";
+      if (!sequence) {
+        renderNtGrid([]);
+        return;
+      }
+      try {
+        const data = await api(`/api/constructs/nt_rows?sequence=${encodeURIComponent(sequence)}`);
+        if (currentEntity.type === "construct" && sequenceInput.value.trim() === sequence) {
+          renderNtGrid(data.nt_rows);
+          $("entityError").textContent = "";
+        }
+      } catch (e) {
+        // Partial input often has no uppercase target yet. Creation will show
+        // the validation message if the sequence is left in that state.
+      }
+    }, 250);
+    sequenceInput?.addEventListener("input", detectRegions);
+  }
   $("entityModal").showModal();
 }
 
@@ -1131,8 +1152,10 @@ function renderNtGrid(rows) {
 $("ntDefaultBtn").addEventListener("click", async () => {
   const sequence = $("entityForm").querySelector('[name="sequence"]')?.value.trim();
   if (!sequence) return toast("Enter the sequence first.", "err");
-  const data = await api(`/api/constructs/nt_rows?sequence=${encodeURIComponent(sequence)}`);
-  renderNtGrid(data.nt_rows);
+  try {
+    const data = await api(`/api/constructs/nt_rows?sequence=${encodeURIComponent(sequence)}`);
+    renderNtGrid(data.nt_rows);
+  } catch (e) { toast(e.message, "err"); }
 });
 
 $("ntCopyBtn").addEventListener("click", async () => {
