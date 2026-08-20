@@ -166,7 +166,7 @@ def test_legacy_export_remains_self_contained_and_quotes_database(tmp_path):
     assert "'" in result["commands"][-1]
 
 
-@pytest.mark.parametrize("mode", ["create", "edit", "view"])
+@pytest.mark.parametrize("mode", ["create", "edit", "view", "analyze"])
 def test_webui_modes_use_global_phase4_project_context(
     cli_runner, tmp_path, monkeypatch, mode,
 ):
@@ -189,7 +189,7 @@ def test_webui_modes_use_global_phase4_project_context(
     assert session.project_config == project
     assert session.db_path == project.database
     assert webui_module._state(save=False)["mode"] == mode
-    if mode == "view":
+    if mode in {"view", "analyze"}:
         assert session.conn.execute("PRAGMA query_only").fetchone()[0] == 1
 
 

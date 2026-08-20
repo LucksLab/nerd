@@ -17,6 +17,12 @@ let queueIndex = 0;
 let databaseEntities = {};
 let databaseType = "construct";
 let selectedDatabaseId = null;
+let analysisCatalog = { fmod_runs: [], reaction_groups: [] };
+let timecourseSites = [];
+let selectedRunIds = [];
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const PLOT_COLORS = ["#4338ca", "#0891b2", "#b45309"];
 
 /* ---------------------------------------------------------------- util */
 
@@ -44,20 +50,25 @@ async function post(path, body) {
 
 function configureMode(mode = "create") {
   const isCreate = mode === "create";
+  const isDatabase = mode === "edit" || mode === "view";
+  const isAnalyze = mode === "analyze";
   const labels = {
     create: ["sample creation", "create"],
     edit: ["database maintenance", "edit"],
     view: ["database browser", "view only"],
+    analyze: ["interactive analysis", "read only"],
   };
   const [subtitle, badge] = labels[mode] || labels.create;
   $("modeLabel").textContent = subtitle;
   $("modeBadge").textContent = badge;
-  $("modeBadge").className = `pill ${mode === "view" ? "pill-idle" : "pill-ok"}`;
+  $("modeBadge").className = `pill ${["view", "analyze"].includes(mode) ? "pill-idle" : "pill-ok"}`;
   document.title = `nerd · ${subtitle}`;
   $("stepBar").classList.toggle("hidden", !isCreate);
   $("createWorkspace").classList.toggle("hidden", !isCreate);
-  $("databaseBar").classList.toggle("hidden", isCreate);
-  $("databaseWorkspace").classList.toggle("hidden", isCreate);
+  $("databaseBar").classList.toggle("hidden", !isDatabase);
+  $("databaseWorkspace").classList.toggle("hidden", !isDatabase);
+  $("analyzeBar").classList.toggle("hidden", !isAnalyze);
+  $("analyzeWorkspace").classList.toggle("hidden", !isAnalyze);
   $("labelInput").classList.toggle("hidden", !isCreate);
   $("topShutdownBtn").classList.toggle("hidden", isCreate);
   document.querySelectorAll("section.panel").forEach((panel) => {
@@ -246,15 +257,408 @@ $("topShutdownBtn").addEventListener("click", async () => {
   } catch (e) { toast(e.message, "err"); }
 });
 
+/* ---------------------------------------------------------------- analysis */
+
+function orderedValtypes(values) {
+  const preferred = ["modrate", "GAmodrate"];
+  return [...new Set(values || [])].sort((a, b) => {
+    const ai = preferred.indexOf(a);
+    const bi = preferred.indexOf(b);
+    if (ai >= 0 || bi >= 0) return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+    return a.localeCompare(b);
+  });
+}
+
+function setSelectOptions(select, values, selected = null, placeholder = null) {
+  const previous = selected ?? select.value;
+  select.replaceChildren();
+  if (placeholder !== null) select.add(new Option(placeholder, ""));
+  values.forEach((value) => select.add(new Option(value.label ?? value, value.value ?? value)));
+  if ([...select.options].some((option) => option.value === String(previous))) {
+    select.value = String(previous);
+  }
+}
+
+function fmtValue(value, digits = 3) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toLocaleString(undefined, { maximumFractionDigits: digits }) : "—";
+}
+
+function runConditions(run) {
+  const parts = [run.construct_name, run.buffer_name];
+  if (run.temperature !== null) parts.push(`${fmtValue(run.temperature)}°C`);
+  if (run.replicate !== null) parts.push(`rep ${run.replicate}`);
+  parts.push(Number(run.treated) === 0 ? "control" : `${fmtValue(run.reaction_time)} s`);
+  if (run.probe) parts.push(`${run.probe}${run.probe_concentration !== null ? ` ${fmtValue(run.probe_concentration)}` : ""}`);
+  return parts.filter(Boolean).join(" · ");
+}
+
+function groupLabel(group) {
+  const parts = [group.rg_label || `group ${group.rg_id}`, group.construct_name, group.buffer_name];
+  if (group.temperature !== null) parts.push(`${group.temperature}°C`);
+  if (group.replicate !== null) parts.push(`rep ${group.replicate}`);
+  if (group.probe) parts.push(group.probe);
+  return parts.filter(Boolean).join(" · ");
+}
+
+async function loadAnalysisCatalog() {
+  analysisCatalog = await api("/api/analyze/catalog");
+  renderFmodRunChoices();
+  const groups = analysisCatalog.reaction_groups || [];
+  setSelectOptions(
+    $("reactionGroupSelect"),
+    groups.map((group) => ({ value: group.rg_id, label: groupLabel(group) })),
+    $("reactionGroupSelect").value,
+    groups.length ? "Choose a reaction group…" : "No reaction groups with data",
+  );
+  if (groups.length && !$("reactionGroupSelect").value) $("reactionGroupSelect").value = String(groups[0].rg_id);
+  if (groups.length) await selectReactionGroup();
+}
+
+function renderFmodRunChoices() {
+  const list = $("fmodRunChoices");
+  const runs = analysisCatalog.fmod_runs || [];
+  selectedRunIds = selectedRunIds.filter((id) => runs.some((run) => run.fmod_run_id === id));
+  list.replaceChildren();
+  if (!runs.length) {
+    const empty = document.createElement("span");
+    empty.className = "hint";
+    empty.textContent = "No ShapeMapper modification-rate runs found.";
+    list.appendChild(empty);
+  }
+  runs.forEach((run) => {
+    const item = document.createElement("label");
+    item.className = `selection-item${selectedRunIds.includes(run.fmod_run_id) ? " selected" : ""}`;
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = selectedRunIds.includes(run.fmod_run_id);
+    input.addEventListener("change", () => {
+      if (input.checked && selectedRunIds.length >= 3) {
+        input.checked = false;
+        toast("Choose no more than three ShapeMapper runs.", "info");
+        return;
+      }
+      selectedRunIds = input.checked
+        ? [...selectedRunIds, run.fmod_run_id]
+        : selectedRunIds.filter((id) => id !== run.fmod_run_id);
+      renderFmodRunChoices();
+      updateModrateValtypes();
+    });
+    const content = document.createElement("span");
+    content.className = "selection-item-main";
+    const name = document.createElement("b");
+    name.textContent = run.sample_name;
+    const meta = document.createElement("span");
+    meta.className = "selection-item-meta";
+    meta.textContent = runConditions(run);
+    const provenance = document.createElement("span");
+    provenance.className = "selection-item-provenance";
+    provenance.textContent = `run ${run.fmod_run_id} · ${run.software_name}${run.software_version ? ` ${run.software_version}` : ""} · ${(run.valtypes || []).join(", ")}`;
+    content.append(name, meta, provenance);
+    item.append(input, content);
+    list.appendChild(item);
+  });
+  $("runSelectionCount").textContent = selectedRunIds.length ? `${selectedRunIds.length} of 3 selected` : "Choose up to 3";
+}
+
+function updateModrateValtypes() {
+  const select = $("modrateValtype");
+  const selectedRuns = selectedRunIds.map((id) =>
+    analysisCatalog.fmod_runs.find((run) => run.fmod_run_id === id)
+  ).filter(Boolean);
+  let common = [];
+  if (selectedRuns.length) {
+    common = selectedRuns[0].valtypes.filter((value) =>
+      selectedRuns.every((run) => run.valtypes.includes(value))
+    );
+  }
+  common = orderedValtypes(common);
+  setSelectOptions(select, common);
+  select.disabled = !common.length;
+  if (common.length && !select.value) select.value = common[0];
+  loadModificationRates();
+}
+
+async function loadModificationRates() {
+  const valtype = $("modrateValtype").value;
+  if (!selectedRunIds.length || !valtype) {
+    $("modrateEmpty").classList.remove("hidden");
+    $("modratePlotScroll").classList.add("hidden");
+    return;
+  }
+  const query = new URLSearchParams({ valtype });
+  selectedRunIds.forEach((id) => query.append("run_id", id));
+  try {
+    const data = await api(`/api/analyze/modification-rates?${query}`);
+    renderModificationRatePlot(data);
+  } catch (e) { toast(e.message, "err"); }
+}
+
+function svgElement(name, attrs = {}) {
+  const element = document.createElementNS(SVG_NS, name);
+  Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+  return element;
+}
+
+function svgText(parent, text, x, y, className, attrs = {}) {
+  const node = svgElement("text", { x, y, class: className, ...attrs });
+  node.textContent = text;
+  parent.appendChild(node);
+  return node;
+}
+
+function addSvgTitle(element, text) {
+  const title = svgElement("title");
+  title.textContent = text;
+  element.appendChild(title);
+}
+
+function renderLegend(container, items) {
+  const legend = document.createElement("div");
+  legend.className = "plot-legend";
+  items.forEach((item) => {
+    const entry = document.createElement("span");
+    entry.className = "plot-legend-item";
+    const swatch = document.createElement("i");
+    swatch.className = "plot-legend-swatch";
+    swatch.style.background = item.color;
+    entry.append(swatch, document.createTextNode(item.label));
+    legend.appendChild(entry);
+  });
+  container.appendChild(legend);
+}
+
+function renderModificationRatePlot(data) {
+  const values = data.values || [];
+  const plot = $("modratePlot");
+  plot.replaceChildren();
+  if (!values.length) {
+    $("modrateEmpty").textContent = "No values matched the selected runs and data type.";
+    $("modrateEmpty").classList.remove("hidden");
+    $("modratePlotScroll").classList.add("hidden");
+    return;
+  }
+  $("modrateEmpty").classList.add("hidden");
+  $("modratePlotScroll").classList.remove("hidden");
+  const siteMap = new Map();
+  values.forEach((row) => siteMap.set(row.site_base, row));
+  const sites = [...siteMap.values()].sort((a, b) => Number(a.site) - Number(b.site) || a.nt_id - b.nt_id);
+  const runs = selectedRunIds.map((id) => analysisCatalog.fmod_runs.find((run) => run.fmod_run_id === id));
+  const width = Math.max(850, 100 + sites.length * Math.max(20, runs.length * 10));
+  const height = 420;
+  const margin = { top: 30, right: 25, bottom: 95, left: 65 };
+  const innerWidth = width - margin.left - margin.right;
+  const innerHeight = height - margin.top - margin.bottom;
+  const numbers = values.map((row) => Number(row.fmod_val));
+  const yMin = Math.min(0, ...numbers);
+  const yMax = Math.max(0.01, ...numbers);
+  const pad = Math.max((yMax - yMin) * .08, .005);
+  const lo = yMin < 0 ? yMin - pad : 0;
+  const hi = yMax + pad;
+  const y = (value) => margin.top + innerHeight - ((value - lo) / (hi - lo)) * innerHeight;
+  const groupWidth = innerWidth / sites.length;
+  const barWidth = Math.min(18, groupWidth * .82 / runs.length);
+  const svg = svgElement("svg", { width, height, class: "plot-svg", role: "img", "aria-label": "Modification rate bar plot" });
+  for (let tick = 0; tick <= 5; tick += 1) {
+    const value = lo + (hi - lo) * tick / 5;
+    const py = y(value);
+    svg.appendChild(svgElement("line", { x1: margin.left, x2: width - margin.right, y1: py, y2: py, class: "plot-grid" }));
+    svgText(svg, fmtValue(value), margin.left - 8, py + 4, "plot-label", { "text-anchor": "end" });
+  }
+  const zeroY = y(0);
+  svg.appendChild(svgElement("line", { x1: margin.left, x2: width - margin.right, y1: zeroY, y2: zeroY, class: "plot-axis" }));
+  sites.forEach((site, siteIndex) => {
+    const center = margin.left + groupWidth * (siteIndex + .5);
+    runs.forEach((run, runIndex) => {
+      const row = values.find((value) => value.site_base === site.site_base && value.fmod_run_id === run.fmod_run_id);
+      if (!row) return;
+      const value = Number(row.fmod_val);
+      const py = y(Math.max(value, 0));
+      const bottom = y(Math.min(value, 0));
+      const x = center - runs.length * barWidth / 2 + runIndex * barWidth;
+      const rect = svgElement("rect", {
+        x, y: Math.min(py, bottom), width: Math.max(1, barWidth - 1), height: Math.max(1, Math.abs(bottom - py)),
+        fill: PLOT_COLORS[runIndex], opacity: row.outlier ? .55 : .82,
+      });
+      addSvgTitle(rect, `${run.sample_name}\n${row.site_base} · ${data.valtype}: ${fmtValue(value, 6)}\nread depth: ${row.read_depth}${row.outlier ? "\noutlier" : ""}`);
+      svg.appendChild(rect);
+    });
+    const label = svgText(svg, site.site_base, center, height - margin.bottom + 16, "plot-label", { "text-anchor": "end" });
+    label.setAttribute("transform", `rotate(-30 ${center} ${height - margin.bottom + 16})`);
+  });
+  svgText(svg, data.valtype, 16, margin.top + innerHeight / 2, "plot-label", { "text-anchor": "middle", transform: `rotate(-90 16 ${margin.top + innerHeight / 2})` });
+  plot.appendChild(svg);
+  renderLegend(plot, runs.map((run, index) => ({ label: run.sample_name, color: PLOT_COLORS[index] })));
+}
+
+document.querySelectorAll("[data-analysis-view]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll("[data-analysis-view]").forEach((item) => item.classList.remove("active"));
+    document.querySelectorAll(".analysis-view").forEach((view) => view.classList.remove("active"));
+    button.classList.add("active");
+    $(button.dataset.analysisView).classList.add("active");
+    if (button.dataset.analysisView === "timecourseView") loadTimecourseData();
+  });
+});
+
+$("modrateValtype").addEventListener("change", loadModificationRates);
+
+async function selectReactionGroup() {
+  const rgId = Number($("reactionGroupSelect").value);
+  const group = analysisCatalog.reaction_groups.find((item) => item.rg_id === rgId);
+  if (!group) return;
+  const details = [];
+  if (group.probe_concentration !== null) details.push(`probe concentration ${group.probe_concentration}`);
+  if (group.rt_protocol) details.push(`RT ${group.rt_protocol}`);
+  details.push(`${group.sample_count} samples`);
+  if (group.timepoint_count) details.push(`${group.timepoint_count} treated times · ${fmtValue(group.time_min)}–${fmtValue(group.time_max)} s`);
+  $("reactionGroupDetails").textContent = details.join(" · ");
+  const valtypes = orderedValtypes(group.valtypes);
+  setSelectOptions($("timecourseValtype"), valtypes);
+  if (valtypes.length && !$("timecourseValtype").value) $("timecourseValtype").value = valtypes[0];
+  try {
+    const options = await api(`/api/analyze/timecourse-options?rg_id=${rgId}`);
+    timecourseSites = options.sites || [];
+    renderTimecourseSiteSelectors();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+function renderTimecourseSiteSelectors() {
+  const count = Number($("timecoursePlotCount").value);
+  const valtype = $("timecourseValtype").value;
+  const available = timecourseSites.filter((site) => site.valtypes.includes(valtype));
+  const container = $("timecourseSiteSelectors");
+  const previous = [...container.querySelectorAll("select")].map((select) => select.value);
+  container.replaceChildren();
+  for (let index = 0; index < count; index += 1) {
+    const label = document.createElement("label");
+    label.className = "field";
+    label.appendChild(document.createTextNode(`Site ${index + 1}`));
+    const select = document.createElement("select");
+    select.className = "input";
+    setSelectOptions(select, available.map((site) => ({ value: site.nt_id, label: site.site_base })), previous[index] || available[index]?.nt_id, "Choose a site…");
+    if (!select.value && available[index]) select.value = String(available[index].nt_id);
+    select.addEventListener("change", loadTimecourseData);
+    label.appendChild(select);
+    container.appendChild(label);
+  }
+  loadTimecourseData();
+}
+
+async function loadTimecourseData() {
+  const rgId = $("reactionGroupSelect").value;
+  const valtype = $("timecourseValtype").value;
+  const ntIds = [...$("timecourseSiteSelectors").querySelectorAll("select")]
+    .map((select) => select.value).filter(Boolean);
+  const uniqueNtIds = [...new Set(ntIds)];
+  if (!rgId || !valtype || !uniqueNtIds.length) {
+    $("timecourseEmpty").classList.remove("hidden");
+    $("timecoursePlots").classList.add("hidden");
+    return;
+  }
+  const query = new URLSearchParams({ rg_id: rgId, valtype, include_fits: $("showTimecourseFits").checked });
+  uniqueNtIds.forEach((id) => query.append("nt_id", id));
+  try {
+    const data = await api(`/api/analyze/timecourse?${query}`);
+    renderTimecoursePlots(data);
+  } catch (e) { toast(e.message, "err"); }
+}
+
+function renderTimecoursePlots(data) {
+  const container = $("timecoursePlots");
+  container.replaceChildren();
+  if (!(data.series || []).length) {
+    $("timecourseEmpty").textContent = "No observations matched the selected group, sites, and data type.";
+    $("timecourseEmpty").classList.remove("hidden");
+    container.classList.add("hidden");
+    return;
+  }
+  $("timecourseEmpty").classList.add("hidden");
+  container.classList.remove("hidden");
+  data.series.forEach((series) => renderTimecoursePlot(container, series, data.valtype));
+}
+
+function renderTimecoursePlot(container, series, valtype) {
+  const card = document.createElement("div");
+  card.className = "timecourse-card";
+  const width = Math.max(760, container.clientWidth - 20);
+  const height = 320;
+  const margin = { top: 42, right: 25, bottom: 50, left: 65 };
+  const innerWidth = width - margin.left - margin.right;
+  const innerHeight = height - margin.top - margin.bottom;
+  const observations = series.observations || [];
+  const curve = series.fit?.curve || [];
+  const maxX = Math.max(1, ...observations.map((row) => Number(row.plot_time)), ...curve.map((row) => Number(row.time)));
+  const allY = [...observations.map((row) => Number(row.fmod_val)), ...curve.map((row) => Number(row.fmod_val))];
+  const minData = Math.min(0, ...allY);
+  const maxData = Math.max(.01, ...allY);
+  const yPad = Math.max((maxData - minData) * .1, .005);
+  const yMin = minData < 0 ? minData - yPad : 0;
+  const yMax = maxData + yPad;
+  const x = (value) => margin.left + Number(value) / maxX * innerWidth;
+  const y = (value) => margin.top + innerHeight - (Number(value) - yMin) / (yMax - yMin) * innerHeight;
+  const svg = svgElement("svg", { width, height, class: "plot-svg", role: "img", "aria-label": `${series.site_base} time course` });
+  for (let tick = 0; tick <= 5; tick += 1) {
+    const yValue = yMin + (yMax - yMin) * tick / 5;
+    const py = y(yValue);
+    svg.appendChild(svgElement("line", { x1: margin.left, x2: width - margin.right, y1: py, y2: py, class: "plot-grid" }));
+    svgText(svg, fmtValue(yValue), margin.left - 8, py + 4, "plot-label", { "text-anchor": "end" });
+    const xValue = maxX * tick / 5;
+    svgText(svg, fmtValue(xValue), x(xValue), height - margin.bottom + 20, "plot-label", { "text-anchor": "middle" });
+  }
+  svg.appendChild(svgElement("line", { x1: margin.left, x2: width - margin.right, y1: margin.top + innerHeight, y2: margin.top + innerHeight, class: "plot-axis" }));
+  svgText(svg, `${series.site_base} · ${valtype}`, margin.left, 20, "plot-title");
+  const subtitle = series.fit
+    ? `${series.fit.fit_kind}${series.fit.r2 !== null && series.fit.r2 !== undefined ? ` · R² ${fmtValue(series.fit.r2)}` : ""}`
+    : "No stored fit";
+  svgText(svg, subtitle, margin.left, 35, "plot-subtitle");
+  svgText(svg, "Reaction time (s)", margin.left + innerWidth / 2, height - 8, "plot-label", { "text-anchor": "middle" });
+  svgText(svg, valtype, 16, margin.top + innerHeight / 2, "plot-label", { "text-anchor": "middle", transform: `rotate(-90 16 ${margin.top + innerHeight / 2})` });
+  if (curve.length) {
+    const points = curve.map((row) => `${x(row.time)},${y(row.fmod_val)}`).join(" ");
+    svg.appendChild(svgElement("polyline", { points, fill: "none", stroke: "#111827", "stroke-width": 2 }));
+  }
+  observations.forEach((row) => {
+    const color = Number(row.to_drop) ? "#c62828" : Number(row.outlier) ? "#d97706" : "#2563eb";
+    const px = x(row.plot_time);
+    const py = y(row.fmod_val);
+    const title = `${row.sample_name}\n${series.site_base} · ${valtype}: ${fmtValue(row.fmod_val, 6)}\ntime: ${fmtValue(row.plot_time)} s · run ${row.fmod_run_id}\nread depth: ${row.read_depth}${row.to_drop ? "\nto_drop" : ""}${row.outlier ? "\noutlier" : ""}`;
+    if (Number(row.treated) === 0) {
+      const group = svgElement("g");
+      group.appendChild(svgElement("line", { x1: px - 4, x2: px + 4, y1: py - 4, y2: py + 4, stroke: color, "stroke-width": 2 }));
+      group.appendChild(svgElement("line", { x1: px - 4, x2: px + 4, y1: py + 4, y2: py - 4, stroke: color, "stroke-width": 2 }));
+      addSvgTitle(group, title);
+      svg.appendChild(group);
+    } else {
+      const point = svgElement("circle", { cx: px, cy: py, r: 4.5, fill: color, stroke: "#fff", "stroke-width": 1 });
+      addSvgTitle(point, title);
+      svg.appendChild(point);
+    }
+  });
+  card.appendChild(svg);
+  renderLegend(card, [
+    { label: "included", color: "#2563eb" },
+    { label: "outlier", color: "#d97706" },
+    { label: "to_drop", color: "#c62828" },
+    ...(curve.length ? [{ label: "stored fit", color: "#111827" }] : []),
+  ]);
+  container.appendChild(card);
+}
+
+$("reactionGroupSelect").addEventListener("change", selectReactionGroup);
+$("timecourseValtype").addEventListener("change", renderTimecourseSiteSelectors);
+$("timecoursePlotCount").addEventListener("change", renderTimecourseSiteSelectors);
+$("showTimecourseFits").addEventListener("change", loadTimecourseData);
+
 /* ---------------------------------------------------------------- panels */
 
-document.querySelectorAll(".step").forEach((btn) => {
+document.querySelectorAll(".step[data-panel]").forEach((btn) => {
   btn.addEventListener("click", () => {
     const target = btn.dataset.panel;
     const panel = $(target);
     const isOpen = panel.classList.contains("open");
     document.querySelectorAll(".panel").forEach((p) => p.classList.remove("open"));
-    document.querySelectorAll(".step").forEach((s) => s.classList.remove("active"));
+    document.querySelectorAll(".step[data-panel]").forEach((s) => s.classList.remove("active"));
     if (!isOpen) {
       panel.classList.add("open");
       btn.classList.add("active");
@@ -545,6 +949,10 @@ function initTable() {
 function render(state) {
   S = state;
   configureMode(S.mode);
+  if (S.mode === "analyze") {
+    loadAnalysisCatalog().catch((e) => toast(e.message, "err"));
+    return;
+  }
   if (S.mode !== "create") {
     loadDatabaseEntities().catch((e) => toast(e.message, "err"));
     return;

@@ -47,6 +47,50 @@
   </section>
 </main>
 
+<div id="analyzeBar" class="step-bar hidden">
+  <button class="step active" data-analysis-view="modrateView">Modification rates</button>
+  <button class="step" data-analysis-view="timecourseView">Time courses</button>
+</div>
+
+<main id="analyzeWorkspace" class="analyze-workspace hidden">
+  <section id="modrateView" class="analysis-view active">
+    <div class="analysis-controls">
+      <div class="analysis-control-wide">
+        <div class="control-heading"><b>ShapeMapper runs</b><span id="runSelectionCount" class="hint">Choose up to 3</span></div>
+        <div id="fmodRunChoices" class="selection-list"></div>
+      </div>
+      <label class="field">Data type
+        <select id="modrateValtype" class="input" disabled></select>
+      </label>
+    </div>
+    <div id="modrateEmpty" class="analysis-empty">Choose one to three ShapeMapper runs to compare modification rates.</div>
+    <div id="modratePlotScroll" class="plot-scroll hidden"><div id="modratePlot"></div></div>
+  </section>
+
+  <section id="timecourseView" class="analysis-view">
+    <div class="analysis-controls timecourse-controls">
+      <label class="field analysis-control-wide">Reaction group
+        <select id="reactionGroupSelect" class="input"></select>
+        <span id="reactionGroupDetails" class="condition-summary"></span>
+      </label>
+      <label class="field">Data type
+        <select id="timecourseValtype" class="input"></select>
+      </label>
+      <label class="field">Plots
+        <select id="timecoursePlotCount" class="input">
+          <option value="1">1 site</option>
+          <option value="2">2 sites</option>
+          <option value="3" selected>3 sites</option>
+        </select>
+      </label>
+      <label class="checkline fit-toggle"><input id="showTimecourseFits" type="checkbox" checked> Show stored fits</label>
+      <div id="timecourseSiteSelectors" class="site-selectors analysis-control-wide"></div>
+    </div>
+    <div id="timecourseEmpty" class="analysis-empty">Choose a reaction group and nucleotide sites to inspect their time courses.</div>
+    <div id="timecoursePlots" class="timecourse-plots hidden"></div>
+  </section>
+</main>
+
 <!-- ---------- collapsible panels ---------- -->
 <section id="ingestPanel" class="panel">
   <div class="panel-grid">

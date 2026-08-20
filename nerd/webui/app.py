@@ -9,8 +9,8 @@ Every mutating endpoint returns the *whole* new state (rows, entity
 resolution, validation summary) so the frontend never has to stitch
 together partial updates or re-query to find out what changed.
 
-Launch inside a Phase 4 project with ``nerd webui create``, ``edit``, or
-``view``; each command also accepts ``--project`` and ``--db`` overrides.
+Launch inside a Phase 4 project with ``nerd webui create``, ``edit``, ``view``,
+or ``analyze``; each command also accepts ``--project`` and ``--db`` overrides.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -39,6 +39,9 @@ from nerd.fastq_sources import (
     FastqSourceError, LOCAL, SRA, list_remote_directory, normalize_source,
     profile_for_source, remote_profiles,
 )
+from nerd.webui.analysis import (
+    analysis_catalog, modification_rates, timecourse_data, timecourse_options,
+)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -47,7 +50,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 session = Session()
 _server: Optional[Any] = None
-WEBUI_MODES = {"create", "edit", "view"}
+WEBUI_MODES = {"create", "edit", "view", "analyze"}
 _mode = "create"
 
 
@@ -137,14 +140,16 @@ def _state(save: bool = True) -> Dict[str, Any]:
 
 @app.middleware("http")
 async def enforce_workspace_mode(request: Request, call_next):
-    """Keep view mode read-only and creation writes out of maintenance mode."""
+    """Keep view/analyze read-only and creation writes out of maintenance mode."""
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         always_allowed = {"/api/session/connect", "/api/shutdown"}
         edit_allowed = {"/api/database/constructs/base-regions"}
         path = request.url.path
         if path not in always_allowed:
-            if _mode == "view":
-                return JSONResponse({"detail": "Web UI view mode is read-only."}, status_code=403)
+            if _mode in {"view", "analyze"}:
+                return JSONResponse(
+                    {"detail": "Web UI %s mode is read-only." % _mode}, status_code=403,
+                )
             if _mode == "edit" and path not in edit_allowed:
                 return JSONResponse(
                     {"detail": "This creation operation is unavailable in Web UI edit mode."},
@@ -177,7 +182,7 @@ class ConnectRequest(BaseModel):
 def connect(req: ConnectRequest) -> Dict[str, Any]:
     try:
         info = session.connect(
-            req.project_dir, req.db_path, req.label, read_only=_mode == "view"
+            req.project_dir, req.db_path, req.label, read_only=_mode in {"view", "analyze"}
         )
     except Exception as exc:
         raise HTTPException(400, "Could not open project: %s" % exc)
@@ -187,6 +192,51 @@ def connect(req: ConnectRequest) -> Dict[str, Any]:
 @app.get("/api/state")
 def get_state() -> Dict[str, Any]:
     return _state(save=False)
+
+
+# ---------------------------------------------------------------- analysis
+
+def _analysis_connection() -> Any:
+    active = _require_session()
+    if active.conn is None:
+        raise HTTPException(400, "No database connection is available.")
+    return active.conn
+
+
+@app.get("/api/analyze/catalog")
+def get_analysis_catalog() -> Dict[str, Any]:
+    return analysis_catalog(_analysis_connection())
+
+
+@app.get("/api/analyze/modification-rates")
+def get_modification_rates(
+    run_id: List[int] = Query(...),
+    valtype: str = Query(...),
+) -> Dict[str, Any]:
+    try:
+        return modification_rates(_analysis_connection(), run_id, valtype)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/analyze/timecourse-options")
+def get_timecourse_options(rg_id: int = Query(...)) -> Dict[str, Any]:
+    return timecourse_options(_analysis_connection(), rg_id)
+
+
+@app.get("/api/analyze/timecourse")
+def get_timecourse_data(
+    rg_id: int = Query(...),
+    nt_id: List[int] = Query(...),
+    valtype: str = Query(...),
+    include_fits: bool = Query(True),
+) -> Dict[str, Any]:
+    try:
+        return timecourse_data(
+            _analysis_connection(), rg_id, nt_id, valtype, include_fits=include_fits,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 # ---------------------------------------------------------------- tokens

@@ -158,12 +158,13 @@ pip install -e ".[webui]"
 nerd webui create
 ```
 
-The Web UI has three focused workspaces:
+The Web UI has four focused workspaces:
 
 ```bash
 nerd webui create  # build sample sheets and create configurations
 nerd webui edit    # correct supported existing database metadata
 nerd webui view    # browse metadata without allowing database writes
+nerd webui analyze # compare modification rates and inspect time courses
 ```
 
 Add `--project PATH` to any command when launching outside the project. Each
@@ -176,8 +177,10 @@ project and any explicit database override.
 Edit mode currently supports ID-preserving construct `base_region` corrections
 and records changes in `.nerd/maintenance.jsonl`. Construct sequences are shown
 read-only because changing a referenced biological sequence requires creating a
-new construct revision. View mode is read-only at both the interface and API
-layers.
+new construct revision. View and Analyze modes are read-only at both the
+interface and API layers. Analyze mode compares up to three ShapeMapper runs in
+a scrollable nucleotide bar plot and shows one to three reaction-group time
+courses with optional stored kinetic fits.
 
 Draft sample-sheet state is stored in `.nerd/sample-draft.json`. Existing
 `.nerd_sample_draft.json` files are still loaded so an in-progress legacy draft

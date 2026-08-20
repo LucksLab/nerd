@@ -42,7 +42,7 @@ plugin_doctor_app = typer.Typer(no_args_is_help=True, help="Check plugin readine
 image_app = typer.Typer(no_args_is_help=True, help="Inspect and prepare immutable tool images.")
 db_app = typer.Typer(no_args_is_help=True, help="Inspect the selected project database.")
 config_app = typer.Typer(no_args_is_help=True, help="Create, validate, and inspect analysis configs.")
-webui_app = typer.Typer(no_args_is_help=True, help="Create, edit, or view project data in the Web UI.")
+webui_app = typer.Typer(no_args_is_help=True, help="Create, edit, view, or analyze project data in the Web UI.")
 
 
 class RunStep(str, enum.Enum):
@@ -1088,7 +1088,7 @@ def _launch_webui(
         info = webui_module.session.connect(
             str(selected_project), str(selected_db) if selected_db else None,
             webui_module.session.label,
-            read_only=mode == "view",
+            read_only=mode in {"view", "analyze"},
         )
     except (ContextResolutionError, ProjectConfigError, OSError, ValueError) as exc:
         typer.echo("Web UI startup failed: %s" % exc, err=True)
@@ -1166,6 +1166,24 @@ def webui_view(
 ) -> None:
     """Browse project database metadata in a read-only Web UI."""
     _launch_webui(ctx, "view", project, db, host, port, open_browser)
+
+
+@webui_app.command("analyze")
+def webui_analyze(
+    ctx: typer.Context,
+    project: Optional[Path] = typer.Option(
+        None, "--project", "-p",
+        help="Project root or direct .nerd/project.toml; defaults to project discovery.",
+    ),
+    db: Optional[Path] = typer.Option(
+        None, "--db", help="Database override; otherwise use project.toml or legacy discovery."
+    ),
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8420, "--port"),
+    open_browser: bool = typer.Option(True, "--open-browser/--no-open-browser"),
+) -> None:
+    """Interactively compare probing modification rates and time courses."""
+    _launch_webui(ctx, "analyze", project, db, host, port, open_browser)
 
 
 def _deprecated(old: str, replacement: str) -> None:
