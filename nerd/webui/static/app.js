@@ -14,6 +14,9 @@ let tokens = {};
 let entitySchema = { fields: {}, lookup_fields: {} };
 let queue = [];           // pending unresolved entities
 let queueIndex = 0;
+let databaseEntities = {};
+let databaseType = "construct";
+let selectedDatabaseId = null;
 
 /* ---------------------------------------------------------------- util */
 
@@ -38,6 +41,210 @@ async function api(path, options = {}) {
 async function post(path, body) {
   return api(path, { method: "POST", body: JSON.stringify(body || {}) });
 }
+
+function configureMode(mode = "create") {
+  const isCreate = mode === "create";
+  const labels = {
+    create: ["sample creation", "create"],
+    edit: ["database maintenance", "edit"],
+    view: ["database browser", "view only"],
+  };
+  const [subtitle, badge] = labels[mode] || labels.create;
+  $("modeLabel").textContent = subtitle;
+  $("modeBadge").textContent = badge;
+  $("modeBadge").className = `pill ${mode === "view" ? "pill-idle" : "pill-ok"}`;
+  document.title = `nerd · ${subtitle}`;
+  $("stepBar").classList.toggle("hidden", !isCreate);
+  $("createWorkspace").classList.toggle("hidden", !isCreate);
+  $("databaseBar").classList.toggle("hidden", isCreate);
+  $("databaseWorkspace").classList.toggle("hidden", isCreate);
+  $("labelInput").classList.toggle("hidden", !isCreate);
+  $("topShutdownBtn").classList.toggle("hidden", isCreate);
+  document.querySelectorAll("section.panel").forEach((panel) => {
+    if (!isCreate) panel.classList.remove("open");
+  });
+}
+
+async function loadDatabaseEntities() {
+  const data = await api("/api/database/entities");
+  databaseEntities = data.entities || {};
+  renderDatabaseList();
+}
+
+function databaseDisplayName(type, record) {
+  if (type === "sequencing_run") return record.run_name || `run ${record.id}`;
+  return record.disp_name || record.name || `${type} ${record.id}`;
+}
+
+function renderDatabaseList() {
+  const list = $("databaseList");
+  const query = $("databaseSearch").value.trim().toLowerCase();
+  const records = (databaseEntities[databaseType] || []).filter((record) =>
+    !query || Object.values(record).some((value) => String(value ?? "").toLowerCase().includes(query))
+  );
+  list.replaceChildren();
+  $("databaseCount").textContent = `${records.length} ${databaseType.replace("_", " ")}${records.length === 1 ? "" : "s"}`;
+  records.forEach((record) => {
+    const button = document.createElement("button");
+    button.className = `database-item${record.id === selectedDatabaseId ? " active" : ""}`;
+    const name = document.createElement("b");
+    name.textContent = databaseDisplayName(databaseType, record);
+    const meta = document.createElement("span");
+    meta.textContent = `${record.reference_count || 0} reference${record.reference_count === 1 ? "" : "s"}`;
+    button.append(name, meta);
+    button.onclick = () => showDatabaseRecord(databaseType, record);
+    list.appendChild(button);
+  });
+  if (!records.length) {
+    const empty = document.createElement("span");
+    empty.className = "hint";
+    empty.textContent = "No matching entries.";
+    list.appendChild(empty);
+  }
+}
+
+async function showDatabaseRecord(type, record) {
+  databaseType = type;
+  selectedDatabaseId = record.id;
+  renderDatabaseList();
+  const detail = $("databaseDetail");
+  detail.replaceChildren();
+
+  const title = document.createElement("div");
+  title.className = "database-title";
+  const heading = document.createElement("h2");
+  heading.textContent = databaseDisplayName(type, record);
+  const refs = document.createElement("span");
+  refs.className = "pill pill-idle";
+  refs.textContent = `${record.reference_count || 0} references`;
+  title.append(heading, refs);
+  detail.appendChild(title);
+
+  const fields = document.createElement("div");
+  fields.className = "database-fields";
+  Object.entries(record).filter(([key]) => key !== "reference_count").forEach(([key, value]) => {
+    const field = document.createElement("div");
+    field.className = "database-field";
+    const label = document.createElement("span");
+    label.className = "key";
+    label.textContent = key;
+    const contents = document.createElement("span");
+    contents.className = "value";
+    contents.textContent = value ?? "";
+    field.append(label, contents);
+    fields.appendChild(field);
+  });
+  detail.appendChild(fields);
+
+  if (type !== "construct") return;
+  try {
+    const data = await api(`/api/constructs/nt_rows?construct_id=${record.id}`);
+    renderDatabaseNtRows(record, data.nt_rows || []);
+  } catch (e) {
+    const error = document.createElement("div");
+    error.className = "form-error";
+    error.textContent = e.message;
+    detail.appendChild(error);
+  }
+}
+
+function renderDatabaseNtRows(record, rows) {
+  const detail = $("databaseDetail");
+  const head = document.createElement("div");
+  head.className = "database-nt-head";
+  const title = document.createElement("h3");
+  title.textContent = `Nucleotide annotations · ${rows.length} positions`;
+  head.appendChild(title);
+  detail.appendChild(head);
+
+  const wrap = document.createElement("div");
+  wrap.className = "nt-grid-wrap";
+  const grid = document.createElement("table");
+  grid.innerHTML = "<thead><tr><th>site</th><th>base</th><th>base region</th></tr></thead>";
+  const body = document.createElement("tbody");
+  rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    [row.site, row.base].forEach((value) => {
+      const td = document.createElement("td");
+      td.className = "readonly-cell";
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    const regionCell = document.createElement("td");
+    if (S.mode === "edit") {
+      const select = document.createElement("select");
+      select.className = "region-select";
+      ["0", "1", "2"].forEach((region) => select.add(new Option(region, region)));
+      select.value = String(row.base_region);
+      select.onchange = () => { row.base_region = select.value; };
+      regionCell.appendChild(select);
+    } else {
+      regionCell.className = "readonly-cell";
+      regionCell.textContent = row.base_region;
+    }
+    tr.appendChild(regionCell);
+    body.appendChild(tr);
+  });
+  grid.appendChild(body);
+  wrap.appendChild(grid);
+  detail.appendChild(wrap);
+
+  if (S.mode === "edit") {
+    const actions = document.createElement("div");
+    actions.className = "panel-actions";
+    const save = document.createElement("button");
+    save.className = "btn btn-primary";
+    save.textContent = "Save region corrections";
+    const note = document.createElement("span");
+    note.className = "hint";
+    note.textContent = "Sites, bases, construct identity, and nucleotide IDs are preserved.";
+    save.onclick = async () => {
+      save.disabled = true;
+      try {
+        const data = await api("/api/database/constructs/base-regions", {
+          method: "PATCH",
+          body: JSON.stringify({
+            construct_id: record.id,
+            rows: rows.map((row) => ({ site: row.site, base_region: row.base_region })),
+          }),
+        });
+        toast(`${data.changed} region label${data.changed === 1 ? "" : "s"} updated.`, "ok");
+        if (!data.audit_logged) toast("Saved, but the maintenance log could not be written.", "info");
+        renderDatabaseNtRowsInPlace(record, data.nt_rows || rows);
+      } catch (e) {
+        toast(e.message, "err");
+      } finally {
+        save.disabled = false;
+      }
+    };
+    actions.append(save, note);
+    detail.appendChild(actions);
+  }
+}
+
+function renderDatabaseNtRowsInPlace(record, rows) {
+  showDatabaseRecord("construct", record);
+}
+
+document.querySelectorAll("[data-db-type]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll("[data-db-type]").forEach((item) => item.classList.remove("active"));
+    button.classList.add("active");
+    databaseType = button.dataset.dbType;
+    selectedDatabaseId = null;
+    $("databaseDetail").innerHTML = '<div class="database-empty">Select an entry to inspect it.</div>';
+    renderDatabaseList();
+  });
+});
+$("databaseSearch").addEventListener("input", renderDatabaseList);
+
+$("topShutdownBtn").addEventListener("click", async () => {
+  try {
+    await post("/api/shutdown", {});
+    $("topShutdownBtn").disabled = true;
+    $("topShutdownBtn").textContent = "Closed — return to the terminal";
+  } catch (e) { toast(e.message, "err"); }
+});
 
 /* ---------------------------------------------------------------- panels */
 
@@ -80,7 +287,7 @@ $("connectBtn").addEventListener("click", async () => {
       "ok"
     );
     if (data.restored_draft) toast("Picked up where you left off.", "info");
-    if (!S.rows.length) openPanel("ingestPanel");
+    if (S.mode === "create" && !S.rows.length) openPanel("ingestPanel");
   } catch (e) {
     $("connectStatus").textContent = "failed";
     $("connectStatus").className = "pill pill-bad";
@@ -337,6 +544,11 @@ function initTable() {
 
 function render(state) {
   S = state;
+  configureMode(S.mode);
+  if (S.mode !== "create") {
+    loadDatabaseEntities().catch((e) => toast(e.message, "err"));
+    return;
+  }
   if (!table) initTable();
   table.setColumns(buildColumns());
   table.replaceData(S.rows);
@@ -839,11 +1051,14 @@ $("gridApplyBtn").addEventListener("click", async () => {
 /* ---------------------------------------------------------------- init */
 
 (async function init() {
-  initTable();
   entitySchema = await api("/api/entities/schema");
-  await loadTokens();
   try {
     const state = await api("/api/state");
+    configureMode(state.mode);
+    if (state.mode === "create") {
+      initTable();
+      await loadTokens();
+    }
     if (state.connected) {
       $("projectDir").value = state.project_dir || "";
       $("dbPath").value = state.db_path || "";
@@ -852,7 +1067,7 @@ $("gridApplyBtn").addEventListener("click", async () => {
       $("connectStatus").className = "pill pill-ok";
       render(state);
     } else {
-      openPanel("ingestPanel");
+      if (state.mode === "create") openPanel("ingestPanel");
     }
   } catch (e) { /* not connected yet */ }
 })();

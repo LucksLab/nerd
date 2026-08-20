@@ -102,7 +102,7 @@ def _iter_chunks(items: Iterable[Dict[str, Any]], size: int) -> Iterable[List[Di
         yield chunk
 
 
-def connect(db_path: Path) -> sqlite3.Connection:
+def connect(db_path: Path, *, read_only: bool = False) -> sqlite3.Connection:
     """
     Establishes a connection to the SQLite database.
 
@@ -113,14 +113,23 @@ def connect(db_path: Path) -> sqlite3.Connection:
         A sqlite3.Connection object.
     """
     try:
-        # Ensure the parent directory exists
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(db_path, check_same_thread=False)
+        if read_only:
+            conn = sqlite3.connect(
+                "%s?mode=ro" % db_path.resolve().as_uri(),
+                uri=True,
+                check_same_thread=False,
+            )
+        else:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
-        # Ensure FK constraints (including ON DELETE CASCADE) are enforced
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA synchronous = NORMAL")
+        if read_only:
+            conn.execute("PRAGMA query_only = ON")
+        else:
+            # Ensure FK constraints (including ON DELETE CASCADE) are enforced
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA synchronous = NORMAL")
         conn.execute("PRAGMA busy_timeout = 5000")
         log.debug("Database connection established to %s", db_path)
         return conn
@@ -1865,7 +1874,7 @@ def _iter_chunks(items: Iterable[Dict[str, Any]], size: int) -> Iterable[List[Di
         yield chunk
 
 
-def connect(db_path: Path) -> sqlite3.Connection:
+def connect(db_path: Path, *, read_only: bool = False) -> sqlite3.Connection:
     """
     Establishes a connection to the SQLite database.
 
@@ -1876,14 +1885,23 @@ def connect(db_path: Path) -> sqlite3.Connection:
         A sqlite3.Connection object.
     """
     try:
-        # Ensure the parent directory exists
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(db_path, check_same_thread=False)
+        if read_only:
+            conn = sqlite3.connect(
+                "%s?mode=ro" % db_path.resolve().as_uri(),
+                uri=True,
+                check_same_thread=False,
+            )
+        else:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
-        # Ensure FK constraints (including ON DELETE CASCADE) are enforced
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA synchronous = NORMAL")
+        if read_only:
+            conn.execute("PRAGMA query_only = ON")
+        else:
+            # Ensure FK constraints (including ON DELETE CASCADE) are enforced
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA synchronous = NORMAL")
         conn.execute("PRAGMA busy_timeout = 5000")
         log.debug("Database connection established to %s", db_path)
         return conn

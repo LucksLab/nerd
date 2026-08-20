@@ -1,4 +1,4 @@
-"""FastAPI layer for the nerd sample-input helper.
+"""FastAPI layer for the nerd create, edit, and view workspaces.
 
 Deliberately thin: every endpoint translates HTTP to a call into
 nerd.sheetbuilder and back. All the logic -- provenance, pattern
@@ -9,16 +9,18 @@ Every mutating endpoint returns the *whole* new state (rows, entity
 resolution, validation summary) so the frontend never has to stitch
 together partial updates or re-query to find out what changed.
 
-Launch inside a Phase 4 project with ``nerd webui serve``, or select one
-explicitly with ``nerd webui serve --project <project_root> [--db <path>]``.
+Launch inside a Phase 4 project with ``nerd webui create``, ``edit``, or
+``view``; each command also accepts ``--project`` and ``--db`` overrides.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -40,11 +42,13 @@ from nerd.fastq_sources import (
 
 STATIC_DIR = Path(__file__).parent / "static"
 
-app = FastAPI(title="nerd sample input helper")
+app = FastAPI(title="nerd web UI")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 session = Session()
 _server: Optional[Any] = None
+WEBUI_MODES = {"create", "edit", "view"}
+_mode = "create"
 
 
 # ---------------------------------------------------------------- helpers
@@ -59,6 +63,19 @@ def set_server(server: Optional[Any]) -> None:
     """Register the running uvicorn server so the local UI can stop it."""
     global _server
     _server = server
+
+
+def set_mode(mode: str) -> None:
+    """Select the workspace exposed by this server process."""
+    global _mode
+    if mode not in WEBUI_MODES:
+        raise ValueError("Unknown Web UI mode %r." % mode)
+    _mode = mode
+
+
+def _require_mode(expected: str) -> None:
+    if _mode != expected:
+        raise HTTPException(403, "This operation is only available in Web UI %s mode." % expected)
 
 
 def _request_server_shutdown() -> None:
@@ -88,6 +105,7 @@ def _state(save: bool = True) -> Dict[str, Any]:
     }
 
     return {
+        "mode": _mode,
         "connected": session.connected,
         "project_dir": str(session.project_dir) if session.project_dir else None,
         "project_id": session.project_config.name if session.project_config else None,
@@ -117,6 +135,29 @@ def _state(save: bool = True) -> Dict[str, Any]:
     }
 
 
+@app.middleware("http")
+async def enforce_workspace_mode(request: Request, call_next):
+    """Keep view mode read-only and creation writes out of maintenance mode."""
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        always_allowed = {"/api/session/connect", "/api/shutdown"}
+        edit_allowed = {"/api/database/constructs/base-regions"}
+        path = request.url.path
+        if path not in always_allowed:
+            if _mode == "view":
+                return JSONResponse({"detail": "Web UI view mode is read-only."}, status_code=403)
+            if _mode == "edit" and path not in edit_allowed:
+                return JSONResponse(
+                    {"detail": "This creation operation is unavailable in Web UI edit mode."},
+                    status_code=403,
+                )
+            if _mode == "create" and path in edit_allowed:
+                return JSONResponse(
+                    {"detail": "Database maintenance requires Web UI edit mode."},
+                    status_code=403,
+                )
+    return await call_next(request)
+
+
 # ---------------------------------------------------------------- pages
 
 @app.get("/")
@@ -135,7 +176,9 @@ class ConnectRequest(BaseModel):
 @app.post("/api/session/connect")
 def connect(req: ConnectRequest) -> Dict[str, Any]:
     try:
-        info = session.connect(req.project_dir, req.db_path, req.label)
+        info = session.connect(
+            req.project_dir, req.db_path, req.label, read_only=_mode == "view"
+        )
     except Exception as exc:
         raise HTTPException(400, "Could not open project: %s" % exc)
     return {**info, "state": _state(save=False)}
@@ -373,6 +416,40 @@ def list_entities() -> Dict[str, Any]:
     return {"db": session.catalog.db, "staged": session.catalog.staged}
 
 
+@app.get("/api/database/entities")
+def database_entities() -> Dict[str, Any]:
+    """Return the small metadata catalog used by the view/edit workspaces."""
+    active = _require_session()
+    if active.conn is None:
+        raise HTTPException(400, "No database connection is available.")
+    active.refresh_catalog()
+
+    result = {
+        entity_type: [dict(record) for record in records]
+        for entity_type, records in active.catalog.db.items()
+    }
+    reference_queries = {
+        "construct": (
+            "SELECT COUNT(*) FROM probe_reactions WHERE construct_id = ?",
+            "SELECT COUNT(*) FROM probe_tempgrad_groups WHERE construct_id = ?",
+        ),
+        "buffer": (
+            "SELECT COUNT(*) FROM probe_reactions WHERE buffer_id = ?",
+            "SELECT COUNT(*) FROM probe_tempgrad_groups WHERE buffer_id = ?",
+        ),
+        "sequencing_run": (
+            "SELECT COUNT(*) FROM sequencing_samples WHERE seqrun_id = ?",
+        ),
+    }
+    for entity_type, records in result.items():
+        for record in records:
+            record["reference_count"] = sum(
+                int(active.conn.execute(query, (record["id"],)).fetchone()[0])
+                for query in reference_queries.get(entity_type, ())
+            )
+    return {"mode": _mode, "entities": result}
+
+
 class EntityCreate(BaseModel):
     entity_type: str
     record: Dict[str, Any]
@@ -422,12 +499,26 @@ def delete_entity(req: EntityDelete) -> Dict[str, Any]:
 
 
 @app.get("/api/constructs/nt_rows")
-def nt_rows(disp_name: Optional[str] = None, sequence: Optional[str] = None) -> Dict[str, Any]:
+def nt_rows(
+    construct_id: Optional[int] = None,
+    disp_name: Optional[str] = None,
+    sequence: Optional[str] = None,
+) -> Dict[str, Any]:
     """Seed the numbering grid: default 1-based, or copy an existing construct's."""
     if sequence:
         return {"nt_rows": export_mod.default_nt_rows(sequence), "source": "default"}
+    if construct_id is not None:
+        active = _require_session()
+        rows = active.conn.execute(
+            "SELECT site, base, base_region FROM meta_nucleotides "
+            "WHERE construct_id = ? ORDER BY site",
+            (construct_id,),
+        ).fetchall() if active.conn is not None else []
+        if rows:
+            return {"nt_rows": [dict(row) for row in rows], "source": "database"}
+        raise HTTPException(404, "No numbering found for construct id %s." % construct_id)
     if not disp_name:
-        raise HTTPException(400, "Pass either sequence= or disp_name=.")
+        raise HTTPException(400, "Pass construct_id=, sequence=, or disp_name=.")
 
     staged = next(
         (c for c in session.catalog.staged.get("construct", [])
@@ -446,6 +537,111 @@ def nt_rows(disp_name: Optional[str] = None, sequence: Optional[str] = None) -> 
         if rows:
             return {"nt_rows": [dict(r) for r in rows], "source": "database"}
     raise HTTPException(404, "No numbering found for %r." % disp_name)
+
+
+class BaseRegionRow(BaseModel):
+    site: int
+    base_region: str
+
+
+class BaseRegionUpdate(BaseModel):
+    construct_id: int
+    rows: List[BaseRegionRow]
+
+
+def _write_maintenance_log(entry: Dict[str, Any]) -> None:
+    if session.project_dir is None:
+        return
+    path = session.project_dir / ".nerd" / "maintenance.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, sort_keys=True) + "\n")
+
+
+@app.patch("/api/database/constructs/base-regions")
+def update_construct_base_regions(req: BaseRegionUpdate) -> Dict[str, Any]:
+    """Correct a construct's region labels without changing nucleotide IDs."""
+    _require_mode("edit")
+    active = _require_session()
+    if active.conn is None:
+        raise HTTPException(400, "No database connection is available.")
+
+    construct = active.conn.execute(
+        "SELECT id, disp_name FROM meta_constructs WHERE id = ?", (req.construct_id,)
+    ).fetchone()
+    if construct is None:
+        raise HTTPException(404, "No construct with id %s." % req.construct_id)
+
+    current_rows = active.conn.execute(
+        "SELECT id, site, base, base_region FROM meta_nucleotides "
+        "WHERE construct_id = ? ORDER BY site",
+        (req.construct_id,),
+    ).fetchall()
+    if not current_rows:
+        raise HTTPException(400, "This construct has no nucleotide rows to edit.")
+
+    provided = {row.site: row.base_region.strip() for row in req.rows}
+    if len(provided) != len(req.rows):
+        raise HTTPException(400, "Each nucleotide site must appear exactly once.")
+    current_by_site = {int(row["site"]): row for row in current_rows}
+    if set(provided) != set(current_by_site):
+        raise HTTPException(400, "The submitted sites must exactly match the construct's nucleotide sites.")
+
+    proposed_rows = [
+        {
+            "site": site,
+            "base": current_by_site[site]["base"],
+            "base_region": provided[site],
+        }
+        for site in sorted(provided)
+    ]
+    try:
+        export_mod.validate_primer_annotations(proposed_rows)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    changes = [
+        {
+            "nucleotide_id": int(current_by_site[site]["id"]),
+            "site": site,
+            "old": str(current_by_site[site]["base_region"]),
+            "new": provided[site],
+        }
+        for site in sorted(provided)
+        if str(current_by_site[site]["base_region"]) != provided[site]
+    ]
+    audit_logged = True
+    if changes:
+        with active.conn:
+            active.conn.executemany(
+                "UPDATE meta_nucleotides SET base_region = ? "
+                "WHERE construct_id = ? AND site = ?",
+                [(change["new"], req.construct_id, change["site"]) for change in changes],
+            )
+        try:
+            _write_maintenance_log({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "mode": "edit",
+                "entity_type": "construct",
+                "entity_id": req.construct_id,
+                "disp_name": construct["disp_name"],
+                "operation": "update_base_regions",
+                "changes": changes,
+            })
+        except OSError:
+            audit_logged = False
+
+    saved = active.conn.execute(
+        "SELECT site, base, base_region FROM meta_nucleotides "
+        "WHERE construct_id = ? ORDER BY site",
+        (req.construct_id,),
+    ).fetchall()
+    return {
+        "ok": True,
+        "changed": len(changes),
+        "audit_logged": audit_logged,
+        "nt_rows": [dict(row) for row in saved],
+    }
 
 
 # ---------------------------------------------------------------- generate

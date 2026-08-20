@@ -3,19 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>nerd · sample input</title>
+<title>nerd · web UI</title>
 <link rel="stylesheet" href="/static/vendor/tabulator/tabulator.min.css">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><span class="brand-mark">nerd</span><span class="brand-sub">sample input</span></div>
+  <div class="brand"><span class="brand-mark">nerd</span><span id="modeLabel" class="brand-sub">web UI</span><span id="modeBadge" class="pill pill-idle"></span></div>
   <div class="connect-bar">
     <input id="projectDir" class="input" placeholder="Phase 4 project root" size="30">
     <input id="dbPath" class="input" placeholder="DB override (optional)" size="20">
     <input id="labelInput" class="input" placeholder="label" value="sample_import" size="12">
     <button id="connectBtn" class="btn btn-primary">Connect</button>
     <span id="connectStatus" class="pill pill-idle">not connected</span>
+    <button id="topShutdownBtn" class="btn btn-ghost hidden">Close Web UI</button>
   </div>
 </header>
 
@@ -27,6 +28,24 @@
   <button class="step" data-panel="tokenPanel"><span class="step-num">·</span> Tokens</button>
   <button class="step" data-panel="stagedPanel"><span class="step-num">·</span> New entries <span id="stagedCount" class="mini-badge"></span></button>
 </div>
+
+<div id="databaseBar" class="step-bar hidden">
+  <button class="step active" data-db-type="construct">Constructs</button>
+  <button class="step" data-db-type="buffer">Buffers</button>
+  <button class="step" data-db-type="sequencing_run">Sequencing runs</button>
+  <span class="spacer"></span>
+  <input id="databaseSearch" class="input input-sm" placeholder="Filter entries…" size="24">
+</div>
+
+<main id="databaseWorkspace" class="database-workspace hidden">
+  <aside class="database-list-pane">
+    <div id="databaseCount" class="hint"></div>
+    <div id="databaseList" class="database-list"></div>
+  </aside>
+  <section id="databaseDetail" class="database-detail">
+    <div class="database-empty">Select an entry to inspect it.</div>
+  </section>
+</main>
 
 <!-- ---------- collapsible panels ---------- -->
 <section id="ingestPanel" class="panel">
@@ -142,7 +161,7 @@
 </section>
 
 <!-- ---------- the table ---------- -->
-<main class="table-wrap">
+<main id="createWorkspace" class="table-wrap">
   <div class="table-head">
     <div class="issue-bar" id="issueBar"></div>
     <div class="table-actions">

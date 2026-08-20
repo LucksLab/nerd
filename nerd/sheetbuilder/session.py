@@ -45,7 +45,14 @@ class Session:
     def connected(self) -> bool:
         return self.project_dir is not None
 
-    def connect(self, project_dir: str, db_path: Optional[str], label: str) -> Dict[str, Any]:
+    def connect(
+        self,
+        project_dir: str,
+        db_path: Optional[str],
+        label: str,
+        *,
+        read_only: bool = False,
+    ) -> Dict[str, Any]:
         from nerd.db import api as db_api
 
         requested = Path(project_dir).expanduser()
@@ -57,6 +64,8 @@ class Session:
             if requested.name in {"project.toml", ".nerd"}:
                 raise ValueError("No Phase 4 project file found at %s." % marker)
             project = requested.resolve()
+            if read_only and not project.is_dir():
+                raise ValueError("Project folder does not exist: %s." % project)
             project.mkdir(parents=True, exist_ok=True)
 
         # UI-entered relative DB paths are project-root-relative. The CLI
@@ -69,9 +78,12 @@ class Session:
         context = ProjectContext(db=explicit_db, project=project)
         database = context.resolve_database(cwd=project)
         is_new = not database.is_file()
+        if read_only and is_new:
+            raise ValueError("Database does not exist: %s." % database)
 
-        conn = db_api.connect(database)
-        db_api.init_schema(conn)
+        conn = db_api.connect(database, read_only=read_only)
+        if not read_only:
+            db_api.init_schema(conn)
 
         previous_conn = self.conn
 

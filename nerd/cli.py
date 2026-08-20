@@ -42,7 +42,7 @@ plugin_doctor_app = typer.Typer(no_args_is_help=True, help="Check plugin readine
 image_app = typer.Typer(no_args_is_help=True, help="Inspect and prepare immutable tool images.")
 db_app = typer.Typer(no_args_is_help=True, help="Inspect the selected project database.")
 config_app = typer.Typer(no_args_is_help=True, help="Create, validate, and inspect analysis configs.")
-webui_app = typer.Typer(no_args_is_help=True, help="Run the sample-input helper webapp.")
+webui_app = typer.Typer(no_args_is_help=True, help="Create, edit, or view project data in the Web UI.")
 
 
 class RunStep(str, enum.Enum):
@@ -963,26 +963,16 @@ app.add_typer(webui_app, name="webui")
 
 
 
-@webui_app.command("serve")
-def webui_serve(
+def _launch_webui(
     ctx: typer.Context,
-    project: Optional[Path] = typer.Option(
-        None, "--project", "-p",
-        help="Project root or direct .nerd/project.toml; defaults to project discovery.",
-    ),
-    db: Optional[Path] = typer.Option(
-        None, "--db", help="Database override; otherwise use project.toml or legacy discovery."
-    ),
-    host: str = typer.Option("127.0.0.1", "--host"),
-    port: int = typer.Option(8420, "--port"),
-    open_browser: bool = typer.Option(True, "--open-browser/--no-open-browser"),
-):
-    """Launch the sample-input helper: a local webapp for building nerd
-    'create' configs (constructs, buffers, sequencing runs, sample sheets)
-    from a pattern-parsed list of sample names.
-
-    Requires the 'webui' extra: pip install -e ".[webui]"
-    """
+    mode: str,
+    project: Optional[Path],
+    db: Optional[Path],
+    host: str,
+    port: int,
+    open_browser: bool,
+) -> None:
+    """Shared startup for the create, edit, and view workspaces."""
     try:
         import uvicorn
     except ImportError:
@@ -1007,15 +997,17 @@ def webui_serve(
             selected_db = selected_db.expanduser().resolve()
 
         import nerd.webui.app as webui_module
+        webui_module.set_mode(mode)
         info = webui_module.session.connect(
             str(selected_project), str(selected_db) if selected_db else None,
             webui_module.session.label,
+            read_only=mode == "view",
         )
     except (ContextResolutionError, ProjectConfigError, OSError, ValueError) as exc:
         typer.echo("Web UI startup failed: %s" % exc, err=True)
         raise typer.Exit(code=1)
 
-    typer.echo("Serving nerd sample-input helper at http://%s:%s" % (host, port))
+    typer.echo("Serving nerd Web UI (%s) at http://%s:%s" % (mode, host, port))
     typer.echo("project: %s" % info["project_dir"])
     typer.echo("database: %s" % info["db_path"])
     typer.echo("output_directory: %s" % info["output_dir"])
@@ -1033,6 +1025,60 @@ def webui_serve(
         server.run()
     finally:
         webui_module.set_server(None)
+
+
+@webui_app.command("create")
+def webui_create(
+    ctx: typer.Context,
+    project: Optional[Path] = typer.Option(
+        None, "--project", "-p",
+        help="Project root or direct .nerd/project.toml; defaults to project discovery.",
+    ),
+    db: Optional[Path] = typer.Option(
+        None, "--db", help="Database override; otherwise use project.toml or legacy discovery."
+    ),
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8420, "--port"),
+    open_browser: bool = typer.Option(True, "--open-browser/--no-open-browser"),
+) -> None:
+    """Build sample sheets and create configurations in the Web UI."""
+    _launch_webui(ctx, "create", project, db, host, port, open_browser)
+
+
+@webui_app.command("edit")
+def webui_edit(
+    ctx: typer.Context,
+    project: Optional[Path] = typer.Option(
+        None, "--project", "-p",
+        help="Project root or direct .nerd/project.toml; defaults to project discovery.",
+    ),
+    db: Optional[Path] = typer.Option(
+        None, "--db", help="Database override; otherwise use project.toml or legacy discovery."
+    ),
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8420, "--port"),
+    open_browser: bool = typer.Option(True, "--open-browser/--no-open-browser"),
+) -> None:
+    """Correct existing database entries in the maintenance Web UI."""
+    _launch_webui(ctx, "edit", project, db, host, port, open_browser)
+
+
+@webui_app.command("view")
+def webui_view(
+    ctx: typer.Context,
+    project: Optional[Path] = typer.Option(
+        None, "--project", "-p",
+        help="Project root or direct .nerd/project.toml; defaults to project discovery.",
+    ),
+    db: Optional[Path] = typer.Option(
+        None, "--db", help="Database override; otherwise use project.toml or legacy discovery."
+    ),
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8420, "--port"),
+    open_browser: bool = typer.Option(True, "--open-browser/--no-open-browser"),
+) -> None:
+    """Browse project database metadata in a read-only Web UI."""
+    _launch_webui(ctx, "view", project, db, host, port, open_browser)
 
 
 def _deprecated(old: str, replacement: str) -> None:

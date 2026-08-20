@@ -148,22 +148,36 @@ records are clearer in a sheet than as hundreds of YAML entries. Other starter
 configs keep scientific selections and model parameters in YAML. Templates do
 not invent credentials or cluster allocations.
 
-## Build sample inputs in the web helper
+## Use the web interface
 
 Install the optional web UI dependencies, then launch the helper anywhere
 inside an initialized project:
 
 ```bash
 pip install -e ".[webui]"
-nerd webui serve
+nerd webui create
 ```
 
-Use `nerd webui serve --project PATH` when launching outside the project. The
-helper reads the database and output directory from `.nerd/project.toml`, opens
-already connected, and writes generated create configs under `configs/`.
+The Web UI has three focused workspaces:
+
+```bash
+nerd webui create  # build sample sheets and create configurations
+nerd webui edit    # correct supported existing database metadata
+nerd webui view    # browse metadata without allowing database writes
+```
+
+Add `--project PATH` to any command when launching outside the project. Each
+workspace reads the database and output directory from `.nerd/project.toml` and
+opens already connected. Create mode writes generated configs under `configs/`.
 Those configs inherit project output and executor defaults rather than copying
 them into YAML. The displayed `nerd run create` commands retain the selected
 project and any explicit database override.
+
+Edit mode currently supports ID-preserving construct `base_region` corrections
+and records changes in `.nerd/maintenance.jsonl`. Construct sequences are shown
+read-only because changing a referenced biological sequence requires creating a
+new construct revision. View mode is read-only at both the interface and API
+layers.
 
 Draft sample-sheet state is stored in `.nerd/sample-draft.json`. Existing
 `.nerd_sample_draft.json` files are still loaded so an in-progress legacy draft

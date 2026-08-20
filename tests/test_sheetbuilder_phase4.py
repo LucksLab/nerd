@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, HTTPException
 
 from nerd.cli import app
 from nerd.configuration import resolve_config, validate_config
@@ -166,14 +166,15 @@ def test_legacy_export_remains_self_contained_and_quotes_database(tmp_path):
     assert "'" in result["commands"][-1]
 
 
-def test_webui_serve_uses_global_phase4_project_context(
-    cli_runner, tmp_path, monkeypatch,
+@pytest.mark.parametrize("mode", ["create", "edit", "view"])
+def test_webui_modes_use_global_phase4_project_context(
+    cli_runner, tmp_path, monkeypatch, mode,
 ):
     root = tmp_path / "project"
     project = _init_project(cli_runner, root)
     observed = _stub_uvicorn_server(monkeypatch)
     result = cli_runner.invoke(app, [
-        "--project", str(root), "webui", "serve", "--no-open-browser",
+        "--project", str(root), "webui", mode, "--no-open-browser",
     ])
 
     assert result.exit_code == 0, result.output
@@ -184,11 +185,15 @@ def test_webui_serve_uses_global_phase4_project_context(
     assert observed["ran"] is True
 
     from nerd.webui.app import session
+    import nerd.webui.app as webui_module
     assert session.project_config == project
     assert session.db_path == project.database
+    assert webui_module._state(save=False)["mode"] == mode
+    if mode == "view":
+        assert session.conn.execute("PRAGMA query_only").fetchone()[0] == 1
 
 
-def test_webui_serve_discovers_phase4_project_from_nested_directory(
+def test_webui_create_discovers_phase4_project_from_nested_directory(
     cli_runner, tmp_path, monkeypatch,
 ):
     root = tmp_path / "project"
@@ -198,11 +203,111 @@ def test_webui_serve_discovers_phase4_project_from_nested_directory(
     monkeypatch.chdir(nested)
     _stub_uvicorn_server(monkeypatch)
 
-    result = cli_runner.invoke(app, ["webui", "serve", "--no-open-browser"])
+    result = cli_runner.invoke(app, ["webui", "create", "--no-open-browser"])
 
     assert result.exit_code == 0, result.output
     assert "project: %s" % root.resolve() in result.output
     assert "database: %s" % project.database in result.output
+
+
+def test_webui_serve_command_is_removed(cli_runner):
+    result = cli_runner.invoke(app, ["webui", "serve"])
+
+    assert result.exit_code != 0
+
+
+def test_webui_construct_region_edit_preserves_ids(cli_runner, tmp_path):
+    import nerd.webui.app as webui_module
+
+    root = tmp_path / "project"
+    project = _init_project(cli_runner, root)
+    webui_module.set_mode("edit")
+    webui_module.session.connect(str(root), None, "sample_import")
+    conn = webui_module.session.conn
+    with conn:
+        cursor = conn.execute(
+            "INSERT INTO meta_constructs (family, name, version, sequence, disp_name) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("switch", "WT", "v1", "ACGU", "switch_WT_v1"),
+        )
+        construct_id = cursor.lastrowid
+        conn.executemany(
+            "INSERT INTO meta_nucleotides (construct_id, site, base, base_region) "
+            "VALUES (?, ?, ?, ?)",
+            [
+                (construct_id, 1, "A", "0"),
+                (construct_id, 2, "C", "0"),
+                (construct_id, 3, "G", "1"),
+                (construct_id, 4, "U", "1"),
+            ],
+        )
+    before = conn.execute(
+        "SELECT id, site FROM meta_nucleotides WHERE construct_id = ? ORDER BY site",
+        (construct_id,),
+    ).fetchall()
+
+    request = webui_module.BaseRegionUpdate(
+        construct_id=construct_id,
+        rows=[
+            {"site": 1, "base_region": "0"},
+            {"site": 2, "base_region": "1"},
+            {"site": 3, "base_region": "1"},
+            {"site": 4, "base_region": "2"},
+        ],
+    )
+    result = webui_module.update_construct_base_regions(request)
+    after = conn.execute(
+        "SELECT id, site, base_region FROM meta_nucleotides "
+        "WHERE construct_id = ? ORDER BY site",
+        (construct_id,),
+    ).fetchall()
+
+    assert result["changed"] == 2
+    assert [(row["id"], row["site"]) for row in before] == [
+        (row["id"], row["site"]) for row in after
+    ]
+    assert [row["base_region"] for row in after] == ["0", "1", "1", "2"]
+    assert (root / ".nerd" / "maintenance.jsonl").is_file()
+
+
+def test_webui_construct_region_edit_rejects_invalid_annotation_atomically(
+    cli_runner, tmp_path,
+):
+    import nerd.webui.app as webui_module
+
+    root = tmp_path / "project"
+    _init_project(cli_runner, root)
+    webui_module.set_mode("edit")
+    webui_module.session.connect(str(root), None, "sample_import")
+    conn = webui_module.session.conn
+    with conn:
+        cursor = conn.execute(
+            "INSERT INTO meta_constructs (family, name, version, sequence, disp_name) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("switch", "WT", "v1", "AC", "switch_WT_v1"),
+        )
+        construct_id = cursor.lastrowid
+        conn.executemany(
+            "INSERT INTO meta_nucleotides (construct_id, site, base, base_region) "
+            "VALUES (?, ?, ?, ?)",
+            [(construct_id, 1, "A", "1"), (construct_id, 2, "C", "2")],
+        )
+
+    request = webui_module.BaseRegionUpdate(
+        construct_id=construct_id,
+        rows=[
+            {"site": 1, "base_region": "1"},
+            {"site": 2, "base_region": "1"},
+        ],
+    )
+    with pytest.raises(HTTPException, match="cannot consist entirely of 1s"):
+        webui_module.update_construct_base_regions(request)
+
+    saved = conn.execute(
+        "SELECT base_region FROM meta_nucleotides WHERE construct_id = ? ORDER BY site",
+        (construct_id,),
+    ).fetchall()
+    assert [row["base_region"] for row in saved] == ["1", "2"]
 
 
 def test_webui_shutdown_stops_registered_server_after_response():
