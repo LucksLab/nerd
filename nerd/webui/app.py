@@ -9,7 +9,8 @@ Every mutating endpoint returns the *whole* new state (rows, entity
 resolution, validation summary) so the frontend never has to stitch
 together partial updates or re-query to find out what changed.
 
-Launch with: nerd webui serve --project <label_dir> [--db <path>]
+Launch inside a Phase 4 project with ``nerd webui serve``, or select one
+explicitly with ``nerd webui serve --project <project_root> [--db <path>]``.
 """
 from __future__ import annotations
 
@@ -32,6 +33,10 @@ from nerd.sheetbuilder.pattern import TokenSpec, compile_pattern, parse_name
 from nerd.sheetbuilder.pattern.compile import PatternError
 from nerd.sheetbuilder.session import Session
 from nerd.sheetbuilder.validate import validate
+from nerd.fastq_sources import (
+    FastqSourceError, LOCAL, SRA, list_remote_directory, normalize_source,
+    profile_for_source, remote_profiles,
+)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -64,6 +69,7 @@ def _state(save: bool = True) -> Dict[str, Any]:
         session.sheet,
         session.catalog,
         project_dir=str(session.project_dir) if session.project_dir else None,
+        executors=session.project_config.executors if session.project_config else {},
     ) if session.sheet.rows else {
         "ok": False, "error_count": 0, "warning_count": 0, "by_code": {},
         "resolution_queue": [], "issues": [], "truncated": False,
@@ -72,10 +78,19 @@ def _state(save: bool = True) -> Dict[str, Any]:
     return {
         "connected": session.connected,
         "project_dir": str(session.project_dir) if session.project_dir else None,
+        "project_id": session.project_config.name if session.project_config else None,
+        "project_file": str(session.project_config.source_path) if session.project_config else None,
         "db_path": str(session.db_path) if session.db_path else None,
+        "output_dir": str(session.output_dir) if session.output_dir else None,
         "label": session.label,
         "pattern": session.pattern,
         "fq_dir": session.fq_dir,
+        "fq_source": session.fq_source,
+        "fq_source_choices": [
+            {"value": LOCAL, "label": "Local — this computer"},
+            *remote_profiles(session.project_config.executors if session.project_config else {}),
+            {"value": SRA, "label": "SRA — coming soon", "disabled": True},
+        ],
         "columns": SAMPLE_COLUMNS,
         "entity_columns": ENTITY_COLUMNS,
         "rows": [row.to_dict() for row in session.sheet.rows],
@@ -163,22 +178,30 @@ def delete_token(name: str) -> Dict[str, Any]:
 
 class FastqIngest(BaseModel):
     fq_dir: str
+    fq_source: str = LOCAL
     listing: Optional[str] = None   # pasted `ls` output
     scan_local: bool = False        # or scan fq_dir on this machine
+    scan_source: bool = False       # list through the selected local/remote source
     replace: bool = True
 
 
 @app.post("/api/ingest/fastq")
 def ingest_fastq(req: FastqIngest) -> Dict[str, Any]:
     _require_session()
-    if req.scan_local:
+    try:
+        source = normalize_source(req.fq_source)
+    except FastqSourceError as exc:
+        raise HTTPException(400, str(exc))
+    if source == SRA:
+        raise HTTPException(400, "SRA pulling is reserved for a future release; choose local or a remote HPC alias.")
+    if req.scan_local or (req.scan_source and source == LOCAL):
         try:
             filenames = fillers.scan_directory(req.fq_dir)
         except FileNotFoundError as exc:
             raise HTTPException(400, str(exc))
         if not filenames:
             raise HTTPException(400, "No fastq files found in %s" % req.fq_dir)
-    else:
+    elif not req.scan_source:
         filenames = fillers.parse_listing(req.listing or "")
         if not filenames:
             raise HTTPException(
@@ -186,8 +209,23 @@ def ingest_fastq(req: FastqIngest) -> Dict[str, Any]:
                 "No fastq filenames found in that listing. Paste the output of "
                 "`ls` (or `ls -l`) from the folder holding the fastq files.",
             )
-    result = fillers.fastq_scan(session.sheet, filenames, req.fq_dir, replace=req.replace)
+    else:
+        try:
+            executors = session.project_config.executors if session.project_config else {}
+            filenames = list_remote_directory(req.fq_dir, profile_for_source(source, executors))
+            filenames = [
+                name for name in filenames
+                if name.lower().endswith(fillers.FASTQ_SUFFIXES)
+            ]
+        except (FastqSourceError, FileNotFoundError) as exc:
+            raise HTTPException(400, str(exc))
+        if not filenames:
+            raise HTTPException(400, "No files found in %s via %s." % (req.fq_dir, source))
+    result = fillers.fastq_scan(
+        session.sheet, filenames, req.fq_dir, fq_source=source, replace=req.replace
+    )
     session.fq_dir = req.fq_dir
+    session.fq_source = source
     return {"result": result, "state": _state()}
 
 
@@ -405,7 +443,8 @@ class GenerateRequest(BaseModel):
 def generate(req: GenerateRequest) -> Dict[str, Any]:
     active = _require_session()
     report = validate(
-        active.sheet, active.catalog, project_dir=str(active.project_dir)
+        active.sheet, active.catalog, project_dir=str(active.project_dir),
+        executors=active.project_config.executors if active.project_config else {},
     )
     if not report["ok"] and not req.ignore_errors:
         raise HTTPException(
@@ -416,6 +455,7 @@ def generate(req: GenerateRequest) -> Dict[str, Any]:
     result = export_mod.export(
         active.sheet, active.catalog, str(active.project_dir), active.label,
         mode=req.mode, db_path=str(active.db_path) if active.db_path else None,
+        project_config=active.project_config,
     )
     return {"result": result, "validation": report, "state": _state()}
 

@@ -95,16 +95,19 @@ function openPanel(id) {
 /* ---------------------------------------------------------------- ingest */
 
 $("ingestFastqBtn").addEventListener("click", () => ingest(false));
-$("scanLocalBtn").addEventListener("click", () => ingest(true));
+$("listFastqBtn").addEventListener("click", () => ingest(true));
 
 async function ingest(scanLocal) {
   const fq_dir = $("fqDir").value.trim();
+  const fq_source = $("fqSource").value;
   if (!fq_dir) return toast("Enter the fastq folder path first.", "err");
   try {
     const data = await post("/api/ingest/fastq", {
       fq_dir,
-      listing: $("fqListing").value,
-      scan_local: scanLocal,
+      fq_source,
+      listing: scanLocal ? null : $("fqListing").value,
+      scan_local: scanLocal && fq_source === "local",
+      scan_source: scanLocal,
     });
     render(data.state);
     const r = data.result;
@@ -343,6 +346,17 @@ function render(state) {
   renderGroups();
   if (S.pattern && !$("patternInput").value) $("patternInput").value = S.pattern;
   if (S.fq_dir && !$("fqDir").value) $("fqDir").value = S.fq_dir;
+  const sourceSelect = $("fqSource");
+  const selectedSource = S.fq_source || sourceSelect.value || "local";
+  sourceSelect.replaceChildren();
+  (S.fq_source_choices || []).forEach((choice) => {
+    const option = new Option(choice.label, choice.value);
+    option.disabled = !!choice.disabled;
+    sourceSelect.add(option);
+  });
+  if ([...sourceSelect.options].some((option) => option.value === selectedSource)) {
+    sourceSelect.value = selectedSource;
+  }
   if (!$("batchColumn").options.length) {
     S.columns.forEach((c) => {
       $("batchColumn").add(new Option(c, c));
@@ -361,6 +375,8 @@ const CODE_LABELS = {
   missing_fastq: (n) => `${n} missing fastq file${n === 1 ? "" : "s"}`,
   missing_fq_dir: (n) => `${n} missing folder${n === 1 ? "" : "s"}`,
   remote_fq_dir: () => `cluster paths not checked here`,
+  invalid_fq_source: (n) => `${n} invalid FASTQ source${n === 1 ? "" : "s"}`,
+  sra_placeholder: () => `SRA pulling is not implemented yet`,
   empty_sheet: () => `no rows yet`,
 };
 
@@ -793,6 +809,7 @@ $("gridApplyBtn").addEventListener("click", async () => {
     const state = await api("/api/state");
     if (state.connected) {
       $("projectDir").value = state.project_dir || "";
+      $("dbPath").value = state.db_path || "";
       $("labelInput").value = state.label || "";
       $("connectStatus").textContent = "connected";
       $("connectStatus").className = "pill pill-ok";

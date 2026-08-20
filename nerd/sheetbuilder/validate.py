@@ -14,13 +14,13 @@ since nerd cannot stat them from here either).
 """
 from __future__ import annotations
 
-import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .catalog import EntityCatalog
 from .model import ENTITY_COLUMNS, REQUIRED_COLUMNS, Sheet
+from nerd.fastq_sources import FastqSourceError, LOCAL, SRA, normalize_source, profile_for_source
 
 ERROR = "error"
 WARNING = "warning"
@@ -38,10 +38,6 @@ def _text(value: Any) -> str:
 
 NUMERIC_COLUMNS = ("temperature", "reaction_time", "probe_concentration", "treated")
 
-# Prefixes that mean "this lives on a cluster, not on this machine".
-REMOTE_PREFIXES = ("/projects/", "/scratch/", "/home/", "/gpfs/", "/work/")
-
-
 @dataclass
 class Issue:
     severity: str
@@ -55,20 +51,12 @@ class Issue:
         return asdict(self)
 
 
-def looks_remote(path: str) -> bool:
-    text = str(path or "")
-    if not text:
-        return False
-    if text.startswith(REMOTE_PREFIXES):
-        return not Path(text).exists()
-    return False
-
-
 def validate(
     sheet: Sheet,
     catalog: EntityCatalog,
     project_dir: Optional[str] = None,
     check_files: bool = True,
+    executors: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     issues: List[Issue] = []
 
@@ -133,11 +121,25 @@ def validate(
     # --- fastq presence ---
     if check_files:
         unverified = 0
+        sra_placeholders = 0
         for row in sheet.rows:
             fq_dir = _text(row.get("fq_dir"))
             if not fq_dir:
                 continue
-            if looks_remote(fq_dir):
+            try:
+                source = normalize_source(row.get("fq_source"))
+                if source not in {LOCAL, SRA}:
+                    profile_for_source(source, executors or {})
+            except FastqSourceError as exc:
+                issues.append(Issue(
+                    ERROR, "invalid_fq_source", str(exc), row_uid=row.uid,
+                    column="fq_source", value=_text(row.get("fq_source")),
+                ))
+                continue
+            if source == SRA:
+                sra_placeholders += 1
+                continue
+            if source != LOCAL:
                 unverified += 1
                 continue
             base = Path(fq_dir)
@@ -162,7 +164,14 @@ def validate(
             issues.append(Issue(
                 WARNING, "remote_fq_dir",
                 "%d row(s) point at a cluster path that cannot be checked from "
-                "here; nerd create will verify them where it runs." % unverified,
+                "the table; the selected remote HPC alias is checked during listing "
+                "and nerd create." % unverified,
+            ))
+        if sra_placeholders:
+            issues.append(Issue(
+                WARNING, "sra_placeholder",
+                "%d row(s) use the reserved SRA source; automatic SRA pulling is not implemented yet."
+                % sra_placeholders,
             ))
 
     return _summarize(issues)

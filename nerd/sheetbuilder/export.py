@@ -14,9 +14,12 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+import shlex
 from typing import Any, Dict, List, Optional
 
 import yaml
+
+from nerd.project import ProjectConfig
 
 from .catalog import EntityCatalog
 from .model import SAMPLE_COLUMNS, Sheet
@@ -60,8 +63,9 @@ def export(
     label: str,
     mode: str = HYBRID,
     db_path: Optional[str] = None,
+    project_config: Optional[ProjectConfig] = None,
 ) -> Dict[str, Any]:
-    project = Path(project_dir)
+    project = project_config.root if project_config is not None else Path(project_dir)
     configs = project / "configs"
     to_import = configs / "to_import"
     nt_info_dir = configs / "nt_info"
@@ -90,8 +94,16 @@ def export(
     _write_csv(samples_csv, SAMPLE_COLUMNS, rows)
     written.append(str(samples_csv))
 
-    run_block = {"output_dir": ".", "label": label, "backend": "local"}
+    # Phase 4 owns output/executor defaults in project.toml. Omitting them
+    # here lets resolve_config inherit those settings. Legacy projects keep
+    # an explicit project-root output directory.
+    run_block = (
+        {"label": label}
+        if project_config is not None
+        else {"output_dir": "..", "label": label, "backend": "local"}
+    )
 
+    meta_written = False
     if mode == CSV_ONLY:
         if buffers:
             path = to_import / "buffers.csv"
@@ -116,6 +128,7 @@ def export(
         if create_block:
             _write_yaml(meta_config, {"run": run_block, "create": create_block})
             written.append(str(meta_config))
+            meta_written = True
     else:
         meta_config = configs / "create_meta.yaml"
         create_block = {}
@@ -128,6 +141,7 @@ def export(
         if create_block:
             _write_yaml(meta_config, {"run": run_block, "create": create_block})
             written.append(str(meta_config))
+            meta_written = True
 
     samples_config = configs / "create_probing_samples.yaml"
     _write_yaml(samples_config, {
@@ -136,11 +150,23 @@ def export(
     })
     written.append(str(samples_config))
 
-    db_flag = " --db %s" % db_path if db_path else ""
-    commands = []
-    if (configs / "create_meta.yaml").exists():
-        commands.append("nerd run create%s %s" % (db_flag, configs / "create_meta.yaml"))
-    commands.append("nerd run create%s %s" % (db_flag, samples_config))
+    def command_for(config_path: Path) -> str:
+        args = ["nerd"]
+        if project_config is not None:
+            args.extend(["--project", str(project_config.root)])
+        uses_database_override = db_path is not None and (
+            project_config is None
+            or Path(db_path).expanduser().resolve() != project_config.database
+        )
+        if uses_database_override:
+            args.extend(["--db", str(db_path)])
+        args.extend(["run", "create", str(config_path)])
+        return shlex.join(args)
+
+    commands: List[str] = []
+    if meta_written:
+        commands.append(command_for(configs / "create_meta.yaml"))
+    commands.append(command_for(samples_config))
 
     return {
         "written": written,

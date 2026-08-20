@@ -19,6 +19,10 @@ from nerd.pipeline.tasks.derived import (
     SubsampleMaterializer,
     FilterSingleHitMaterializer,
 )
+from nerd.fastq_sources import (
+    LOCAL, SRA, local_fastq_paths, normalize_source, remote_alias,
+    remote_fastq_paths,
+)
 
 log = get_logger(__name__)
 
@@ -401,6 +405,7 @@ class MutCountTask(Task):
             "artifacts/*/per_read_histogram.txtga",
         ]
         successes = 0
+        failures: List[str] = []
         for name in sample_names:
             start_cmd_idx = len(cmds)
             start_stage_in_idx = len(self._stage_in)
@@ -428,13 +433,25 @@ class MutCountTask(Task):
                         raise ValueError(f"Derived sample '{name}' refers to missing parent sample id={parent_id}")
 
                 sid = int(parent_srow["id"]) if "id" in parent_srow.keys() else int(parent_srow[0])
-                # Resolve parent R1/R2 local paths
-                fq_dir = Path(str(parent_srow["fq_dir"]))
-                if not fq_dir.is_absolute():
-                    fq_dir = label_dir / fq_dir
-                fq_dir = fq_dir.resolve()
-                r1 = (fq_dir / str(parent_srow["r1_file"])).resolve()
-                r2 = (fq_dir / str(parent_srow["r2_file"])).resolve()
+                source = normalize_source(parent_srow["fq_source"])
+                if source == SRA:
+                    raise ValueError("SRA FASTQ pulling is not implemented yet.")
+                if source == LOCAL:
+                    r1, r2 = local_fastq_paths(
+                        str(parent_srow["fq_dir"]), str(parent_srow["r1_file"]),
+                        str(parent_srow["r2_file"]), label_dir,
+                    )
+                else:
+                    alias = remote_alias(source)
+                    if str(ctx.backend).lower() != "ssh_slurm" or ctx.executor_profile != alias:
+                        raise ValueError(
+                            "Sample %r uses FASTQs on remote HPC alias %r; run mut_count "
+                            "with executor %r." % (name, alias, alias)
+                        )
+                    r1, r2 = remote_fastq_paths(
+                        str(parent_srow["fq_dir"]), str(parent_srow["r1_file"]),
+                        str(parent_srow["r2_file"]),
+                    )
 
                 cid = _construct_id_for_sample_id(sid)
                 if cid is None:
@@ -473,7 +490,10 @@ class MutCountTask(Task):
                 remote_r1 = sample_dir / r1.name
                 remote_r2 = sample_dir / r2.name
                 backend = str(ctx.backend or "").lower()
-                needs_stage = backend not in {"local"} and not bool(inputs.get("_shared_filesystem"))
+                needs_stage = (
+                    source == LOCAL and backend not in {"local"}
+                    and not bool(inputs.get("_shared_filesystem"))
+                )
                 if needs_stage:
                     self._stage_in.append({"src": str(r1), "dst": str(remote_r1)})
                     self._stage_in.append({"src": str(r2), "dst": str(remote_r2)})
@@ -570,17 +590,22 @@ class MutCountTask(Task):
                     cmds.append("echo %s" % _q("[Step 4] Would run shapemapper via %s (skipped in dry_run)" % run_script))
                 else:
                     cmds.append(wrapped_shapecmd)
-            except Exception:
+            except Exception as exc:
                 cmds[:] = cmds[:start_cmd_idx]
                 self._stage_in[:] = self._stage_in[:start_stage_in_idx]
                 self._stage_out_extra[:] = self._stage_out_extra[:start_stage_out_idx]
                 log.exception("Failed to prepare mut_count inputs for sample %s; skipping.", name)
+                failures.append("%s: %s" % (name, exc))
                 continue
 
             successes += 1
 
         if successes == 0:
-            raise RuntimeError("No samples qualified for mut_count task.")
+            detail = "; ".join(failures)
+            raise RuntimeError(
+                "No samples qualified for mut_count task.%s"
+                % (" " + detail if detail else "")
+            )
 
         # Use newlines between commands; 'set -e' in the job script ensures abort on failure.
         return "set -euo pipefail\nmkdir -p .nerd-tmp\n" + "\n".join(cmds)
@@ -641,13 +666,20 @@ class MutCountTask(Task):
 
     def _resolve_fastqs(self, ctx: TaskContext, row) -> Tuple[Path, Path]:
         label_dir = (Path(ctx.output_dir) / ctx.label).resolve()
-        fq_dir = Path(row["fq_dir"]) if isinstance(row["fq_dir"], str) else Path(str(row["fq_dir"]))
-        if not fq_dir.is_absolute():
-            fq_dir = label_dir / fq_dir
-        fq_dir = fq_dir.resolve()
-        r1 = (fq_dir / row["r1_file"]).resolve()
-        r2 = (fq_dir / row["r2_file"]).resolve()
-        return r1, r2
+        source = normalize_source(row["fq_source"])
+        if source == LOCAL:
+            return local_fastq_paths(
+                str(row["fq_dir"]), str(row["r1_file"]), str(row["r2_file"]), label_dir
+            )
+        if source == SRA:
+            raise ValueError("SRA FASTQ pulling is not implemented yet.")
+        alias = remote_alias(source)
+        if str(ctx.backend).lower() != "ssh_slurm" or ctx.executor_profile != alias:
+            raise ValueError("Remote FASTQs on %r require executor %r." % (alias, alias))
+        r1, r2 = remote_fastq_paths(
+            str(row["fq_dir"]), str(row["r1_file"]), str(row["r2_file"])
+        )
+        return Path(str(r1)), Path(str(r2))
 
     def scope_id(self, ctx: Optional[TaskContext], inputs: Any) -> Optional[int]:
         """Return parent sequencing_samples.id if exactly one sample/child is requested; else None."""

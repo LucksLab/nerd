@@ -8,11 +8,15 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from .base import Task, TaskContext
 from nerd.utils.logging import get_logger
 from nerd.db import api as db_api
+from nerd.fastq_sources import (
+    LOCAL, SRA, check_remote_fastqs, local_fastq_paths, normalize_source,
+    profile_for_source,
+)
 
 log = get_logger(__name__)
 
@@ -57,6 +61,8 @@ class CreateTask(Task):
         },
         "samples": {
             "sample_name": "sample_name",
+            "fq_source": "fq_source",
+            "fastq_source": "fq_source",
             "fq_dir": "fq_dir",
             "fastq_dir": "fq_dir",
             "r1": "r1_file",
@@ -139,24 +145,35 @@ class CreateTask(Task):
 
         # --- Validate paths ---
         # 1. Check fq_dir for each sample
+        remote_directory_cache: Dict[Tuple[str, str], Set[str]] = {}
         for sample in create_cfg.get("samples", []):
             fq_dir_str = sample.get("fq_dir")
             if fq_dir_str:
-                fq_dir = Path(fq_dir_str)
-                if not fq_dir.is_absolute():
-                    # Default root is the label directory
-                    fq_dir = label_dir / fq_dir
-
-                if not fq_dir.is_dir():
-                    raise FileNotFoundError(f"FastQ directory not found: {fq_dir}")
-
-                # 2. Check R1 and R2 files within the fq_dir
-                r1_file = fq_dir / sample.get("r1_file", "")
-                r2_file = fq_dir / sample.get("r2_file", "")
-                if not r1_file.is_file():
-                    raise FileNotFoundError(f"R1 file not found: {r1_file}")
-                if not r2_file.is_file():
-                    raise FileNotFoundError(f"R2 file not found: {r2_file}")
+                source = normalize_source(sample.get("fq_source"))
+                sample["fq_source"] = source
+                r1_name = str(sample.get("r1_file", ""))
+                r2_name = str(sample.get("r2_file", ""))
+                if source == SRA:
+                    # Reserved source: accession resolution/pulling remains a placeholder.
+                    continue
+                if source == LOCAL:
+                    r1_file, r2_file = local_fastq_paths(
+                        str(fq_dir_str), r1_name, r2_name, label_dir
+                    )
+                    if not r1_file.parent.is_dir():
+                        raise FileNotFoundError(f"FastQ directory not found: {r1_file.parent}")
+                    if not r1_file.is_file():
+                        raise FileNotFoundError(f"R1 file not found: {r1_file}")
+                    if not r2_file.is_file():
+                        raise FileNotFoundError(f"R2 file not found: {r2_file}")
+                else:
+                    profile = profile_for_source(source, cfg.get("executors") or {})
+                    cache_key = (source, str(fq_dir_str))
+                    available = remote_directory_cache.get(cache_key)
+                    available = check_remote_fastqs(
+                        str(fq_dir_str), (r1_name, r2_name), profile, available
+                    )
+                    remote_directory_cache[cache_key] = available
 
         # 3. Check nt_info csv if provided
         construct_cfg = create_cfg.get("construct") or {}
@@ -345,6 +362,8 @@ class CreateTask(Task):
                 if value == "":
                     value = None
             normalized[target_key] = value
+        if section == "samples" and not normalized.get("fq_source"):
+            normalized["fq_source"] = LOCAL
         return normalized
 
     @staticmethod
@@ -637,7 +656,11 @@ class CreateTask(Task):
                         if sample_name in (None, ""):
                             raise ValueError("Sample entry is missing 'sample_name'.")
                         fq_dir_val = sample.get("fq_dir")
-                        existing_sample_id = db_api.get_sample_id(ctx.db, seqrun_id, sample_name, fq_dir_val)
+                        fq_source_val = normalize_source(sample.get("fq_source"))
+                        sample["fq_source"] = fq_source_val
+                        existing_sample_id = db_api.get_sample_id(
+                            ctx.db, seqrun_id, sample_name, fq_dir_val, fq_source_val
+                        )
                         sample_existing_map[(seqrun_id, str(sample_name), fq_dir_val or None)] = existing_sample_id
                         grouped_samples.setdefault(seqrun_id, []).append(sample)
                         sample_seqrun_pairs.append((sample, seqrun_id))
@@ -648,7 +671,10 @@ class CreateTask(Task):
                         for sample in group:
                             sample_name = sample.get("sample_name")
                             fq_dir_val = sample.get("fq_dir")
-                            sample_id = db_api.get_sample_id(ctx.db, seqrun_id, sample_name, fq_dir_val)
+                            sample_id = db_api.get_sample_id(
+                                ctx.db, seqrun_id, sample_name, fq_dir_val,
+                                normalize_source(sample.get("fq_source")),
+                            )
                             key = (seqrun_id, str(sample_name), fq_dir_val or None)
                             previous_id = sample_existing_map.get(key)
                             status = "created" if previous_id is None else "updated"
@@ -725,7 +751,10 @@ class CreateTask(Task):
                     for s, seq_id in sample_seqrun_pairs:
                         sample_name = s.get("sample_name")
                         fq_dir = s.get("fq_dir")
-                        s_id = db_api.get_sample_id(ctx.db, seq_id, sample_name, fq_dir)
+                        s_id = db_api.get_sample_id(
+                            ctx.db, seq_id, sample_name, fq_dir,
+                            normalize_source(s.get("fq_source")),
+                        )
                         if s_id is None:
                             raise ValueError(f"Could not resolve sequencing sample id for name='{sample_name}', fq_dir='{fq_dir}'")
 

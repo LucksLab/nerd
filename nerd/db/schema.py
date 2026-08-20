@@ -71,12 +71,13 @@ CREATE TABLE IF NOT EXISTS sequencing_samples (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     seqrun_id INTEGER NOT NULL,
     sample_name TEXT NOT NULL,
+    fq_source TEXT NOT NULL DEFAULT 'local',
     fq_dir TEXT NOT NULL,
     r1_file TEXT NOT NULL,
     r2_file TEXT NOT NULL,
     to_drop INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY(seqrun_id) REFERENCES sequencing_runs(id),
-    UNIQUE(seqrun_id, sample_name, fq_dir)
+    UNIQUE(seqrun_id, sample_name, fq_source, fq_dir)
 );
 """
 

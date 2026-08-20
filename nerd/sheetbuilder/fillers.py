@@ -133,6 +133,7 @@ def fastq_scan(
     sheet: Sheet,
     filenames: Sequence[str],
     fq_dir: str,
+    fq_source: str = "local",
     replace: bool = True,
 ) -> Dict[str, Any]:
     """Populate the sheet from a fastq listing.
@@ -148,6 +149,7 @@ def fastq_scan(
         sheet.add_row(
             {
                 "sample_name": pair["sample_name"],
+                "fq_source": fq_source,
                 "fq_dir": fq_dir,
                 "r1_file": pair["r1_file"],
                 "r2_file": pair["r2_file"],

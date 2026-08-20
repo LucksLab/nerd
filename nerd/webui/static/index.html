@@ -11,8 +11,8 @@
 <header class="topbar">
   <div class="brand"><span class="brand-mark">nerd</span><span class="brand-sub">sample input</span></div>
   <div class="connect-bar">
-    <input id="projectDir" class="input" placeholder="Project folder" size="30">
-    <input id="dbPath" class="input" placeholder="DB path (optional)" size="20">
+    <input id="projectDir" class="input" placeholder="Phase 4 project root" size="30">
+    <input id="dbPath" class="input" placeholder="DB override (optional)" size="20">
     <input id="labelInput" class="input" placeholder="label" value="sample_import" size="12">
     <button id="connectBtn" class="btn btn-primary">Connect</button>
     <span id="connectStatus" class="pill pill-idle">not connected</span>
@@ -31,6 +31,12 @@
 <!-- ---------- collapsible panels ---------- -->
 <section id="ingestPanel" class="panel">
   <div class="panel-grid">
+    <label class="field">FASTQ location
+      <select id="fqSource" class="input">
+        <option value="local">Local — this computer</option>
+        <option value="sra" disabled>SRA — coming soon</option>
+      </select>
+    </label>
     <label class="field">fastq folder (the path nerd will use as fq_dir)
       <input id="fqDir" class="input input-mono" placeholder="/projects/b1044/Sequencing/.../run_name">
     </label>
@@ -40,10 +46,11 @@
     </label>
   </div>
   <div class="panel-actions">
+    <button id="listFastqBtn" class="btn btn-primary">List folder &amp; build rows</button>
     <button id="ingestFastqBtn" class="btn btn-primary">Pair reads &amp; build rows</button>
-    <button id="scanLocalBtn" class="btn btn-ghost">Scan folder on this machine</button>
     <span class="hint">R1/R2 are paired automatically; sample_name, fq_dir, r1_file, r2_file get filled.</span>
   </div>
+  <p id="fqSourceHelp" class="hint">Remote HPC locations appear only after an <code>ssh_slurm</code> alias is configured in <code>.nerd/project.toml</code>. Configure and test its OpenSSH Host alias before creating samples.</p>
   <details class="fallback">
     <summary>No fastq files — just paste sample names</summary>
     <textarea id="plainNames" class="input input-mono" rows="4" placeholder="one sample name per line"></textarea>

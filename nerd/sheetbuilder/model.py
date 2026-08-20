@@ -15,7 +15,7 @@ from typing import Any, Dict, Iterable, List, Optional
 # header nerd normalizes to rt_protocol; reaction_group is a free-text
 # label nerd maps to a numeric rg_id at ingest.
 SAMPLE_COLUMNS: List[str] = [
-    "sequencing_run_name", "sample_name", "fq_dir", "r1_file", "r2_file",
+    "sequencing_run_name", "sample_name", "fq_source", "fq_dir", "r1_file", "r2_file",
     "reaction_group", "temperature", "replicate", "reaction_time", "probe",
     "probe_concentration", "RT", "treated", "buffer", "construct", "done_by",
 ]
@@ -23,7 +23,7 @@ SAMPLE_COLUMNS: List[str] = [
 # Columns create.py refuses to ingest when empty. Note sequencing_run_name
 # is NOT among them -- it is empty in all 1131 rows of the demo sheet.
 REQUIRED_COLUMNS: List[str] = [
-    "sample_name", "fq_dir", "r1_file", "r2_file", "reaction_group",
+    "sample_name", "fq_source", "fq_dir", "r1_file", "r2_file", "reaction_group",
     "temperature", "replicate", "reaction_time", "probe",
     "probe_concentration", "RT", "treated", "buffer", "construct", "done_by",
 ]
@@ -89,10 +89,15 @@ class Row:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Row":
+        values = dict(data.get("values") or {})
+        origins = dict(data.get("origins") or {})
+        if not values.get("fq_source"):
+            values["fq_source"] = "local"
+            origins["fq_source"] = FASTQ
         return cls(
             uid=int(data["uid"]),
-            values=dict(data.get("values") or {}),
-            origins=dict(data.get("origins") or {}),
+            values=values,
+            origins=origins,
             context=dict(data.get("context") or {}),
             unmatched=bool(data.get("unmatched", False)),
         )

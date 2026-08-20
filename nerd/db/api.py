@@ -27,6 +27,20 @@ _LOCK_RETRY_MESSAGES: tuple[str, ...] = (
 )
 
 
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    """Apply small, idempotent migrations needed by existing project DBs."""
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(sequencing_samples)")}
+    if columns and "fq_source" not in columns:
+        conn.execute(
+            "ALTER TABLE sequencing_samples "
+            "ADD COLUMN fq_source TEXT NOT NULL DEFAULT 'local'"
+        )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_sequencing_samples_source "
+        "ON sequencing_samples (seqrun_id, sample_name, fq_source, fq_dir)"
+    )
+
+
 def _is_lock_error(err: sqlite3.Error) -> bool:
     """Return True if the sqlite error looks like a lock/busy condition."""
     msg = str(err).lower()
@@ -126,6 +140,7 @@ def init_schema(conn: sqlite3.Connection):
         with conn:
             for table_sql in ALL_TABLES:
                 conn.execute(table_sql)
+            _migrate_schema(conn)
             for index_sql in ALL_INDEXES:
                 conn.execute(index_sql)
             for view_name, view_sql in VIEW_DEFINITIONS:
@@ -1482,6 +1497,7 @@ def bulk_upsert_samples(conn: sqlite3.Connection, seqrun_id: int, samples: List[
             {
                 "seqrun_id": seqrun_id,
                 "sample_name": s.get("sample_name"),
+                "fq_source": s.get("fq_source") or "local",
                 "fq_dir": s.get("fq_dir"),
                 "r1_file": s.get("r1_file"),
                 "r2_file": s.get("r2_file"),
@@ -1491,9 +1507,10 @@ def bulk_upsert_samples(conn: sqlite3.Connection, seqrun_id: int, samples: List[
 
     sql = (
         """
-        INSERT INTO sequencing_samples (seqrun_id, sample_name, fq_dir, r1_file, r2_file, to_drop)
-        VALUES (:seqrun_id, :sample_name, :fq_dir, :r1_file, :r2_file, :to_drop)
-        ON CONFLICT(seqrun_id, sample_name, fq_dir) DO UPDATE SET
+        INSERT INTO sequencing_samples (seqrun_id, sample_name, fq_source, fq_dir, r1_file, r2_file, to_drop)
+        VALUES (:seqrun_id, :sample_name, :fq_source, :fq_dir, :r1_file, :r2_file, :to_drop)
+        ON CONFLICT DO UPDATE SET
+            fq_source = excluded.fq_source,
             r1_file = excluded.r1_file,
             r2_file = excluded.r2_file,
             to_drop = excluded.to_drop
@@ -1519,7 +1536,8 @@ def bulk_upsert_samples(conn: sqlite3.Connection, seqrun_id: int, samples: List[
 
 
 # --- Additional helpers for probing reactions and reaction groups ---
-def get_sample_id(conn: sqlite3.Connection, seqrun_id: int, sample_name: str, fq_dir: Optional[str] = None) -> Optional[int]:
+def get_sample_id(conn: sqlite3.Connection, seqrun_id: int, sample_name: str, fq_dir: Optional[str] = None,
+                  fq_source: Optional[str] = None) -> Optional[int]:
     """
     Fetch the id of a sequencing sample by seqrun_id and sample_name.
     If fq_dir is provided, include it in the filter for disambiguation.
@@ -1530,10 +1548,15 @@ def get_sample_id(conn: sqlite3.Connection, seqrun_id: int, sample_name: str, fq
                 "SELECT id FROM sequencing_samples WHERE seqrun_id = ? AND sample_name = ?",
                 (seqrun_id, sample_name),
             ).fetchone()
-        else:
+        elif fq_source is None:
             row = conn.execute(
                 "SELECT id FROM sequencing_samples WHERE seqrun_id = ? AND sample_name = ? AND fq_dir = ?",
                 (seqrun_id, sample_name, fq_dir),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT id FROM sequencing_samples WHERE seqrun_id = ? AND sample_name = ? AND fq_dir = ? AND fq_source = ?",
+                (seqrun_id, sample_name, fq_dir, fq_source),
             ).fetchone()
         return int(row[0]) if row else None
     except sqlite3.Error as e:
@@ -1880,6 +1903,7 @@ def init_schema(conn: sqlite3.Connection):
         with conn:
             for table_sql in ALL_TABLES:
                 conn.execute(table_sql)
+            _migrate_schema(conn)
             for index_sql in ALL_INDEXES:
                 conn.execute(index_sql)
             for view_name, view_sql in VIEW_DEFINITIONS:
@@ -2978,6 +3002,7 @@ def bulk_upsert_samples(conn: sqlite3.Connection, seqrun_id: int, samples: List[
             {
                 "seqrun_id": seqrun_id,
                 "sample_name": s.get("sample_name"),
+                "fq_source": s.get("fq_source") or "local",
                 "fq_dir": s.get("fq_dir"),
                 "r1_file": s.get("r1_file"),
                 "r2_file": s.get("r2_file"),
@@ -2987,9 +3012,10 @@ def bulk_upsert_samples(conn: sqlite3.Connection, seqrun_id: int, samples: List[
 
     sql = (
         """
-        INSERT INTO sequencing_samples (seqrun_id, sample_name, fq_dir, r1_file, r2_file, to_drop)
-        VALUES (:seqrun_id, :sample_name, :fq_dir, :r1_file, :r2_file, :to_drop)
-        ON CONFLICT(seqrun_id, sample_name, fq_dir) DO UPDATE SET
+        INSERT INTO sequencing_samples (seqrun_id, sample_name, fq_source, fq_dir, r1_file, r2_file, to_drop)
+        VALUES (:seqrun_id, :sample_name, :fq_source, :fq_dir, :r1_file, :r2_file, :to_drop)
+        ON CONFLICT DO UPDATE SET
+            fq_source = excluded.fq_source,
             r1_file = excluded.r1_file,
             r2_file = excluded.r2_file,
             to_drop = excluded.to_drop
@@ -3015,7 +3041,8 @@ def bulk_upsert_samples(conn: sqlite3.Connection, seqrun_id: int, samples: List[
 
 
 # --- Additional helpers for probing reactions and reaction groups ---
-def get_sample_id(conn: sqlite3.Connection, seqrun_id: int, sample_name: str, fq_dir: Optional[str] = None) -> Optional[int]:
+def get_sample_id(conn: sqlite3.Connection, seqrun_id: int, sample_name: str, fq_dir: Optional[str] = None,
+                  fq_source: Optional[str] = None) -> Optional[int]:
     """
     Fetch the id of a sequencing sample by seqrun_id and sample_name.
     If fq_dir is provided, include it in the filter for disambiguation.
@@ -3026,10 +3053,15 @@ def get_sample_id(conn: sqlite3.Connection, seqrun_id: int, sample_name: str, fq
                 "SELECT id FROM sequencing_samples WHERE seqrun_id = ? AND sample_name = ?",
                 (seqrun_id, sample_name),
             ).fetchone()
-        else:
+        elif fq_source is None:
             row = conn.execute(
                 "SELECT id FROM sequencing_samples WHERE seqrun_id = ? AND sample_name = ? AND fq_dir = ?",
                 (seqrun_id, sample_name, fq_dir),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT id FROM sequencing_samples WHERE seqrun_id = ? AND sample_name = ? AND fq_dir = ? AND fq_source = ?",
+                (seqrun_id, sample_name, fq_dir, fq_source),
             ).fetchone()
         return int(row[0]) if row else None
     except sqlite3.Error as e:
