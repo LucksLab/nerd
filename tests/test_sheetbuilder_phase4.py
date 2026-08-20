@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 import yaml
+from fastapi import BackgroundTasks
 
 from nerd.cli import app
 from nerd.configuration import resolve_config, validate_config
 from nerd.project import ProjectContext, load_project
 from nerd.sheetbuilder.catalog import EntityCatalog
-from nerd.sheetbuilder.export import export
+from nerd.sheetbuilder.export import export, validate_primer_annotations
 from nerd.sheetbuilder.model import Sheet
 from nerd.sheetbuilder.session import Session
 
@@ -23,6 +27,43 @@ def _init_project(cli_runner, root: Path, *, database: str = ".nerd/nerd.sqlite"
     ])
     assert result.exit_code == 0, result.output
     return load_project(root)
+
+
+def _stub_uvicorn_server(monkeypatch):
+    observed = {}
+
+    class FakeServer:
+        def __init__(self, config):
+            self.config = config
+            self.should_exit = False
+            observed["application"] = config.app
+            observed["host"] = config.host
+            observed["port"] = config.port
+
+        def run(self):
+            observed["ran"] = True
+
+    monkeypatch.setattr("uvicorn.Server", FakeServer)
+    return observed
+
+
+def test_construct_primer_annotations_reject_all_target_labels():
+    rows = [
+        {"site": 1, "base": "A", "base_region": "1"},
+        {"site": 2, "base": "C", "base_region": "1"},
+    ]
+
+    with pytest.raises(ValueError, match="cannot consist entirely of 1s"):
+        validate_primer_annotations(rows)
+
+
+def test_construct_primer_annotations_allow_target_and_rt_primer_without_five_prime_primer():
+    rows = [
+        {"site": 1, "base": "A", "base_region": "1"},
+        {"site": 2, "base": "C", "base_region": "2"},
+    ]
+
+    validate_primer_annotations(rows)
 
 
 def test_session_uses_phase4_database_output_and_draft_location(cli_runner, tmp_path):
@@ -130,13 +171,7 @@ def test_webui_serve_uses_global_phase4_project_context(
 ):
     root = tmp_path / "project"
     project = _init_project(cli_runner, root)
-    observed = {}
-
-    def fake_run(application, **kwargs):
-        observed["application"] = application
-        observed.update(kwargs)
-
-    monkeypatch.setattr("uvicorn.run", fake_run)
+    observed = _stub_uvicorn_server(monkeypatch)
     result = cli_runner.invoke(app, [
         "--project", str(root), "webui", "serve", "--no-open-browser",
     ])
@@ -146,6 +181,7 @@ def test_webui_serve_uses_global_phase4_project_context(
     assert "output_directory: %s" % project.output_dir in result.output
     assert observed["host"] == "127.0.0.1"
     assert observed["port"] == 8420
+    assert observed["ran"] is True
 
     from nerd.webui.app import session
     assert session.project_config == project
@@ -160,10 +196,25 @@ def test_webui_serve_discovers_phase4_project_from_nested_directory(
     nested = root / "samples" / "batch-01"
     nested.mkdir(parents=True)
     monkeypatch.chdir(nested)
-    monkeypatch.setattr("uvicorn.run", lambda application, **kwargs: None)
+    _stub_uvicorn_server(monkeypatch)
 
     result = cli_runner.invoke(app, ["webui", "serve", "--no-open-browser"])
 
     assert result.exit_code == 0, result.output
     assert "project: %s" % root.resolve() in result.output
     assert "database: %s" % project.database in result.output
+
+
+def test_webui_shutdown_stops_registered_server_after_response():
+    import nerd.webui.app as webui_module
+
+    server = SimpleNamespace(should_exit=False)
+    tasks = BackgroundTasks()
+    webui_module.set_server(server)
+    try:
+        assert webui_module.shutdown_server(tasks) == {"ok": True}
+        assert server.should_exit is False
+        asyncio.run(tasks())
+        assert server.should_exit is True
+    finally:
+        webui_module.set_server(None)

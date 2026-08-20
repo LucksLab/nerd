@@ -174,9 +174,10 @@
       <div id="entityFields" class="form-grid"></div>
       <div id="ntBlock" class="nt-block">
         <div class="nt-head">
-          <h4>Sequence numbering</h4>
-          <span class="hint">Defaults to 1, 2, 3… Edit to match canonical numbering (negative and skipped positions are fine).</span>
+          <h4>Sequence numbering and primer sites</h4>
+          <span class="hint">Numbering defaults to 1, 2, 3… Edit it to match canonical numbering (negative and skipped positions are fine).</span>
         </div>
+        <p class="hint"><strong>Required:</strong> manually annotate every sequence region with a primer-site label: <strong>0</strong> = 5'-end primer, <strong>1</strong> = target, <strong>2</strong> = 3'-end primer (RT). An all-1 annotation is not accepted. Labels 1 and 2 are sufficient when there is no 5'-end primer.</p>
         <div class="nt-actions">
           <button type="button" id="ntDefaultBtn" class="btn btn-secondary btn-sm">Reset to 1-based</button>
           <input id="ntCopyFrom" class="input input-sm" placeholder="copy from construct…" size="18">
@@ -184,7 +185,7 @@
           <span id="ntSummary" class="hint"></span>
         </div>
         <div id="ntGridWrap" class="nt-grid-wrap"><table id="ntGrid">
-          <thead><tr><th>site</th><th>base</th><th>region</th></tr></thead><tbody></tbody>
+          <thead><tr><th>site</th><th>base</th><th>primer-site label (0/1/2)</th></tr></thead><tbody></tbody>
         </table></div>
       </div>
       <div id="entityError" class="form-error"></div>
@@ -206,10 +207,12 @@
   </div>
   <div class="modal-body" id="reviewBody"></div>
   <div class="modal-foot">
-    <label class="checkline"><input type="checkbox" id="csvOnlyMode"> write every table as CSV instead</label>
+    <label id="generateModeControls" class="checkline"><input type="checkbox" id="csvOnlyMode"> write every table as CSV instead</label>
     <span class="spacer"></span>
-    <button type="button" class="btn btn-ghost" data-close>Back</button>
+    <button type="button" id="reviewBackBtn" class="btn btn-ghost" data-close>Back</button>
     <button type="button" id="confirmGenerateBtn" class="btn btn-primary">Write config files</button>
+    <button type="button" id="continueCreatingBtn" class="btn btn-secondary hidden">Keep creating samples</button>
+    <button type="button" id="shutdownBtn" class="btn btn-primary hidden">Close and return to CLI</button>
   </div>
 </dialog>
 

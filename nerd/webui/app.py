@@ -17,7 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -44,6 +44,7 @@ app = FastAPI(title="nerd sample input helper")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 session = Session()
+_server: Optional[Any] = None
 
 
 # ---------------------------------------------------------------- helpers
@@ -52,6 +53,17 @@ def _require_session() -> Session:
     if not session.connected:
         raise HTTPException(400, "Connect to a project folder first.")
     return session
+
+
+def set_server(server: Optional[Any]) -> None:
+    """Register the running uvicorn server so the local UI can stop it."""
+    global _server
+    _server = server
+
+
+def _request_server_shutdown() -> None:
+    if _server is not None:
+        _server.should_exit = True
 
 
 def _state(save: bool = True) -> Dict[str, Any]:
@@ -387,6 +399,10 @@ def create_entity(req: EntityCreate) -> Dict[str, Any]:
 
     if req.entity_type == "construct":
         record["nt_rows"] = req.nt_rows or export_mod.default_nt_rows(record.get("sequence", ""))
+        try:
+            export_mod.validate_primer_annotations(record["nt_rows"])
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     session.catalog.stage(req.entity_type, record)
     return {"state": _state()}
@@ -458,6 +474,15 @@ def generate(req: GenerateRequest) -> Dict[str, Any]:
         project_config=active.project_config,
     )
     return {"result": result, "validation": report, "state": _state()}
+
+
+@app.post("/api/shutdown")
+def shutdown_server(background_tasks: BackgroundTasks) -> Dict[str, bool]:
+    """Return the response, then stop the local helper and restore the CLI prompt."""
+    if _server is None:
+        raise HTTPException(503, "The sample-input server cannot be stopped from this session.")
+    background_tasks.add_task(_request_server_shutdown)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- reaction groups

@@ -1003,7 +1003,14 @@ def webui_serve(
         import webbrowser
         threading.Timer(1.0, lambda: webbrowser.open(f"http://{host}:{port}/")).start()
 
-    uvicorn.run(webui_module.app, host=host, port=port, log_level="info")
+    server = uvicorn.Server(uvicorn.Config(
+        webui_module.app, host=host, port=port, log_level="info",
+    ))
+    webui_module.set_server(server)
+    try:
+        server.run()
+    finally:
+        webui_module.set_server(None)
 
 
 def _deprecated(old: str, replacement: str) -> None:

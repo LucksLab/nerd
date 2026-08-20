@@ -570,7 +570,16 @@ $("delRowBtn").addEventListener("click", async () => {
 
 /* ---------------------------------------------------------------- generate */
 
+function showGenerateCompletionActions(completed) {
+  $("generateModeControls").classList.toggle("hidden", completed);
+  $("reviewBackBtn").classList.toggle("hidden", completed);
+  $("confirmGenerateBtn").classList.toggle("hidden", completed);
+  $("continueCreatingBtn").classList.toggle("hidden", !completed);
+  $("shutdownBtn").classList.toggle("hidden", !completed);
+}
+
 $("generateBtn").addEventListener("click", () => {
+  showGenerateCompletionActions(false);
   const v = S.validation;
   const counts = Object.entries(S.staged || {}).map(([t, r]) => `${r.length} ${t.replace("_", " ")}${r.length === 1 ? "" : "s"}`);
   $("reviewBody").innerHTML = `
@@ -595,9 +604,37 @@ $("confirmGenerateBtn").addEventListener("click", async () => {
     const r = data.result;
     $("reviewBody").innerHTML = `
       <div class="review-block"><h4>Written</h4>${r.written.map((w) => `<code>${w}</code>`).join("")}</div>
-      <div class="review-block"><h4>Run it</h4>${r.commands.map((c) => `<code>${c}</code>`).join("")}</div>`;
+      <div class="review-block"><h4>Run it</h4>${r.commands.map((c) => `<code>${c}</code>`).join("")}</div>
+      <div class="review-block"><h4>What next?</h4>Keep this helper open to create more samples, or close it and shut down the local server to return to the NERD CLI.</div>`;
+    showGenerateCompletionActions(true);
     toast(`Config files written for ${r.sample_count} samples.`, "ok");
   } catch (e) { toast(e.message, "err"); }
+});
+
+$("continueCreatingBtn").addEventListener("click", () => {
+  $("reviewModal").close();
+  toast("Ready to create more samples.", "info");
+});
+
+$("shutdownBtn").addEventListener("click", async () => {
+  const button = $("shutdownBtn");
+  button.disabled = true;
+  button.textContent = "Closing…";
+  try {
+    await post("/api/shutdown");
+    $("reviewBody").innerHTML = `
+      <div class="review-block"><h4>Finished</h4>The sample-input server has stopped. You can return to the NERD CLI.</div>`;
+    window.close();
+    setTimeout(() => {
+      if (!window.closed) {
+        document.body.innerHTML = `<main class="closed-page"><h2>NERD sample helper closed</h2><p>The server has stopped and the CLI is ready. You can close this tab.</p></main>`;
+      }
+    }, 250);
+  } catch (e) {
+    button.disabled = false;
+    button.textContent = "Close and return to CLI";
+    toast(e.message, "err");
+  }
 });
 
 /* ------------------------------------------------------- reaction groups */

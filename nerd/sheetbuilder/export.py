@@ -56,6 +56,26 @@ def default_nt_rows(sequence: str) -> List[Dict[str, Any]]:
     ]
 
 
+def validate_primer_annotations(nt_rows: List[Dict[str, Any]]) -> None:
+    """Validate the manually assigned primer-site labels for a construct."""
+    regions = [str(row.get("base_region", "")).strip() for row in nt_rows]
+    invalid = sorted({region for region in regions if region not in {"0", "1", "2"}})
+    if invalid:
+        raise ValueError(
+            "Primer-site labels must be 0 (5'-end primer), 1 (target), or "
+            "2 (3'-end primer/RT)."
+        )
+    if "1" not in regions:
+        raise ValueError("Primer-site annotations must include a target region labeled 1.")
+    if all(region == "1" for region in regions):
+        raise ValueError(
+            "Manually annotate the primer sites before creating this construct; "
+            "the annotation cannot consist entirely of 1s. Label each region as "
+            "0 (5'-end primer), 1 (target), or 2 (3'-end primer/RT). A 0 region "
+            "is not required."
+        )
+
+
 def export(
     sheet: Sheet,
     catalog: EntityCatalog,
