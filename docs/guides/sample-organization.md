@@ -62,6 +62,14 @@ Constructs and buffers are shared resources. When you import new samples, the CL
 
 Typical flow: `create` inserts sequencing runs and samples, `probe_reaction_groups` tracks the lab-defined grouping (e.g., `65_1`), and `probe_reactions` attaches experimental context (temperature, probe concentration). Derived samples record how a `mut_count` task generated filtered FASTQs; parent-child relationships let downstream tasks trace provenance.
 
+Each `sequencing_samples` row has an explicit `fq_source`:
+
+- `local` means `fq_dir`, `r1_file`, and `r2_file` are checked on the controller computer and staged when a remote executor needs them.
+- `remote_hpc:<alias>` means the files already exist on that configured HPC. For example, `remote_hpc:quest` is checked through the `quest` profile and must be analyzed with that same executor; the large FASTQs are used in place rather than uploaded again.
+- `sra` is reserved in the schema and helper, but automatic accession pulling is not implemented yet.
+
+Legacy database rows and sample sheets without `fq_source` default to `local`.
+
 Foreign-key highlights:
 
 - `probe_reactions.s_id → sequencing_samples.id`

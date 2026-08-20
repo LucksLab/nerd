@@ -72,18 +72,19 @@ nerd run mut_count configs/mut_count.yaml --detach --profile quest
 ```
 
 Later commands need the same controller database. NERD first honors an explicit
-`--db` or `--project`, then discovers an existing `nerd.sqlite` in the current
-directory or a parent, then checks `NERD_DB`/`NERD_PROJECT`. Inspection commands
-never create a missing database. The selectors work naturally after the command:
+`--db` or `--project`, then discovers the nearest `.nerd/project.toml`, then
+checks `NERD_PROJECT`/`NERD_DB`. Existing parent `nerd.sqlite` discovery and
+config-driven paths remain compatibility fallbacks. Inspection commands never
+create a missing database. The selectors work naturally after the command:
 
 ```bash
 nerd task show 42 --db results/nerd.sqlite
 nerd task logs 42 --db results/nerd.sqlite --tail 200
-nerd task wait 42 --project results
-nerd task cancel 42 --project results
-nerd task collect 42 --project results
-nerd task retry 42 --project results
-nerd task list --project results --state failed --limit 20
+nerd task wait 42 --project EKC.07.00.000
+nerd task cancel 42 --project EKC.07.00.000
+nerd task collect 42 --project EKC.07.00.000
+nerd task retry 42 --project EKC.07.00.000
+nerd task list --project EKC.07.00.000 --state failed --limit 20
 ```
 
 `task show` first asks Slurm (or the local executor) and then records the observed

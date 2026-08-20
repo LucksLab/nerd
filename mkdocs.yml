@@ -7,6 +7,7 @@ nav:
       - Quest from a Mac: guides/quest-new-user.md
       - Running NERD on Quest: guides/quest-local-user.md
       - Task Scheduling: guides/task-scheduling.md
+      - Projects and Configuration: guides/projects-and-config.md
       - Containerized ShapeMapper: guides/shapemapper-containers.md
       - Create Samples: guides/sample-organization.md
       - NMR Kinetics: guides/nmr-kinetics.md

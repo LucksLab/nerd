@@ -174,6 +174,10 @@ Register the samples and experiment information:
 nerd run create configs/create.yaml
 ```
 
+The command finishes with a completion summary naming the task ID, what was
+registered, and where the log and database live. See
+[Reading NERD output](#reading-nerd-output) if the summary is unfamiliar.
+
 This creates:
 
 ```text
@@ -244,7 +248,22 @@ NERD checks that Quest can find its job commands, Singularity, the container
 folder, and the correct ShapeMapper package information. It does not submit an
 analysis.
 
-Correct any failed checks before continuing.
+Each check prints on its own line, prefixed `OK` or `NOT READY`, and the last
+line reads `ready: yes` or `ready: no`:
+
+```text
+execution_host: local
+executor: quest_login (slurm)
+OK  scheduler: sbatch, squeue, sacct, and scancel are available
+OK  architecture: x86_64 (supported: x86_64)
+OK  runtime: singularity: singularity version 4.3.1
+OK  cache: /scratch/abc123/nerd-container-cache is writable
+OK  image: immutable image identity configured: ghcr.io/edr-choi/nerd-shapemapper2@sha256:192732b1...
+ready: yes
+```
+
+Correct any `NOT READY` check before continuing. The command exits non-zero
+when a check fails, and accepts `--json` if you want the result in a script.
 
 ## 10. Prepare the ShapeMapper package
 
@@ -272,8 +291,9 @@ nerd image prepare shapemapper configs/mut_count_quest.yaml --profile quest_logi
 ```
 
 NERD downloads the exact tested image, stores it in your container cache, and
-runs `shapemapper --version`. Repeating this command should reuse the existing
-file.
+runs `shapemapper --version`. After the readiness lines it prints `sif:` and
+`sif_sha256:`, the location and checksum of the prepared file. Repeating this
+command should reuse the existing file.
 
 ## 11. Submit the analysis
 
@@ -283,12 +303,18 @@ Submit the job to Quest:
 nerd run mut_count configs/mut_count_quest.yaml --detach --profile quest_login
 ```
 
-NERD prints:
+NERD prints one field per line. The two identifiers to note are:
 
-- A **task ID**, used by NERD.
-- A **Slurm job ID**, used by Quest.
+- `task_id`: NERD's number for the analysis.
+- `scheduler_id`: Quest's Slurm job ID.
 
-Write down the task ID. The command returns after submission; it does not wait
+The surrounding lines — `task_state`, `attempt`, `attempt_state`, `executor`,
+and `executor_type` — describe where the job is and which profile submitted it.
+
+Write down the task ID. Adding `--json` prints the same information as a single
+JSON document, which is easier to capture in a script.
+
+The command returns after submission; it does not wait
 for ShapeMapper to finish. You may log out of Quest, and the job will continue:
 
 ```bash
@@ -370,6 +396,180 @@ nerd task retry <task-id> --db ./results/nerd.sqlite
 ```
 
 NERD keeps the earlier attempt and its logs.
+
+## Reading NERD output
+
+### Completion summaries
+
+Commands that run a workflow on the spot — `nerd run create`, and any `nerd run`
+without `--detach` — end with a short completion summary instead of stopping
+after the last progress line:
+
+```text
+create: completed (task 1, my_experiment)
+counts: attempted=42, buffers_created=2, buffers_failed=0, buffers_unchanged=0,
+buffers_updated=0, constructs_created=3, constructs_failed=0,
+constructs_unchanged=0, constructs_updated=0, derived_samples_processed=12,
+failed=0, samples_created=24, samples_failed=0, samples_unchanged=0,
+samples_updated=0, sequencing_runs_created=1, sequencing_runs_failed=0,
+sequencing_runs_unchanged=0, sequencing_runs_updated=0, skipped=0,
+succeeded=42, unresolved_references=0
+elapsed: 3.412s
+log: /scratch/abc123/nerd-work/my-experiment/results/run_logs/2026-08-19T10-14-02__cfg-a1b2c3d.log
+database: /scratch/abc123/nerd-work/my-experiment/results/nerd.sqlite
+artifacts: /scratch/abc123/nerd-work/my-experiment/results/my_experiment/create/create___cfg-a1b2c3d, /scratch/abc123/nerd-work/my-experiment/results/my_experiment/create/create___cfg-a1b2c3d/command.log, /scratch/abc123/nerd-work/my-experiment/results/my_experiment/create/create___cfg-a1b2c3d/created_objects.json, /scratch/abc123/nerd-work/my-experiment/results/my_experiment/create/create___cfg-a1b2c3d/created_objects.log
+next: nerd task show 1
+```
+
+`counts` and `artifacts` are each printed as one long line; they are wrapped
+above only to fit this page.
+
+Reading the summary:
+
+- The first line gives the workflow, its final status, the NERD task ID, and the
+  `run.label` from the configuration file.
+- `counts` reports only numbers NERD can confirm from the run itself, sorted by
+  name. `attempted`, `succeeded`, `failed`, and `skipped` always appear; the
+  remaining keys depend on the workflow.
+- `elapsed` is the wall-clock time for the run.
+- `log` is the run log for this invocation, written under `run_logs` inside the
+  configured `output_dir`.
+- `database` is the absolute path of the `nerd.sqlite` NERD selected.
+- `artifacts` lists the run directory first, then `command.log`, then any files
+  the workflow produced.
+- `next` suggests the command to run afterwards.
+
+A `tool:` line appears only for workflows that drive an external program. A
+`mut_count` run prints `tool: shapemapper 2.3`; `create` is pure NERD, so the
+line is absent. Workflows that report extra measurements add a `metrics:` line,
+and any problems appear as `warning [code]: ...` or `failure [code]: ...` lines.
+
+Statuses you may see:
+
+- `completed`: everything succeeded.
+- `cached`: an identical configuration already finished, so nothing was rerun.
+  The counts show `skipped=1`, and the `next:` line points at the earlier task
+  that already produced the result.
+- `partial_success`: some items succeeded and some failed.
+- `failed`: the workflow did not finish.
+
+### Progress messages and the summary go to different places
+
+Progress and diagnostic messages are written to standard error. The completion
+summary is written to standard output. Redirecting standard output therefore
+saves the summary without the progress text:
+
+```bash
+nerd run create configs/create.yaml > create_summary.txt
+```
+
+### Output flags
+
+These are global flags, so they come *before* the subcommand:
+
+```bash
+nerd --quiet run create configs/create.yaml
+```
+
+| Flag | Effect |
+| --- | --- |
+| `-v`, `--verbose` | Show detailed DEBUG progress messages. |
+| `-q`, `--quiet` | Show only warnings and errors. The summary is still printed. |
+| `--no-color` | Plain text without color. Useful when saving a transcript. |
+| `--log-file PATH` | Write the log to `PATH` instead of the automatic run log. |
+
+The file log is written at the same level as the console, so `--quiet` also
+reduces what is recorded in it. Use `--verbose` when you want a full DEBUG
+record on disk. Note that `--log-file` replaces the automatic
+`run_logs/<timestamp>__cfg-<hash>.log` file rather than adding to it, and the
+summary's `log:` line names whichever file was used.
+
+### Choosing the database
+
+Every command needs to know which `nerd.sqlite` to use. NERD resolves it in this
+order:
+
+1. `--db PATH`.
+2. `--project DIR`, which means `DIR/nerd.sqlite` (or `DIR/.nerd/nerd.sqlite`).
+3. An existing `nerd.sqlite` — or `.nerd/nerd.sqlite` — found in the current
+   directory or any parent directory.
+4. The `NERD_DB` or `NERD_PROJECT` environment variable.
+5. For `nerd run`, the `run.output_dir` in the configuration file.
+
+`--db` and `--project` work either globally or on the individual command, so
+both of these are valid:
+
+```bash
+nerd --project ./results task list
+nerd task list --project ./results
+```
+
+Because this guide keeps the database in `./results`, `--project ./results` is a
+shorter equivalent of `--db ./results/nerd.sqlite`. Setting it once per session
+avoids repeating either flag:
+
+```bash
+export NERD_PROJECT=/scratch/abc123/nerd-work/my-experiment/results
+```
+
+To confirm which database a command would use, and what it contains:
+
+```bash
+nerd db path --project ./results
+nerd db info --project ./results
+```
+
+Both refuse to create a database; they fail if none exists at the resolved
+location.
+
+### Machine-readable output
+
+Add `--json` to get one JSON document on standard output and nothing else. This
+works with `nerd run`, `nerd task show`, `nerd task list`, `nerd task wait`, and
+the `collect`, `cancel`, and `retry` commands, as well as `nerd plugin doctor`
+and `nerd image inspect` / `nerd image prepare`:
+
+```bash
+nerd run mut_count configs/mut_count_quest.yaml --detach --profile quest_login --json
+nerd task show <task-id> --db ./results/nerd.sqlite --json
+nerd task list --db ./results/nerd.sqlite --json
+```
+
+`nerd task logs` has no `--json`; it prints the log text as-is.
+
+The fields are stable within schema version 1.x. See the
+[output and JSON contract](../cli/output-contract.md) for the full schema.
+
+### Exit codes
+
+A synchronous `nerd run` exits with:
+
+- `0` when the workflow completed or was cached.
+- `2` on partial success.
+- `1` on failure.
+
+A detached `nerd run ... --detach` exits `0` once the job is submitted; it does
+not wait for the result. `nerd plugin doctor` and `nerd image inspect` exit `1`
+when the environment is not ready. Passing `--profile` without `--detach` is
+rejected with exit code `2`.
+
+This makes NERD usable inside a Slurm batch script or a shell loop without
+parsing its text output.
+
+### Older command names
+
+Earlier notes may use the flat command names. They still work, but each one
+prints a deprecation notice on standard error and will be removed:
+
+| Old | Use instead |
+| --- | --- |
+| `nerd submit WORKFLOW CONFIG` | `nerd run WORKFLOW CONFIG --detach` |
+| `nerd ls` | `nerd task list` |
+| `nerd status <task-id>` | `nerd task show <task-id>` |
+| `nerd logs <task-id>` | `nerd task logs <task-id>` |
+| `nerd cancel` / `collect` / `retry` | `nerd task cancel` / `collect` / `retry` |
+| `nerd doctor CONFIG` | `nerd plugin doctor shapemapper CONFIG` |
+| `nerd prepare-image CONFIG` | `nerd image prepare shapemapper CONFIG` |
 
 ## Troubleshooting
 

@@ -25,6 +25,7 @@ mut_count:
     n_proc: 8
   samples:
     - sample_name: 001-EKC-fourU-37C-30s
+      fq_source: local
       fq_dir: /data/runs/2024-09-01
       r1_file: sample_R1.fastq.gz
       r2_file: sample_R2.fastq.gz

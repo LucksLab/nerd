@@ -47,6 +47,20 @@ Every command follows the same pattern:
 nerd run <step> path/to/config.yaml
 ```
 
+Initialize stable project context once, using the lab experiment identifier:
+
+```bash
+nerd init EKC.07.00.000
+cd EKC.07.00.000
+nerd config init create --output configs/create.yaml
+nerd config validate configs/create.yaml
+```
+
+The directory name supplies the project ID only when it exactly matches
+`XXX.00.00.000`; otherwise pass `--name EKC.07.00.000`. NERD discovers
+`.nerd/project.toml` from nested directories, so `run` and `task` commands use
+the same database without repeating `--db`.
+
 Long-running commands can instead be submitted to a durable executor and
 reconciled by later CLI invocations:
 
@@ -84,18 +98,29 @@ Each config shares a small `run` header for bookkeeping:
 
 ```yaml
 run:
-  label: my_analysis
-  output_dir: results
-  backend: local  # or slurm / ssh / custom
+  label: baseline-import
 ```
 
-Add a task-specific block (e.g., `create`, `mut_count`, `probe_timecourse`) to declare inputs and engine options, and NERD handles staging, logging, and database updates.
+Project-level output and executor defaults belong in `.nerd/project.toml`.
+Add a task-specific block (e.g., `create`, `mut_count`, `probe_timecourse`) to
+declare inputs and engine options, and NERD handles staging, logging, and
+database updates. Existing configs with explicit `run.output_dir`, `--db`, or
+legacy executor settings remain supported.
 
 ---
 
 ## Quick Start Workflow
 
-1. **Register samples and metadata**
+1. **Initialize the project**
+
+   ```bash
+   nerd init EKC.07.00.000
+   cd EKC.07.00.000
+   ```
+
+   From any nested directory, NERD finds the nearest `.nerd/project.toml`.
+
+2. **Register samples and metadata**
 
    Sequence-probing and NMR inputs are declared via YAML configs. Each run logs to SQLite and creates a reproducible record of constructs, buffers, and raw inputs.
 
@@ -108,7 +133,7 @@ Add a task-specific block (e.g., `create`, `mut_count`, `probe_timecourse`) to d
    nerd run create demo_folder/01_create_samples/configs/create_nmr_deg_samples.yaml
    ```
 
-2. **Fit independent kinetic measurements (NMR)**
+3. **Fit independent kinetic measurements (NMR)**
 
    Estimate degradation and adduction rate constants, then perform Arrhenius fits across temperatures:
 
@@ -121,7 +146,7 @@ Add a task-specific block (e.g., `create`, `mut_count`, `probe_timecourse`) to d
    nerd run tempgrad_fit demo_folder/03_nmr_arrhenius/tempgrad_atp_c8.yaml
    ```
 
-3. **Count mutations from sequencing data**
+4. **Count mutations from sequencing data**
 
    ```bash
    nerd run mut_count demo_folder/04_run_mutcounts/configs/mut_count_shapemapper.yaml
@@ -129,7 +154,7 @@ Add a task-specific block (e.g., `create`, `mut_count`, `probe_timecourse`) to d
 
    ShapeMapper runs out‑of‑the‑box; configs can swap counters or tweak QC rules.
 
-4. **Fit chemical‑probe time‑courses**
+5. **Fit chemical‑probe time‑courses**
 
    ```bash
    nerd run probe_timecourse demo_folder/05_probe_tc_kinetics/configs/probe_tc.yaml
@@ -137,7 +162,7 @@ Add a task-specific block (e.g., `create`, `mut_count`, `probe_timecourse`) to d
 
    Executes free, global, and constrained fits; all metadata is written to SQLite.
 
-5. **Fit temperature gradients for probe data**
+6. **Fit temperature gradients for probe data**
 
    ```bash
    nerd run tempgrad_fit demo_folder/06_probe_tempgrad_fit/configs/config.yaml
@@ -150,6 +175,10 @@ Outputs are written to `output_dir/label/<task>/latest/results`, and all databas
 ---
 
 ## Configuration Tips
+
+- **Project vs analysis config**: `.nerd/project.toml` says where and how the
+  NERD project operates. YAML and referenced CSV/TSV sheets say what scientific
+  analysis runs. See the [project and config guide](docs/guides/projects-and-config.md).
 
 - **CSV vs YAML**: The `create` task automatically treats strings like `samples: probing_samples.csv` as sheets. It resolves constructs, buffers, and sequencing runs by name, and validates every reference before inserting reactions.
 - **Trace metadata**: When registering NMR traces, you can tag species directly:

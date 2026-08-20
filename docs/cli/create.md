@@ -70,6 +70,8 @@ Inline mode is best for small test cases; CSV mode scales better for large studi
 
 When loading samples from CSV:
 
+- `fq_source` selects `local`, `remote_hpc:<configured alias>`, or the reserved `sra` placeholder. Omitted values remain backward-compatible and default to `local`.
+- Local FASTQ directories and both read files are checked on this computer. Remote HPC directories and reads are checked through their configured SSH alias.
 - `sequencing_run_name` is used to look up (or create) sequencing runs.
 - `construct` and `buffer` names are resolved against the database (using either `disp_name` or `name`). Missing references throw errors before any reactions are inserted.
 - `reaction_group` labels are turned into `probe_reaction_groups`, and each sample becomes a row in `probe_reactions` with the associated metadata (`temperature`, `reaction_time`, etc.).

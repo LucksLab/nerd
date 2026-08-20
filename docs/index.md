@@ -12,8 +12,13 @@ source .venv/bin/activate
 # install NERD
 pip install nerd-pipeline
 
-# initialize a project from an example config
-nerd run create demo_folder/01_create_samples/configs/create_meta.yaml
+# initialize stable project context
+nerd init EKC.07.00.000
+cd EKC.07.00.000
+
+# generate and validate a starter analysis config
+nerd config init create --output configs/create.yaml
+nerd config validate configs/create.yaml
 
 # execute a probe timecourse fit
 nerd run probe_timecourse demo_folder/05_probe_tc_kinetics/configs/probe_tc.yaml
@@ -33,6 +38,7 @@ nerd run probe_timecourse demo_folder/05_probe_tc_kinetics/configs/probe_tc.yaml
 ## Documentation Map
 
 - **Getting Started**: [Sample organization & database layout](guides/sample-organization.md)
+- **Projects & configuration**: [Initialization, discovery, and config resolution](guides/projects-and-config.md)
 - **Guides**:
   - [Probe timecourse workflow](guides/probe-timecourse.md)
   - [NMR kinetics workflow](guides/nmr-kinetics.md)
