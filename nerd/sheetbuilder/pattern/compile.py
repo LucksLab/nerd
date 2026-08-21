@@ -175,4 +175,21 @@ def parse_name(name: str, compiled: CompiledPattern, registry: TokenRegistry) ->
             continue
         result["values"][spec.maps_to] = spec.apply(text)
 
+    # A split construct name is still the display name stored in the sample
+    # sheet. Keep the family and variant in `raw` for the creation wizard,
+    # while also exposing their conventional family_name concatenation as the
+    # construct column. An explicit [construct] token always takes precedence.
+    if "construct" not in result["values"]:
+        family_spec = registry.get("construct_family")
+        name_spec = registry.get("construct_name")
+        family_raw = result["raw"].get("construct_family")
+        construct_name_raw = result["raw"].get("construct_name")
+        family = family_spec.apply(family_raw) if family_spec and family_raw else ""
+        construct_name = (
+            name_spec.apply(construct_name_raw)
+            if name_spec and construct_name_raw else ""
+        )
+        if family and construct_name:
+            result["values"]["construct"] = "%s_%s" % (family, construct_name)
+
     return result

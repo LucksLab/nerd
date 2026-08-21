@@ -136,6 +136,39 @@ def test_autofill_down_avoids_floating_point_artifacts():
     assert [row.get("reaction_time") for row in sheet.rows] == ["0.1", "0.2", 0.3, 0.4]
 
 
+def test_pattern_split_construct_fills_display_name_and_creation_context():
+    sheet = Sheet()
+    row = sheet.add_row({"sample_name": "HIV_A27C_tp1_p"})
+
+    result = fillers.pattern_fill(
+        sheet,
+        "[construct_family]_[construct_name]_[tp_num]_[treated]",
+        Session().registry,
+    )
+
+    assert row.get("construct") == "HIV_A27C"
+    assert row.get("treated") == 1
+    assert row.context["construct_family"] == "HIV"
+    assert row.context["construct_name"] == "A27C"
+    assert row.context["tp_num"] == 1
+    assert result["columns_written"] == ["construct", "treated"]
+
+
+def test_pattern_explicit_construct_takes_precedence_over_split_construct():
+    sheet = Sheet()
+    row = sheet.add_row({"sample_name": "existing_HIV_A27C"})
+
+    fillers.pattern_fill(
+        sheet,
+        "[construct]_[construct_family]_[construct_name]",
+        Session().registry,
+    )
+
+    assert row.get("construct") == "existing"
+    assert row.context["construct_family"] == "HIV"
+    assert row.context["construct_name"] == "A27C"
+
+
 def test_session_uses_phase4_database_output_and_draft_location(cli_runner, tmp_path):
     root = tmp_path / "project"
     project = _init_project(

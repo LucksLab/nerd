@@ -1188,10 +1188,30 @@ function startQueue() {
   openEntityWizard(queue[0].entity_type, queue[0].value);
 }
 
+function entityWizardDefaults(type, prefill, existing) {
+  if (existing) return existing;
+  const lookupField = entitySchema.lookup_fields?.[type]?.[0] || "disp_name";
+  const defaults = { [lookupField]: prefill || "" };
+  if (type !== "construct" || !prefill) return defaults;
+
+  const sourceRow = (S?.rows || []).find((row) => {
+    const family = row.context?.construct_family;
+    const name = row.context?.construct_name;
+    return family && name
+      && `${family}_${name}` === prefill
+      && row.values?.construct === prefill;
+  });
+  if (sourceRow) {
+    defaults.family = sourceRow.context.construct_family;
+    defaults.name = sourceRow.context.construct_name;
+  }
+  return defaults;
+}
+
 function openEntityWizard(type, prefill, existing) {
   currentEntity = { type, ntRows: existing?.nt_rows || null };
   const fields = entitySchema.fields[type] || [];
-  const lookupField = entitySchema.lookup_fields?.[type]?.[0] || "disp_name";
+  const defaults = entityWizardDefaults(type, prefill, existing);
 
   $("entityTitle").textContent = existing
     ? `Edit ${type.replace("_", " ")}`
@@ -1215,7 +1235,7 @@ function openEntityWizard(type, prefill, existing) {
     input.name = field.name;
     if (field.type === "number") input.type = "number", input.step = "0.01";
     if (field.type === "textarea") input.rows = 3;
-    input.value = existing?.[field.name] ?? (field.name === lookupField ? prefill || "" : "");
+    input.value = defaults[field.name] ?? "";
     label.appendChild(input);
     container.appendChild(label);
   });
