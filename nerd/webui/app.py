@@ -431,6 +431,21 @@ def edit_cell(req: CellEdit) -> Dict[str, Any]:
     return {"state": _state()}
 
 
+class AutofillDown(BaseModel):
+    columns: List[str]
+    source_uids: List[int]
+
+
+@app.post("/api/rows/autofill-down")
+def autofill_rows_down(req: AutofillDown) -> Dict[str, Any]:
+    _require_session()
+    try:
+        result = fillers.autofill_down(session.sheet, req.columns, req.source_uids)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"result": result, "state": _state()}
+
+
 class RowAdd(BaseModel):
     count: int = 1
 

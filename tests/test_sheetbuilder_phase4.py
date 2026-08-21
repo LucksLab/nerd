@@ -13,6 +13,7 @@ from fastapi import BackgroundTasks, HTTPException
 from nerd.cli import app
 from nerd.configuration import resolve_config, validate_config
 from nerd.project import ProjectContext, load_project
+from nerd.sheetbuilder import fillers
 from nerd.sheetbuilder.catalog import EntityCatalog
 from nerd.sheetbuilder.export import default_nt_rows, export, validate_primer_annotations
 from nerd.sheetbuilder.model import Sheet
@@ -86,6 +87,53 @@ def test_default_nt_rows_detects_target_and_rt_primer_without_five_prime_primer(
     rows = default_nt_rows("ACGUacgu")
 
     assert [row["base_region"] for row in rows] == ["1"] * 4 + ["2"] * 4
+
+
+def test_autofill_down_continues_numeric_series_and_repeating_values():
+    sheet = Sheet()
+    for temperature, probe in [(10, "DMS"), (20, "NMIA"), ("", ""), ("", ""), ("", "")]:
+        sheet.add_row({"temperature": temperature, "probe": probe})
+
+    result = fillers.autofill_down(
+        sheet,
+        ["temperature", "probe"],
+        [sheet.rows[0].uid, sheet.rows[1].uid],
+    )
+
+    assert [row.get("temperature") for row in sheet.rows] == [10, 20, 30, 40, 50]
+    assert [row.get("probe") for row in sheet.rows] == ["DMS", "NMIA", "DMS", "NMIA", "DMS"]
+    assert result == {
+        "written": 6,
+        "rows_filled": 3,
+        "columns": ["temperature", "probe"],
+    }
+
+
+def test_autofill_down_requires_contiguous_two_row_source():
+    sheet = Sheet()
+    for value in (1, 2, 3):
+        sheet.add_row({"replicate": value})
+
+    with pytest.raises(ValueError, match="contiguous"):
+        fillers.autofill_down(
+            sheet,
+            ["replicate"],
+            [sheet.rows[0].uid, sheet.rows[2].uid],
+        )
+
+
+def test_autofill_down_avoids_floating_point_artifacts():
+    sheet = Sheet()
+    for value in ("0.1", "0.2", "", ""):
+        sheet.add_row({"reaction_time": value})
+
+    fillers.autofill_down(
+        sheet,
+        ["reaction_time"],
+        [sheet.rows[0].uid, sheet.rows[1].uid],
+    )
+
+    assert [row.get("reaction_time") for row in sheet.rows] == ["0.1", "0.2", 0.3, 0.4]
 
 
 def test_session_uses_phase4_database_output_and_draft_location(cli_runner, tmp_path):

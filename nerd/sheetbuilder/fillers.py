@@ -8,15 +8,17 @@ edits).
   fastq_scan   -> sample_name, fq_dir, r1_file, r2_file   (origin: fastq)
   pattern_fill -> whatever the pattern's tokens map to     (origin: pattern)
   batch_fill   -> one column across selected rows          (origin: batch)
+  autofill_down -> continue selected cell patterns downward (origin: manual)
 """
 from __future__ import annotations
 
 import os
 import re
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from .model import BATCH, FASTQ, PATTERN, SAMPLE_COLUMNS, Row, Sheet
+from .model import BATCH, FASTQ, MANUAL, PATTERN, SAMPLE_COLUMNS, Row, Sheet
 from .pattern import CompiledPattern, TokenRegistry, compile_pattern, parse_name
 
 FASTQ_SUFFIXES = (".fastq.gz", ".fq.gz", ".fastq", ".fq")
@@ -245,3 +247,68 @@ def batch_fill(
         if row.set(column, value, BATCH, force=force):
             written += 1
     return {"written": written, "column": column}
+
+
+def _numeric_step(values: Sequence[Any]) -> Optional[Decimal]:
+    """Return a constant numeric step, or None when values are not a series."""
+    try:
+        numbers = [Decimal(str(value).strip()) for value in values]
+    except (InvalidOperation, ValueError):
+        return None
+    if any(str(value).strip() == "" for value in values):
+        return None
+    step = numbers[1] - numbers[0]
+    if any(right - left != step for left, right in zip(numbers, numbers[1:])):
+        return None
+    return step
+
+
+def _continued_value(values: Sequence[Any], offset: int) -> Any:
+    """Continue a numeric series; otherwise repeat the selected pattern."""
+    step = _numeric_step(values)
+    if step is None:
+        return values[offset % len(values)]
+    value = Decimal(str(values[-1]).strip()) + step * (offset + 1)
+    return int(value) if value == value.to_integral_value() else float(value)
+
+
+def autofill_down(
+    sheet: Sheet,
+    columns: Sequence[str],
+    source_uids: Sequence[int],
+) -> Dict[str, Any]:
+    """Continue a contiguous two-or-more-row selection to the sheet's end.
+
+    Numeric columns with a constant interval continue that interval. Other
+    values repeat the selected pattern, matching spreadsheet fill behavior.
+    """
+    unique_columns = list(dict.fromkeys(columns))
+    if not unique_columns or any(
+        column not in SAMPLE_COLUMNS for column in unique_columns
+    ):
+        raise ValueError("Autofill needs at least one valid sample column.")
+    if len(source_uids) < 2:
+        raise ValueError("Select at least two rows before autofilling down.")
+
+    positions = {row.uid: index for index, row in enumerate(sheet.rows)}
+    if any(uid not in positions for uid in source_uids):
+        raise ValueError("The autofill selection contains a row that no longer exists.")
+    source_indexes = sorted({positions[uid] for uid in source_uids})
+    expected = list(range(source_indexes[0], source_indexes[-1] + 1))
+    if source_indexes != expected or len(source_indexes) != len(source_uids):
+        raise ValueError("Autofill source rows must be one contiguous selection.")
+
+    source_rows = [sheet.rows[index] for index in source_indexes]
+    target_rows = sheet.rows[source_indexes[-1] + 1:]
+    written = 0
+    for column in unique_columns:
+        values = [row.get(column) for row in source_rows]
+        for offset, row in enumerate(target_rows):
+            row.set(column, _continued_value(values, offset), MANUAL, force=True)
+            written += 1
+
+    return {
+        "written": written,
+        "rows_filled": len(target_rows),
+        "columns": unique_columns,
+    }

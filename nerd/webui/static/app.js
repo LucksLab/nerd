@@ -14,6 +14,7 @@ let tokens = {};
 let entitySchema = { fields: {}, lookup_fields: {} };
 let queue = [];           // pending unresolved entities
 let queueIndex = 0;
+let selectedRowUids = new Set();
 let databaseEntities = {};
 let databaseType = "construct";
 let selectedDatabaseId = null;
@@ -684,6 +685,7 @@ $("connectBtn").addEventListener("click", async () => {
     });
     $("connectStatus").textContent = data.is_new_db ? "new database" : "connected";
     $("connectStatus").className = "pill pill-ok";
+    selectedRowUids = new Set();
     render(data.state);
     const counts = data.db_entity_counts || {};
     toast(
@@ -855,7 +857,7 @@ $("applyPatternBtn").addEventListener("click", async () => {
 
 $("batchAllBtn").addEventListener("click", () => batchFill(null));
 $("batchSelBtn").addEventListener("click", () => {
-  const uids = table.getSelectedData().map((r) => r.uid);
+  const uids = [...selectedRowUids];
   if (!uids.length) return toast("Select some rows first.", "err");
   batchFill(uids);
 });
@@ -870,6 +872,55 @@ async function batchFill(uids) {
 }
 
 /* ---------------------------------------------------------------- table */
+
+function updateRowSelectionHeader() {
+  const checkbox = document.querySelector("#grid .row-select-all");
+  if (!checkbox) return;
+  const rowUids = (S?.rows || []).map((row) => row.uid);
+  const selectedCount = rowUids.filter((uid) => selectedRowUids.has(uid)).length;
+  checkbox.checked = !!rowUids.length && selectedCount === rowUids.length;
+  checkbox.indeterminate = selectedCount > 0 && selectedCount < rowUids.length;
+}
+
+function setRowSelected(row, selected) {
+  const uid = row.getData().uid;
+  if (selected) selectedRowUids.add(uid);
+  else selectedRowUids.delete(uid);
+  row.getElement().classList.toggle("tabulator-selected", selected);
+  updateRowSelectionHeader();
+}
+
+function rowSelectionFormatter(cell) {
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.setAttribute("aria-label", "Select Row");
+  checkbox.checked = selectedRowUids.has(cell.getRow().getData().uid);
+  checkbox.addEventListener("click", (event) => event.stopPropagation());
+  checkbox.addEventListener("change", () => setRowSelected(cell.getRow(), checkbox.checked));
+  return checkbox;
+}
+
+function rowSelectionHeaderFormatter() {
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.className = "row-select-all";
+  checkbox.setAttribute("aria-label", "Select Row");
+  checkbox.addEventListener("click", (event) => event.stopPropagation());
+  checkbox.addEventListener("change", () => {
+    selectedRowUids = checkbox.checked
+      ? new Set((S?.rows || []).map((row) => row.uid))
+      : new Set();
+    table.getRows().forEach((row) => {
+      const selected = selectedRowUids.has(row.getData().uid);
+      row.getElement().classList.toggle("tabulator-selected", selected);
+      const input = row.getElement().querySelector('input[aria-label="Select Row"]');
+      if (input) input.checked = selected;
+    });
+    updateRowSelectionHeader();
+  });
+  setTimeout(updateRowSelectionHeader, 0);
+  return checkbox;
+}
 
 function entityFormatter(column) {
   return (cell) => {
@@ -895,9 +946,16 @@ function entityFormatter(column) {
 
 function buildColumns() {
   const cols = [{
-    formatter: "rowSelection", titleFormatter: "rowSelection", hozAlign: "center",
+    formatter: rowSelectionFormatter, titleFormatter: rowSelectionHeaderFormatter,
+    hozAlign: "center",
     headerSort: false, width: 36, frozen: true,
-    cellClick: (e, cell) => cell.getRow().toggleSelect(),
+    cellClick: (event, cell) => {
+      if (event.target.matches('input[type="checkbox"]')) return;
+      const selected = !selectedRowUids.has(cell.getRow().getData().uid);
+      setRowSelected(cell.getRow(), selected);
+      const input = cell.getElement().querySelector('input[aria-label="Select Row"]');
+      if (input) input.checked = selected;
+    },
   }];
   // Before the first connect there is no server state yet; the table still
   // renders (with its placeholder) and picks up real columns on render().
@@ -922,15 +980,72 @@ function buildColumns() {
   return cols;
 }
 
+async function autofillRangeDown(range) {
+  const selected = range.getStructuredCells();
+  if (selected.length < 2) return toast("Select at least two rows to autofill down.", "err");
+  const columns = selected[0]
+    .map((cell) => cell.getField())
+    .filter((field) => field?.startsWith("values."))
+    .map((field) => field.slice(7));
+  if (!columns.length) return toast("Select sample cells to autofill down.", "err");
+
+  const sourceUids = selected.map((cells) => cells[0].getRow().getData().uid);
+  try {
+    const data = await post("/api/rows/autofill-down", {
+      columns,
+      source_uids: sourceUids,
+    });
+    render(data.state);
+    const result = data.result;
+    toast(
+      result.rows_filled
+        ? `Autofilled ${result.columns.length} column(s) through ${result.rows_filled} row(s).`
+        : "The selection already reaches the last row.",
+      "ok",
+    );
+  } catch (e) { toast(e.message, "err"); }
+}
+
+function addAutofillHandle(range) {
+  const selected = range.getStructuredCells();
+  const hasDataCells = selected.some((cells) =>
+    cells.some((cell) => cell.getField()?.startsWith("values."))
+  );
+  if (selected.length < 2 || !hasDataCells) return;
+  const rangeElement = range.getElement();
+  if (rangeElement.querySelector(".autofill-handle")) return;
+
+  const handle = document.createElement("button");
+  handle.type = "button";
+  handle.className = "autofill-handle";
+  handle.title = "Double-click to autofill down";
+  handle.setAttribute("aria-label", "Double-click to autofill down");
+  handle.addEventListener("mousedown", (event) => event.stopPropagation());
+  handle.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  handle.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    autofillRangeDown(range);
+  });
+  rangeElement.appendChild(handle);
+}
+
 function initTable() {
   table = new Tabulator("#grid", {
     data: [], columns: buildColumns(), index: "uid",
     layout: "fitDataFill", height: "100%",
     renderVertical: "virtual",           // keeps 1000+ rows smooth
     placeholder: "No samples yet — start with “Load samples”.",
+    selectableRange: 1,
+    selectableRangeInitializeDefault: false,
+    editTriggerEvent: "dblclick",
     rowFormatter: (row) => {
       const data = row.getData();
       row.getElement().classList.toggle("row-unmatched", !!data.unmatched);
+      row.getElement().classList.toggle("tabulator-selected", selectedRowUids.has(data.uid));
       row.getCells().forEach((cell) => {
         const field = cell.getField();
         if (!field || !field.startsWith("values.")) return;
@@ -942,6 +1057,8 @@ function initTable() {
       });
     },
   });
+  table.on("rangeAdded", addAutofillHandle);
+  table.on("rangeChanged", addAutofillHandle);
 }
 
 /* ---------------------------------------------------------------- render */
@@ -958,6 +1075,8 @@ function render(state) {
     return;
   }
   if (!table) initTable();
+  const liveUids = new Set(S.rows.map((row) => row.uid));
+  selectedRowUids = new Set([...selectedRowUids].filter((uid) => liveUids.has(uid)));
   table.setColumns(buildColumns());
   table.replaceData(S.rows);
   $("rowCount").textContent = `${S.rows.length} sample${S.rows.length === 1 ? "" : "s"}`;
@@ -1204,9 +1323,10 @@ $("addRowBtn").addEventListener("click", async () => {
 });
 
 $("delRowBtn").addEventListener("click", async () => {
-  const uids = table.getSelectedData().map((r) => r.uid);
+  const uids = [...selectedRowUids];
   if (!uids.length) return toast("Select some rows first.", "err");
   const d = await post("/api/rows/delete", { uids });
+  selectedRowUids = new Set();
   render(d.state);
   toast(`${d.result.removed} row(s) removed.`, "ok");
 });
