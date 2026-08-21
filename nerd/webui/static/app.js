@@ -582,7 +582,8 @@ function renderTimecoursePlots(data) {
 function renderTimecoursePlot(container, series, valtype) {
   const card = document.createElement("div");
   card.className = "timecourse-card";
-  const width = Math.max(760, container.clientWidth - 20);
+  // Use a stable drawing coordinate system; CSS scales each SVG to its grid card.
+  const width = 600;
   const height = 320;
   const margin = { top: 42, right: 25, bottom: 50, left: 65 };
   const innerWidth = width - margin.left - margin.right;
@@ -598,7 +599,7 @@ function renderTimecoursePlot(container, series, valtype) {
   const yMax = maxData + yPad;
   const x = (value) => margin.left + Number(value) / maxX * innerWidth;
   const y = (value) => margin.top + innerHeight - (Number(value) - yMin) / (yMax - yMin) * innerHeight;
-  const svg = svgElement("svg", { width, height, class: "plot-svg", role: "img", "aria-label": `${series.site_base} time course` });
+  const svg = svgElement("svg", { width, height, viewBox: `0 0 ${width} ${height}`, class: "plot-svg", role: "img", "aria-label": `${series.site_base} time course` });
   for (let tick = 0; tick <= 5; tick += 1) {
     const yValue = yMin + (yMax - yMin) * tick / 5;
     const py = y(yValue);

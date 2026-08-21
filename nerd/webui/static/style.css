@@ -291,13 +291,15 @@ dialog.modal::backdrop{background:rgba(16,24,40,.4)}
 .timecourse-controls{grid-template-columns:minmax(300px,2fr) minmax(130px,1fr) 100px auto}
 .site-selectors{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:.55rem}
 .fit-toggle{align-self:end;margin:.3rem 0}
-.timecourse-plots{display:flex;flex-direction:column;gap:.75rem}
+.timecourse-plots{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.75rem}
 .timecourse-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
-  box-shadow:var(--shadow);padding:.45rem;overflow-x:auto}
+  box-shadow:var(--shadow);padding:.45rem;min-width:0;overflow:hidden}
+.timecourse-card>.plot-svg{width:100%;height:auto}
 .plot-tooltip{position:fixed;pointer-events:none;z-index:300;background:#1f2430;color:#fff;
   border-radius:6px;padding:.4rem .55rem;font-size:.72rem;line-height:1.4;max-width:280px;
   box-shadow:0 4px 18px rgba(16,24,40,.22)}
 @media(max-width:900px){
   .analysis-controls,.timecourse-controls{grid-template-columns:1fr}
   .site-selectors{grid-column:auto;grid-template-columns:1fr}
+  .timecourse-plots{grid-template-columns:1fr}
 }
