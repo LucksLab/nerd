@@ -12,6 +12,9 @@ from typing import Callable, Optional
 
 import typer
 import yaml
+from rich.console import Console
+from rich.table import Table
+from rich.text import Text
 
 from nerd.db import api as db_api
 from nerd.pipeline.tasks import TASK_REGISTRY
@@ -256,63 +259,145 @@ def _scheduler_summary(row, database_path: Optional[str] = None) -> TaskSummary:
     )
 
 
-def _show_scheduler_row(row, *, detailed: bool = False) -> None:
-    """Render stable human fields available before Phase 3's output contract."""
+_TASK_STATE_STYLES = {
+    "completed": "green",
+    "cached": "green",
+    "running": "cyan",
+    "collecting": "cyan",
+    "submitted": "blue",
+    "pending": "blue",
+    "awaiting_collection": "yellow",
+    "partial_success": "yellow",
+    "cancel_requested": "yellow",
+    "failed": "red",
+    "cancelled": "red",
+}
+
+
+def _task_console(no_color: bool = False) -> Console:
+    """Return the stdout console used for human task lifecycle output."""
+    return Console(no_color=no_color)
+
+
+def _state_text(state: object) -> Text:
+    value = str(state or "unknown")
+    label = value.replace("_", " ")
+    return Text(label, style=_TASK_STATE_STYLES.get(value, ""))
+
+
+def _details_table() -> Table:
+    return Table.grid(padding=(0, 2))
+
+
+def _render_next_actions(console: Console, row) -> None:
+    actions = _next_actions(row)
+    if not actions:
+        return
+    console.print()
+    console.print("[bold]Next[/bold]")
+    for action in actions:
+        console.print("  [cyan]%s[/cyan]" % action)
+
+
+def _show_scheduler_row(row, *, detailed: bool = False, no_color: bool = False) -> None:
+    """Render concise, terminal-width-aware task lifecycle output."""
+    console = _task_console(no_color=no_color)
+    console.print("[bold]Task %s[/bold] · %s" % (row["task_id"], row["task_name"]))
+    console.print()
+
     if _row_value(row, "is_parent", False):
         counts = _row_value(row, "counts", {}) or {}
         total = int(_row_value(row, "total_units", 0) or 0)
         completed = int(counts.get("completed", 0))
         failed = int(counts.get("failed", 0)) + int(counts.get("cancelled", 0))
-        typer.echo("task_id: %s" % row["task_id"])
-        typer.echo("task: %s" % row["task_name"])
-        typer.echo("task_state: %s" % row["task_state"])
-        typer.echo("progress: %s/%s completed; %s failed" % (completed, total, failed))
-        typer.echo("UNIT\tSTATE\tTASK ID\tSCHEDULER ID\tLOG")
+
+        summary = _details_table()
+        summary.add_row("[bold]Status[/bold]", _state_text(row["task_state"]))
+        summary.add_row("[bold]Progress[/bold]", "%s/%s complete · %s failed" % (completed, total, failed))
+        console.print(summary)
+        console.print()
+
+        children = Table(box=None, pad_edge=False, header_style="bold", show_lines=False)
+        children.add_column("UNIT", max_width=38, overflow="ellipsis", no_wrap=True)
+        children.add_column("STATE", no_wrap=True)
+        children.add_column("TASK", justify="right", no_wrap=True)
+        children.add_column("SCHEDULER JOB", justify="right", no_wrap=True)
         for child in row["children"]:
-            typer.echo("%s\t%s\t%s\t%s\t%s" % (
-                child.get("unit_label") or child.get("unit_key"),
-                child["task_state"], child["task_id"],
-                child.get("scheduler_id") or "-", child.get("log_path") or "-",
-            ))
+            children.add_row(
+                str(child.get("unit_label") or child.get("unit_key") or "-"),
+                _state_text(child["task_state"]),
+                str(child["task_id"]),
+                str(child.get("scheduler_id") or "-"),
+            )
+        console.print(children)
         if detailed:
-            typer.echo("output_dir: %s" % row["output_dir"])
-            typer.echo("next_actions: %s" % ", ".join(_next_actions(row)))
+            paths = _details_table()
+            output_dir = _row_value(row, "output_dir")
+            if output_dir:
+                paths.add_row("[bold]Output[/bold]", str(output_dir))
+            if paths.row_count:
+                console.print()
+                console.print("[bold]Paths[/bold]")
+                console.print(paths)
+        _render_next_actions(console, row)
         return
-    typer.echo("task_id: %s" % row["task_id"])
-    typer.echo("task: %s" % row["task_name"])
-    typer.echo("task_state: %s" % row["task_state"])
-    typer.echo("attempt: %s" % row["try_index"])
-    attempt_id = _row_value(row, "scheduler_attempt_id")
-    if attempt_id is not None:
-        typer.echo("attempt_id: %s" % attempt_id)
-    typer.echo("attempt_state: %s" % row["scheduler_state"])
-    typer.echo("executor: %s" % row["executor_profile"])
+
+    summary = _details_table()
+    summary.add_row("[bold]Status[/bold]", _state_text(row["task_state"]))
+    scheduler_id = row["scheduler_id"] or "-"
+    executor = str(row["executor_profile"] or "-")
     executor_type = _row_value(row, "executor_type")
-    if executor_type:
-        typer.echo("executor_type: %s" % executor_type)
-    typer.echo("scheduler_id: %s" % (row["scheduler_id"] or "-"))
+    if scheduler_id != "-":
+        scheduler_label = "Slurm job %s" % scheduler_id if executor_type == "ssh_slurm" else "job %s" % scheduler_id
+        executor = "%s · %s" % (executor, scheduler_label)
+    summary.add_row("[bold]Executor[/bold]", executor)
+    summary.add_row("[bold]Attempt[/bold]", str(row["try_index"] or "-"))
+    unit = _row_value(row, "unit_label") or _row_value(row, "unit_key")
+    if unit:
+        summary.add_row("[bold]Work unit[/bold]", str(unit))
     if row["exit_code"] is not None:
-        typer.echo("exit_code: %s" % row["exit_code"])
+        summary.add_row("[bold]Exit code[/bold]", str(row["exit_code"]))
     error = row["error"] or _row_value(row, "task_message")
-    if error:
-        typer.echo("message: %s" % error)
+    if error and str(error).lower().replace("_", " ") != str(row["task_state"]).lower().replace("_", " "):
+        summary.add_row("[bold]Message[/bold]", str(error))
+    console.print(summary)
+
     if detailed:
+        internals = _details_table()
+        attempt_id = _row_value(row, "scheduler_attempt_id")
+        if attempt_id is not None:
+            internals.add_row("[bold]Attempt ID[/bold]", str(attempt_id))
+        if executor_type:
+            internals.add_row("[bold]Executor type[/bold]", str(executor_type))
+        attempt_state = _row_value(row, "scheduler_state")
+        if attempt_state:
+            internals.add_row("[bold]Attempt state[/bold]", str(attempt_state).replace("_", " "))
+        if internals.row_count:
+            console.print()
+            console.print("[bold]Details[/bold]")
+            console.print(internals)
+
+        paths = _details_table()
         output_dir = _row_value(row, "output_dir")
         if output_dir:
-            typer.echo("output_dir: %s" % output_dir)
+            paths.add_row("[bold]Output[/bold]", str(output_dir))
         try:
             from nerd.scheduler import store
             spec = store.job_spec(row)
-            typer.echo("work_dir: %s" % spec.workdir)
+            paths.add_row("[bold]Local work[/bold]", str(spec.workdir))
         except (KeyError, TypeError, ValueError):
             pass
         remote_workdir = _row_value(row, "remote_workdir")
         if remote_workdir:
-            typer.echo("remote_work_dir: %s" % remote_workdir)
+            paths.add_row("[bold]Remote work[/bold]", str(remote_workdir))
         log_path = _row_value(row, "log_path")
         if log_path:
-            typer.echo("log_path: %s" % log_path)
-        typer.echo("next_actions: %s" % ", ".join(_next_actions(row)))
+            paths.add_row("[bold]Log[/bold]", str(log_path))
+        if paths.row_count:
+            console.print()
+            console.print("[bold]Paths[/bold]")
+            console.print(paths)
+    _render_next_actions(console, row)
 
 
 def _submit_handler(
@@ -340,7 +425,9 @@ def _submit_handler(
         if json_output:
             _emit_summary(_scheduler_summary(row, db_path), True)
         else:
-            _show_scheduler_row(row)
+            _show_scheduler_row(
+                row, no_color=_invocation_context(ctx).get("no_color", False)
+            )
     except Exception as exc:
         get_logger(__name__).exception("Task submission failed: %s", exc)
         if json_output:
@@ -460,7 +547,10 @@ def _action_handler(
             db_path = str(Path(conn.execute("PRAGMA database_list").fetchone()[2]).resolve())
             _emit_summary(_scheduler_summary(row, db_path), True)
         else:
-            _show_scheduler_row(row, detailed=detailed)
+            _show_scheduler_row(
+                row, detailed=detailed,
+                no_color=_invocation_context(ctx).get("no_color", False),
+            )
     except Exception as exc:
         if json_output:
             _emit_summary(_failure_summary("task_%s" % failure.lower(), exc,
@@ -555,11 +645,12 @@ def task_show(
     task_id: int = typer.Argument(..., min=1, help="Durable task ID."),
     db: Optional[Path] = typer.Option(None, "--db", help="Existing controller database."),
     project: Optional[Path] = typer.Option(None, "--project", help="Project directory."),
+    details: bool = typer.Option(False, "--details", help="Show internal identifiers and filesystem paths."),
     json_output: bool = typer.Option(False, "--json", help="Write only JSON to stdout."),
 ):
-    """Reconcile and show task, attempt, executor, path, and next-action details."""
+    """Reconcile and show task status and next actions."""
     from nerd.scheduler.service import reconcile
-    _action_handler(ctx, task_id, db, project, reconcile, "Show", detailed=True,
+    _action_handler(ctx, task_id, db, project, reconcile, "Show", detailed=details,
                     json_output=json_output)
 
 
@@ -592,7 +683,7 @@ def task_wait(
     action = lambda conn, task_id: wait_for_task(
         conn, task_id, collect=collect, poll_interval=poll_interval
     )
-    _action_handler(ctx, task_id, db, project, action, "Wait", detailed=True,
+    _action_handler(ctx, task_id, db, project, action, "Wait", detailed=False,
                     json_output=json_output)
 
 
@@ -623,7 +714,10 @@ def task_watch(
             return
         if last_signature is not None:
             typer.echo("")
-        _show_scheduler_row(row, detailed=False)
+        _show_scheduler_row(
+            row, detailed=False,
+            no_color=_invocation_context(ctx).get("no_color", False),
+        )
         last_signature = signature
 
     try:
@@ -1228,7 +1322,7 @@ def status(
     """Deprecated compatibility wrapper for task show."""
     from nerd.scheduler.service import reconcile
     _deprecated("status", "task show")
-    _action_handler(ctx, task_id, db, project, reconcile, "Status", detailed=True)
+    _action_handler(ctx, task_id, db, project, reconcile, "Status", detailed=False)
 
 
 @app.command("logs", hidden=True)

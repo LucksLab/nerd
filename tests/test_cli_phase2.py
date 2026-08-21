@@ -76,9 +76,10 @@ def test_run_detach_uses_durable_submission_and_phase1_context(
         "config": config_path.resolve(),
         "profile": "quest",
     }
-    assert "task_id: 41" in result.output
-    assert "attempt_id: 7" in result.output
-    assert "scheduler_id: fake-41" in result.output
+    normalized = " ".join(result.output.split())
+    assert "Task 41 · create" in normalized
+    assert "Executor quest · Slurm job fake-41" in normalized
+    assert "Attempt ID" not in normalized
 
 
 def test_task_subcommands_share_explicit_database_context(
@@ -96,12 +97,16 @@ def test_task_subcommands_share_explicit_database_context(
 
     monkeypatch.setattr(service, "reconcile", fake_reconcile)
     result = cli_runner.invoke(
-        app, ["task", "show", "41", "--db", str(selected_db)]
+        app, ["task", "show", "41", "--db", str(selected_db), "--details"]
     )
 
     assert result.exit_code == 0, result.output
     assert observed == [selected_db.resolve()]
-    assert "next_actions:" in result.output
+    normalized = " ".join(result.output.split())
+    assert "Details" in normalized
+    assert "Attempt ID 7" in normalized
+    assert "Executor type ssh_slurm" in normalized
+    assert "Next" in normalized
 
 
 def test_hidden_lifecycle_wrapper_routes_to_shared_service(

@@ -3,7 +3,7 @@
 import pytest
 from typer.main import get_command
 
-from nerd.cli import app
+from nerd.cli import _show_scheduler_row, app
 
 
 TOP_LEVEL_COMMANDS = {
@@ -119,13 +119,88 @@ def test_scheduler_row_output_exposes_durable_identifiers(cli_runner, tmp_path, 
     )
 
     assert result.exit_code == 0, result.output
+    normalized = " ".join(result.output.split())
     for semantic_field in (
-        "task_id: 41",
-        "task: create",
-        "task_state: submitted",
-        "attempt: 1",
-        "attempt_state: queued",
-        "executor: quest",
-        "scheduler_id: fake-41",
+        "Task 41 · create",
+        "Status submitted",
+        "Executor quest · job fake-41",
+        "Attempt 1",
+        "Next",
+        "nerd task logs 41",
+        "nerd task watch 41",
     ):
-        assert semantic_field in result.output
+        assert semantic_field in normalized
+    assert "Attempt ID" not in normalized
+
+
+def test_remote_task_output_hides_internal_paths_until_requested(capsys):
+    row = {
+        "task_id": 45,
+        "task_name": "mut_count",
+        "task_state": "running",
+        "try_index": 3,
+        "scheduler_attempt_id": 42,
+        "scheduler_state": "running",
+        "executor_profile": "quest",
+        "executor_type": "ssh_slurm",
+        "scheduler_id": "3675949",
+        "exit_code": None,
+        "error": None,
+        "task_message": "RUNNING",
+        "unit_label": "HIV_U4_1_HIV_U4",
+        "output_dir": "/local/output",
+        "remote_workdir": "/scratch/remote-run",
+        "log_path": "/local/output/command.log",
+    }
+
+    _show_scheduler_row(row, no_color=True)
+    concise = " ".join(capsys.readouterr().out.split())
+    assert "Task 45 · mut_count" in concise
+    assert "quest · Slurm job 3675949" in concise
+    assert "Message RUNNING" not in concise
+    assert "Attempt ID" not in concise
+    assert "/local/output" not in concise
+    assert "/scratch/remote-run" not in concise
+
+    _show_scheduler_row(row, detailed=True, no_color=True)
+    detailed = " ".join(capsys.readouterr().out.split())
+    assert "Attempt ID 42" in detailed
+    assert "Remote work /scratch/remote-run" in detailed
+    assert "Log /local/output/command.log" in detailed
+
+
+def test_remote_batch_table_omits_per_unit_log_paths(capsys):
+    row = {
+        "is_parent": True,
+        "task_id": 36,
+        "task_name": "mut_count",
+        "task_state": "running",
+        "counts": {"completed": 1, "running": 1},
+        "total_units": 2,
+        "output_dir": "/local/output",
+        "scheduler_state": "batch",
+        "children": [
+            {
+                "unit_label": "HIV_A27C_1",
+                "task_state": "completed",
+                "task_id": 37,
+                "scheduler_id": "3673074",
+                "log_path": "/local/output/rg-1/command.log",
+            },
+            {
+                "unit_label": "HIV_U4_1_HIV_U4",
+                "task_state": "running",
+                "task_id": 45,
+                "scheduler_id": "3673228",
+                "log_path": "/local/output/rg-9/command.log",
+            },
+        ],
+    }
+
+    _show_scheduler_row(row, no_color=True)
+    output = " ".join(capsys.readouterr().out.split())
+    assert "Progress 1/2 complete · 0 failed" in output
+    assert "UNIT STATE TASK SCHEDULER JOB" in output
+    assert "HIV_U4_1_HIV_U4 running 45 3673228" in output
+    assert "LOG" not in output
+    assert "command.log" not in output

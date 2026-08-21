@@ -860,19 +860,19 @@ class MutCountTask(Task):
             profile_path = _resolve_profile_path(sample_dir, name, ga=False)
             if profile_path:
                 found_profiles += 1
-                log.info("Found ShapeMapper profile for %s at %s", name, profile_path)
+                log.debug("Found ShapeMapper profile for %s at %s", name, profile_path)
             else:
                 log.warning("No ShapeMapper profile found for %s under %s", name, sample_dir)
                 try:
                     txts = sorted([str(p.relative_to(run_dir)) for p in sample_dir.rglob("*.txt")])
                     if txts:
-                        log.info(
+                        log.debug(
                             "Found txt files under %s: %s",
                             sample_dir,
                             ", ".join(txts[:10]) + (" ..." if len(txts) > 10 else ""),
                         )
                     else:
-                        log.info("No txt files present under %s", sample_dir)
+                        log.debug("No txt files present under %s", sample_dir)
                 except Exception:
                     pass
                 continue
@@ -981,7 +981,7 @@ class MutCountTask(Task):
                     continue
                 run_id = int(existing["id"] if hasattr(existing, "keys") else existing[0])
             else:
-                log.info("Inserted probe_fmod_run %s for sample %s", run_id, name)
+                log.debug("Inserted probe_fmod_run %s for sample %s", run_id, name)
 
             existing_valtypes_rows = ctx.db.execute(
                 "SELECT DISTINCT valtype FROM probe_fmod_values WHERE fmod_run_id = ?",
@@ -1000,7 +1000,7 @@ class MutCountTask(Task):
 
             for path, valtype in profiles_to_ingest:
                 if valtype in existing_valtypes:
-                    log.info("probe_fmod_values for %s (%s) already present; skipping.", name, valtype)
+                    log.debug("probe_fmod_values for %s (%s) already present; skipping.", name, valtype)
                     continue
 
                 parsed_rows = plugin.parse_profile(path)
@@ -1064,7 +1064,7 @@ class MutCountTask(Task):
 
                 db_api.bulk_insert_fmod_vals(ctx.db, records)
                 nucleotide_values_ingested += len(records)
-                log.info("Inserted %d probe_fmod_values records for %s (%s).", len(records), name, valtype)
+                log.debug("Inserted %d probe_fmod_values records for %s (%s).", len(records), name, valtype)
                 existing_valtypes.add(valtype)
                 inserted_for_sample = True
 
@@ -1077,7 +1077,7 @@ class MutCountTask(Task):
                         allowed_paths.add(hist_path.resolve())
                     except Exception:
                         pass
-                    log.info("Wrote per-read histogram for %s (%s) to %s", name, "Modified", hist_path)
+                    log.debug("Wrote per-read histogram for %s (%s) to %s", name, "Modified", hist_path)
                     histogram_count += 1
                 ga_hist = histograms.get("GAmodrate")
                 if ga_hist:
@@ -1087,7 +1087,7 @@ class MutCountTask(Task):
                         allowed_paths.add(hist_ga_path.resolve())
                     except Exception:
                         pass
-                    log.info("Wrote per-read histogram for %s (%s) to %s", name, "GA", hist_ga_path)
+                    log.debug("Wrote per-read histogram for %s (%s) to %s", name, "GA", hist_ga_path)
                     histogram_count += 1
 
             if log_path and log_path.exists():
@@ -1124,7 +1124,7 @@ class MutCountTask(Task):
             except Exception:
                 log.debug("Failed to remove shapemapper_temp directory at %s", temp_dir)
 
-        log.info(
+        log.debug(
             "mut_count completed. Profiles found for %d/%d samples; ingested %d run(s).",
             found_profiles,
             len(sample_names),
