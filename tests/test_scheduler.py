@@ -369,3 +369,44 @@ def test_mut_count_plans_one_unit_per_reaction_group_without_duplicate_samples(
     assert units[1].config["mut_count"]["reaction_group"] == 12
     assert units[2].config["mut_count"]["samples"] == ["standalone"]
     assert "reaction_groups" not in units[2].config["mut_count"]
+
+
+def test_mut_count_consume_outputs_resolves_reaction_group_samples(tmp_path, monkeypatch):
+    from nerd.pipeline.tasks.mut_count import MutCountTask
+
+    task = MutCountTask()
+    inputs = {"plugin": "shapemapper", "samples": [], "reaction_group": 11}
+    ctx = TaskContext(
+        db=object(), backend="ssh_slurm", workdir=tmp_path, threads=1,
+        mem_gb=1, time="00:10:00", label="fanout", output_dir=str(tmp_path),
+        executor_profile="quest",
+    )
+    resolved = []
+
+    def resolve(received_ctx, received_inputs):
+        resolved.append((received_ctx, received_inputs))
+        received_inputs["samples"] = ["sample-a"]
+        return ["sample-a"], {11: "group-a"}
+
+    monkeypatch.setattr(task, "_resolve_sample_names", resolve)
+
+    with pytest.raises(ValueError, match=r"profiles were found for 0/1 samples"):
+        task.consume_outputs(ctx, inputs, {}, tmp_path)
+
+    assert resolved == [(ctx, inputs)]
+
+
+def test_mut_count_consume_outputs_rejects_empty_sample_resolution(tmp_path, monkeypatch):
+    from nerd.pipeline.tasks.mut_count import MutCountTask
+
+    task = MutCountTask()
+    inputs = {"plugin": "shapemapper", "samples": [], "reaction_group": 11}
+    ctx = TaskContext(
+        db=object(), backend="ssh_slurm", workdir=tmp_path, threads=1,
+        mem_gb=1, time="00:10:00", label="fanout", output_dir=str(tmp_path),
+        executor_profile="quest",
+    )
+    monkeypatch.setattr(task, "_resolve_sample_names", lambda ctx, inputs: ([], {}))
+
+    with pytest.raises(ValueError, match="resolved no samples"):
+        task.consume_outputs(ctx, inputs, {}, tmp_path)

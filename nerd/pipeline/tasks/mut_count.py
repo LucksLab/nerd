@@ -818,10 +818,14 @@ class MutCountTask(Task):
             param_opts = {}
         per_read_hist_enabled = bool(param_opts.get("per_read_histograms", inputs.get("per_read_histograms", False)))
 
-        sample_names: List[str] = inputs.get("samples", [])
+        # Collection rebuilds ``inputs`` from the submitted config snapshot.
+        # Reaction-group work units intentionally persist only the group id, so
+        # resolve it again here just as command() does during submission.
+        sample_names, _ = self._resolve_sample_names(ctx, inputs)
         if not sample_names:
-            log.warning("mut_count.consume_outputs called with no samples.")
-            return
+            raise ValueError(
+                "Scientific validation failed: mut_count resolved no samples for output ingestion."
+            )
 
         artifacts_dir = run_dir / "artifacts"
         artifacts_dir.mkdir(parents=True, exist_ok=True)
