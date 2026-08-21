@@ -19,6 +19,12 @@ let databaseEntities = {};
 let databaseReactionGroups = [];
 let databaseType = "construct";
 let selectedDatabaseId = null;
+let databaseModeInitialized = false;
+let probeSampleTable = null;
+let dirtyProbeSampleIds = new Set();
+let pendingCreateCellEdits = new Map();
+let createCellEditTimer = null;
+let createCellEditInFlight = false;
 let analysisCatalog = { fmod_runs: [], reaction_groups: [] };
 let timecourseSites = [];
 let selectedRunIds = [];
@@ -50,6 +56,12 @@ async function post(path, body) {
   return api(path, { method: "POST", body: JSON.stringify(body || {}) });
 }
 
+window.addEventListener("beforeunload", (event) => {
+  if (!dirtyProbeSampleIds.size && !pendingCreateCellEdits.size) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+
 function configureMode(mode = "create") {
   const isCreate = mode === "create";
   const isDatabase = mode === "edit" || mode === "view";
@@ -61,6 +73,13 @@ function configureMode(mode = "create") {
     analyze: ["interactive analysis", "read only"],
   };
   const [subtitle, badge] = labels[mode] || labels.create;
+  if (isDatabase && !databaseModeInitialized) {
+    databaseType = mode === "edit" ? "probe_sample" : "construct";
+    document.querySelectorAll("[data-db-type]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.dbType === databaseType);
+    });
+    databaseModeInitialized = true;
+  }
   $("modeLabel").textContent = subtitle;
   $("modeBadge").textContent = badge;
   $("modeBadge").className = `pill ${["view", "analyze"].includes(mode) ? "pill-idle" : "pill-ok"}`;
@@ -95,7 +114,125 @@ function databaseRecordId(type, record) {
   return type === "probe_sample" ? record.reaction_id : record.id;
 }
 
+function probeSpreadsheetMode() {
+  return databaseType === "probe_sample" && S?.mode === "edit";
+}
+
+function databaseChoiceValues(type, nameField) {
+  return (databaseEntities[type] || []).map((record) => record[nameField]).filter(Boolean);
+}
+
+function probeSampleColumns() {
+  const list = (values) => ({ editor: "list", editorParams: { values, autocomplete: true } });
+  return [
+    { title: "sequencing_run_name", field: "sequencing_run_name", width: 180, ...list(databaseChoiceValues("sequencing_run", "run_name")) },
+    { title: "sample_name", field: "sample_name", width: 250 },
+    { title: "fq_source", field: "fq_source", width: 120 },
+    { title: "fq_dir", field: "fq_dir", width: 260 },
+    { title: "r1_file", field: "r1_file", width: 240 },
+    { title: "r2_file", field: "r2_file", width: 240 },
+    { title: "reaction_group", field: "reaction_group", width: 170, ...list(databaseReactionGroups.map((group) => group.rg_label).filter(Boolean)) },
+    { title: "temperature", field: "temperature", width: 125, hozAlign: "right" },
+    { title: "replicate", field: "replicate", width: 100, hozAlign: "right" },
+    { title: "reaction_time", field: "reaction_time", width: 130, hozAlign: "right" },
+    { title: "probe", field: "probe", width: 110 },
+    { title: "probe_concentration", field: "probe_concentration", width: 165, hozAlign: "right" },
+    { title: "RT", field: "RT", width: 110 },
+    { title: "treated", field: "treated", width: 105, hozAlign: "right", ...list([0, 1, 2]) },
+    { title: "buffer", field: "buffer", width: 165, ...list(databaseChoiceValues("buffer", "disp_name")) },
+    { title: "construct", field: "construct", width: 165, ...list(databaseChoiceValues("construct", "disp_name")) },
+    { title: "done_by", field: "done_by", width: 110 },
+    { title: "to_drop", field: "to_drop", width: 100, hozAlign: "right", ...list([0, 1]) },
+  ].map((column) => ({ editor: "input", headerSort: false, resizable: "header", ...column }));
+}
+
+function updateProbeSpreadsheetDirtyState() {
+  const count = dirtyProbeSampleIds.size;
+  $("probeDirtyCount").textContent = count
+    ? `${count} changed sample${count === 1 ? "" : "s"}`
+    : "No unsaved changes";
+  $("probeSaveBtn").disabled = !count;
+  $("probeDiscardBtn").disabled = !count;
+  probeSampleTable?.getRows().forEach((row) => {
+    row.getElement().classList.toggle("probe-row-dirty", dirtyProbeSampleIds.has(row.getData().reaction_id));
+  });
+}
+
+function markProbeSampleDirty(rowOrCell) {
+  const row = rowOrCell?.getRow ? rowOrCell.getRow() : rowOrCell;
+  const record = row?.getData?.();
+  if (record) dirtyProbeSampleIds.add(record.reaction_id);
+  updateProbeSpreadsheetDirtyState();
+}
+
+function applyProbeSpreadsheetFilter() {
+  if (!probeSampleTable) return;
+  const query = $("databaseSearch").value.trim().toLowerCase();
+  if (!query) probeSampleTable.clearFilter();
+  else probeSampleTable.setFilter((record) =>
+    Object.values(record).some((value) => String(value ?? "").toLowerCase().includes(query))
+  );
+}
+
+function renderProbeSampleSpreadsheet() {
+  const data = (databaseEntities.probe_sample || []).map((record) => ({ ...record }));
+  $("probeSpreadsheetCount").textContent = `${data.length} probe sample${data.length === 1 ? "" : "s"}`;
+  if (probeSampleTable && dirtyProbeSampleIds.size) {
+    applyProbeSpreadsheetFilter();
+    updateProbeSpreadsheetDirtyState();
+    return;
+  }
+  dirtyProbeSampleIds = new Set();
+  if (probeSampleTable) {
+    probeSampleTable.setColumns(probeSampleColumns());
+    probeSampleTable.replaceData(data).then(() => {
+      applyProbeSpreadsheetFilter();
+      updateProbeSpreadsheetDirtyState();
+    });
+    return;
+  }
+  probeSampleTable = new Tabulator("#probeSampleGrid", {
+    data,
+    index: "reaction_id",
+    height: "100%",
+    layout: "fitDataFill",
+    renderVertical: "virtual",
+    history: true,
+    placeholder: "No probe samples are in this database.",
+    selectableRange: 1,
+    selectableRangeClearCells: true,
+    editTriggerEvent: "dblclick",
+    clipboard: true,
+    clipboardCopyStyled: false,
+    clipboardCopyConfig: { rowHeaders: false, columnHeaders: false },
+    clipboardCopyRowRange: "range",
+    clipboardPasteParser: "range",
+    clipboardPasteAction: "range",
+    rowHeader: {
+      resizable: false, frozen: true, width: 44, hozAlign: "center",
+      formatter: "rownum", editor: false,
+    },
+    columns: probeSampleColumns(),
+  });
+  probeSampleTable.on("cellEdited", markProbeSampleDirty);
+  probeSampleTable.on("clipboardPasted", (_text, _rows, rowComponents) => {
+    (rowComponents || []).forEach(markProbeSampleDirty);
+  });
+  probeSampleTable.on("tableBuilt", () => {
+    applyProbeSpreadsheetFilter();
+    updateProbeSpreadsheetDirtyState();
+  });
+}
+
 function renderDatabaseList() {
+  const spreadsheet = probeSpreadsheetMode();
+  $("databaseList").closest(".database-list-pane").classList.toggle("hidden", spreadsheet);
+  $("databaseDetail").classList.toggle("hidden", spreadsheet);
+  $("probeSampleSpreadsheet").classList.toggle("hidden", !spreadsheet);
+  if (spreadsheet) {
+    renderProbeSampleSpreadsheet();
+    return;
+  }
   const list = $("databaseList");
   const query = $("databaseSearch").value.trim().toLowerCase();
   const records = (databaseEntities[databaseType] || []).filter((record) =>
@@ -371,7 +508,90 @@ document.querySelectorAll("[data-db-type]").forEach((button) => {
     renderDatabaseList();
   });
 });
-$("databaseSearch").addEventListener("input", renderDatabaseList);
+$("databaseSearch").addEventListener("input", () => {
+  if (probeSpreadsheetMode()) applyProbeSpreadsheetFilter();
+  else renderDatabaseList();
+});
+
+function findDatabaseId(records, idField, nameField, value, label) {
+  const match = records.find((record) =>
+    String(record[nameField] ?? "").toLowerCase() === String(value ?? "").trim().toLowerCase()
+  );
+  if (!match) throw new Error(`${label} “${value}” is not in the database.`);
+  return Number(match[idField]);
+}
+
+function probeSamplePayload(record) {
+  const payload = { ...record };
+  payload.seqrun_id = findDatabaseId(
+    databaseEntities.sequencing_run || [], "id", "run_name",
+    record.sequencing_run_name, "Sequencing run",
+  );
+  payload.rg_id = findDatabaseId(
+    databaseReactionGroups, "rg_id", "rg_label", record.reaction_group, "Reaction group",
+  );
+  payload.buffer_id = findDatabaseId(
+    databaseEntities.buffer || [], "id", "disp_name", record.buffer, "Buffer",
+  );
+  payload.construct_id = findDatabaseId(
+    databaseEntities.construct || [], "id", "disp_name", record.construct, "Construct",
+  );
+  ["replicate", "treated", "to_drop", "temperature", "reaction_time", "probe_concentration"].forEach((key) => {
+    const value = Number(payload[key]);
+    if (!Number.isFinite(value)) throw new Error(`${key} must be numeric for ${record.sample_name}.`);
+    payload[key] = value;
+  });
+  return payload;
+}
+
+$("probeFillDownBtn").addEventListener("click", () => {
+  const range = probeSampleTable?.getRanges()?.[0];
+  const rows = range?.getStructuredCells?.() || [];
+  if (rows.length < 2) return toast("Select at least two rows to fill down.", "err");
+  rows.slice(1).forEach((cells) => cells.forEach((cell, columnIndex) => {
+    const source = rows[0][columnIndex];
+    if (source && cell.getColumn().getDefinition().editor !== false) {
+      cell.setValue(source.getValue());
+    }
+  }));
+});
+
+$("probeUndoBtn").addEventListener("click", () => probeSampleTable?.undo());
+$("probeRedoBtn").addEventListener("click", () => probeSampleTable?.redo());
+
+$("probeDiscardBtn").addEventListener("click", () => {
+  dirtyProbeSampleIds = new Set();
+  probeSampleTable.replaceData((databaseEntities.probe_sample || []).map((record) => ({ ...record })))
+    .then(() => {
+      applyProbeSpreadsheetFilter();
+      updateProbeSpreadsheetDirtyState();
+    });
+});
+
+$("probeSaveBtn").addEventListener("click", async () => {
+  const changed = probeSampleTable.getData().filter((record) =>
+    dirtyProbeSampleIds.has(record.reaction_id)
+  );
+  if (!changed.length) return;
+  const button = $("probeSaveBtn");
+  button.disabled = true;
+  try {
+    const result = await api("/api/database/probe-samples/bulk", {
+      method: "PATCH",
+      body: JSON.stringify({ records: changed.map(probeSamplePayload) }),
+    });
+    toast(
+      `Saved ${result.changed_records} sample${result.changed_records === 1 ? "" : "s"} (${result.changed_fields} fields).`,
+      "ok",
+    );
+    if (!result.audit_logged) toast("Saved, but the maintenance log could not be written.", "info");
+    dirtyProbeSampleIds = new Set();
+    await loadDatabaseEntities();
+  } catch (e) {
+    toast(e.message, "err");
+    button.disabled = false;
+  }
+});
 
 $("topShutdownBtn").addEventListener("click", async () => {
   try {
@@ -810,6 +1030,7 @@ $("connectBtn").addEventListener("click", async () => {
     $("connectStatus").textContent = data.is_new_db ? "new database" : "connected";
     $("connectStatus").className = "pill pill-ok";
     selectedRowUids = new Set();
+    dirtyProbeSampleIds = new Set();
     render(data.state);
     const counts = data.db_entity_counts || {};
     toast(
@@ -1068,6 +1289,33 @@ function entityFormatter(column) {
   };
 }
 
+function queueCreateCellEdit(uid, column, value) {
+  pendingCreateCellEdits.set(`${uid}:${column}`, { uid, column, value });
+  clearTimeout(createCellEditTimer);
+  createCellEditTimer = setTimeout(flushCreateCellEdits, 120);
+}
+
+async function flushCreateCellEdits() {
+  if (createCellEditInFlight || !pendingCreateCellEdits.size) return;
+  createCellEditInFlight = true;
+  const edits = [...pendingCreateCellEdits.values()];
+  pendingCreateCellEdits = new Map();
+  let returnedState = null;
+  try {
+    const data = await post("/api/rows/cells", { edits });
+    returnedState = data.state;
+  } catch (e) {
+    edits.forEach((edit) => pendingCreateCellEdits.set(`${edit.uid}:${edit.column}`, edit));
+    toast(e.message, "err");
+  } finally {
+    createCellEditInFlight = false;
+  }
+  if (returnedState) {
+    if (pendingCreateCellEdits.size) flushCreateCellEdits();
+    else render(returnedState);
+  }
+}
+
 function buildColumns() {
   const cols = [{
     formatter: rowSelectionFormatter, titleFormatter: rowSelectionHeaderFormatter,
@@ -1090,9 +1338,7 @@ function buildColumns() {
       minWidth: 90, resizable: true,
       cellEdited: (cell) => {
         const row = cell.getRow().getData();
-        post("/api/rows/cell", { uid: row.uid, column: name, value: cell.getValue() })
-          .then((d) => render(d.state))
-          .catch((e) => toast(e.message, "err"));
+        queueCreateCellEdit(row.uid, name, cell.getValue());
       },
       cellFormatter: null,
     };
@@ -1165,7 +1411,14 @@ function initTable() {
     placeholder: "No samples yet — start with “Load samples”.",
     selectableRange: 1,
     selectableRangeInitializeDefault: false,
+    selectableRangeClearCells: true,
     editTriggerEvent: "dblclick",
+    clipboard: true,
+    clipboardCopyStyled: false,
+    clipboardCopyConfig: { rowHeaders: false, columnHeaders: false },
+    clipboardCopyRowRange: "range",
+    clipboardPasteParser: "range",
+    clipboardPasteAction: "range",
     rowFormatter: (row) => {
       const data = row.getData();
       row.getElement().classList.toggle("row-unmatched", !!data.unmatched);

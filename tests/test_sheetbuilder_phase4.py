@@ -10,7 +10,7 @@ import pytest
 import yaml
 from fastapi import BackgroundTasks, HTTPException
 
-from nerd.cli import app
+from nerd.cli import WEBUI_DEFAULT_PORTS, app
 from nerd.configuration import resolve_config, validate_config
 from nerd.project import ProjectContext, load_project
 from nerd.sheetbuilder import fillers
@@ -32,6 +32,8 @@ def _init_project(cli_runner, root: Path, *, database: str = ".nerd/nerd.sqlite"
 
 def _stub_uvicorn_server(monkeypatch):
     observed = {}
+
+    monkeypatch.setattr("nerd.cli._ensure_webui_port_available", lambda *args: None)
 
     class FakeServer:
         def __init__(self, config):
@@ -284,7 +286,7 @@ def test_webui_modes_use_global_phase4_project_context(
     assert "database: %s" % project.database in result.output
     assert "output_directory: %s" % project.output_dir in result.output
     assert observed["host"] == "127.0.0.1"
-    assert observed["port"] == 8420
+    assert observed["port"] == WEBUI_DEFAULT_PORTS[mode]
     assert observed["ran"] is True
 
     from nerd.webui.app import session
@@ -311,6 +313,46 @@ def test_webui_create_discovers_phase4_project_from_nested_directory(
     assert result.exit_code == 0, result.output
     assert "project: %s" % root.resolve() in result.output
     assert "database: %s" % project.database in result.output
+
+
+def test_webui_explicit_port_override_is_preserved(cli_runner, tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    _init_project(cli_runner, root)
+    observed = _stub_uvicorn_server(monkeypatch)
+
+    result = cli_runner.invoke(app, [
+        "--project", str(root), "webui", "edit", "--port", "9123",
+        "--no-open-browser",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert observed["port"] == 9123
+
+
+def test_webui_refuses_an_occupied_port_before_starting(
+    cli_runner, tmp_path, monkeypatch,
+):
+    root = tmp_path / "project"
+    _init_project(cli_runner, root)
+
+    class BusySocket:
+        def bind(self, address):
+            raise OSError("address already in use")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        "nerd.cli.socket.socket", lambda *args, **kwargs: BusySocket()
+    )
+    port = 9124
+    result = cli_runner.invoke(app, [
+        "--project", str(root), "webui", "analyze", "--port", str(port),
+        "--no-open-browser",
+    ])
+
+    assert result.exit_code == 1
+    assert "Port %s is already in use" % port in result.output
 
 
 def test_webui_serve_command_is_removed(cli_runner):
@@ -521,6 +563,95 @@ def test_webui_probe_sample_edit_rejects_invalid_treated_atomically(cli_runner, 
     assert conn.execute(
         "SELECT sample_name FROM sequencing_samples WHERE id = ?", (sample_id,)
     ).fetchone()[0] == "sample"
+
+
+def test_webui_probe_sample_spreadsheet_bulk_save_is_atomic(cli_runner, tmp_path):
+    import nerd.webui.app as webui_module
+
+    root = tmp_path / "project"
+    _init_project(cli_runner, root)
+    webui_module.set_mode("edit")
+    webui_module.session.connect(str(root), None, "sample_import")
+    conn = webui_module.session.conn
+    with conn:
+        construct_id = conn.execute(
+            "INSERT INTO meta_constructs (family, name, version, sequence, disp_name) "
+            "VALUES ('switch', 'WT', 'v1', 'AC', 'switch_WT')"
+        ).lastrowid
+        buffer_id = conn.execute(
+            "INSERT INTO meta_buffers (name, pH, composition, disp_name) "
+            "VALUES ('fold', 7.0, 'salt', 'folding')"
+        ).lastrowid
+        seqrun_id = conn.execute(
+            "INSERT INTO sequencing_runs (run_name, date, sequencer, run_manager) "
+            "VALUES ('run-1', '2026-08-21', 'NovaSeq', 'EKC')"
+        ).lastrowid
+        conn.execute("INSERT INTO probe_reaction_groups (rg_id, rg_label) VALUES (1, 'group-1')")
+        for index in (1, 2):
+            sample_id = conn.execute(
+                "INSERT INTO sequencing_samples "
+                "(seqrun_id, sample_name, fq_source, fq_dir, r1_file, r2_file) "
+                "VALUES (?, ?, 'local', '/reads', ?, ?)",
+                (seqrun_id, "sample-%s" % index, "r%s-1.fastq.gz" % index,
+                 "r%s-2.fastq.gz" % index),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO probe_reactions "
+                "(rg_id, s_id, construct_id, buffer_id, temperature, replicate, "
+                "reaction_time, probe_concentration, probe, rt_protocol, done_by, treated) "
+                "VALUES (1, ?, ?, ?, 25, ?, 30, 0.01, 'DMS', 'MRT', 'EKC', 1)",
+                (sample_id, construct_id, buffer_id, index),
+            )
+
+    records = webui_module.database_entities()["entities"]["probe_sample"]
+    requests = [
+        webui_module.ProbeSampleUpdate(**{
+            **records[0], "sample_name": "changed-1", "reaction_time": 45,
+        }),
+        webui_module.ProbeSampleUpdate(**{
+            **records[1], "sample_name": "changed-2", "treated": 9,
+        }),
+    ]
+    with pytest.raises(HTTPException, match="treated must be"):
+        webui_module.update_probe_samples_bulk(
+            webui_module.ProbeSampleBulkUpdate(records=requests)
+        )
+    assert [row[0] for row in conn.execute(
+        "SELECT sample_name FROM sequencing_samples ORDER BY id"
+    ).fetchall()] == ["sample-1", "sample-2"]
+
+    requests[1].treated = 0
+    result = webui_module.update_probe_samples_bulk(
+        webui_module.ProbeSampleBulkUpdate(records=requests)
+    )
+    assert result["changed_records"] == 2
+    assert [row[0] for row in conn.execute(
+        "SELECT sample_name FROM sequencing_samples ORDER BY id"
+    ).fetchall()] == ["changed-1", "changed-2"]
+
+
+def test_webui_create_table_applies_pasted_cells_as_one_batch(cli_runner, tmp_path):
+    import nerd.webui.app as webui_module
+
+    root = tmp_path / "project"
+    _init_project(cli_runner, root)
+    webui_module.set_mode("create")
+    webui_module.session.connect(str(root), None, "sample_import")
+    first = webui_module.session.sheet.add_row({"sample_name": "sample-1"})
+    second = webui_module.session.sheet.add_row({"sample_name": "sample-2"})
+
+    result = webui_module.edit_cells(webui_module.CellEdits(edits=[
+        {"uid": first.uid, "column": "probe", "value": "DMS"},
+        {"uid": first.uid, "column": "treated", "value": 1},
+        {"uid": second.uid, "column": "probe", "value": "DMS"},
+        {"uid": second.uid, "column": "treated", "value": 0},
+    ]))
+
+    assert result["edited"] == 4
+    assert first.get("probe") == second.get("probe") == "DMS"
+    assert first.get("treated") == 1
+    assert second.get("treated") == 0
+    assert first.origin("probe") == "manual"
 
 
 def test_webui_shutdown_stops_registered_server_after_response():

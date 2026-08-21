@@ -167,6 +167,10 @@ nerd webui view    # browse metadata without allowing database writes
 nerd webui analyze # compare modification rates and inspect time courses
 ```
 
+Each workspace has its own default local address, so they can run at the same
+time: analyze uses port 8420, create 8421, edit 8422, and view 8423. Pass
+`--port PORT` to any command when you need a different address.
+
 Add `--project PATH` to any command when launching outside the project. Each
 workspace reads the database and output directory from `.nerd/project.toml` and
 opens already connected. Create mode writes generated configs under `configs/`.

@@ -129,6 +129,14 @@ select.input{cursor:pointer}
 .database-edit-form{max-width:900px}
 .database-edit-form input,.database-edit-form select{width:100%;border:1px solid var(--border-strong);
   border-radius:6px;padding:.4rem .5rem;background:var(--surface);color:var(--text)}
+.probe-sample-spreadsheet{grid-column:1/-1;min-height:0;display:flex;flex-direction:column;
+  gap:.45rem;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+  box-shadow:var(--shadow);padding:.65rem}
+.spreadsheet-toolbar{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.spreadsheet-toolbar .spacer{flex:1}
+.spreadsheet-hint{color:var(--faint);font-size:.72rem}
+#probeSampleGrid{flex:1;min-height:300px;border:1px solid var(--border);border-radius:6px}
+#probeSampleGrid .probe-row-dirty{box-shadow:inset 3px 0 0 var(--warn)}
 .database-nt-head{display:flex;align-items:center;gap:.6rem;margin:.6rem 0 .4rem}
 .database-nt-head h3{font-size:.85rem;margin:0}
 .region-select{width:100%;border:0;background:transparent;padding:.18rem .35rem;font:.76rem var(--mono)}
@@ -218,6 +226,7 @@ dialog.modal::backdrop{background:rgba(16,24,40,.4)}
 @media(max-width:900px){.panel-grid{grid-template-columns:1fr}}
 @media(max-width:760px){
   .database-workspace{grid-template-columns:1fr;grid-template-rows:minmax(130px,35vh) 1fr}
+  .probe-sample-spreadsheet{grid-row:1/-1}
   .database-fields{grid-template-columns:1fr}
 }
 

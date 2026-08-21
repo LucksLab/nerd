@@ -46,6 +46,20 @@
   <section id="databaseDetail" class="database-detail">
     <div class="database-empty">Select an entry to inspect it.</div>
   </section>
+  <section id="probeSampleSpreadsheet" class="probe-sample-spreadsheet hidden">
+    <div class="spreadsheet-toolbar">
+      <b id="probeSpreadsheetCount">0 probe samples</b>
+      <button id="probeFillDownBtn" class="btn btn-secondary btn-sm">Fill selection down</button>
+      <button id="probeUndoBtn" class="btn btn-ghost btn-sm">Undo</button>
+      <button id="probeRedoBtn" class="btn btn-ghost btn-sm">Redo</button>
+      <span class="spacer"></span>
+      <span id="probeDirtyCount" class="hint">No unsaved changes</span>
+      <button id="probeDiscardBtn" class="btn btn-ghost btn-sm" disabled>Discard changes</button>
+      <button id="probeSaveBtn" class="btn btn-primary btn-sm" disabled>Save changes</button>
+    </div>
+    <div class="spreadsheet-hint">Double-click to edit. Drag to select cells; use arrow keys to move, Shift+arrows to expand, and Cmd/Ctrl+C or V to copy and paste. Select a range and use Fill selection down to repeat its first row.</div>
+    <div id="probeSampleGrid"></div>
+  </section>
 </main>
 
 <div id="analyzeBar" class="step-bar hidden">

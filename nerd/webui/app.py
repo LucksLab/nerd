@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sqlite3
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -147,6 +147,7 @@ async def enforce_workspace_mode(request: Request, call_next):
         edit_allowed = {
             "/api/database/constructs/base-regions",
             "/api/database/probe-samples",
+            "/api/database/probe-samples/bulk",
         }
         path = request.url.path
         if path not in always_allowed:
@@ -164,7 +165,12 @@ async def enforce_workspace_mode(request: Request, call_next):
                     {"detail": "Database maintenance requires Web UI edit mode."},
                     status_code=403,
                 )
-    return await call_next(request)
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        # The WebUI is a local development-style app. Never let a browser keep
+        # an old HTML/JS bundle across server restarts and source updates.
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 # ---------------------------------------------------------------- pages
@@ -435,6 +441,27 @@ def edit_cell(req: CellEdit) -> Dict[str, Any]:
     return {"state": _state()}
 
 
+class CellEdits(BaseModel):
+    edits: List[CellEdit]
+
+
+@app.post("/api/rows/cells")
+def edit_cells(req: CellEdits) -> Dict[str, Any]:
+    """Apply a clipboard-sized group of create-table edits in one render."""
+    _require_session()
+    resolved = []
+    for edit in req.edits:
+        row = session.sheet.by_uid(edit.uid)
+        if row is None:
+            raise HTTPException(404, "No row %s." % edit.uid)
+        if edit.column not in SAMPLE_COLUMNS:
+            raise HTTPException(400, "Unknown column %r." % edit.column)
+        resolved.append((row, edit))
+    for row, edit in resolved:
+        row.set(edit.column, edit.value, MANUAL, force=True)
+    return {"edited": len(resolved), "state": _state()}
+
+
 class AutofillDown(BaseModel):
     columns: List[str]
     source_uids: List[int]
@@ -530,8 +557,11 @@ def database_entities() -> Dict[str, Any]:
     }
 
 
-def _database_probe_samples(conn: Any) -> List[Dict[str, Any]]:
+def _database_probe_samples(
+    conn: Any, reaction_id: Optional[int] = None,
+) -> List[Dict[str, Any]]:
     """Return the creation-sheet fields joined onto each probe reaction."""
+    where = "WHERE pr.id = ?" if reaction_id is not None else ""
     rows = conn.execute(
         """
         SELECT
@@ -567,8 +597,10 @@ def _database_probe_samples(conn: Any) -> List[Dict[str, Any]]:
         JOIN probe_reaction_groups rg ON rg.rg_id = pr.rg_id
         JOIN meta_buffers b ON b.id = pr.buffer_id
         JOIN meta_constructs c ON c.id = pr.construct_id
+        %s
         ORDER BY LOWER(ss.sample_name), pr.id
-        """
+        """ % where,
+        (reaction_id,) if reaction_id is not None else (),
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -604,7 +636,79 @@ def update_probe_sample(req: ProbeSampleUpdate) -> Dict[str, Any]:
     if active.conn is None:
         raise HTTPException(400, "No database connection is available.")
 
-    current = active.conn.execute(
+    try:
+        with active.conn:
+            saved, changes = _apply_probe_sample_update(active.conn, req)
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(
+            409, "That edit conflicts with an existing database record: %s" % exc
+        ) from exc
+
+    audit_logged = _log_probe_sample_changes([
+        {
+            "reaction_id": req.reaction_id,
+            "sample_id": req.sample_id,
+            "changes": changes,
+        }
+    ])
+    return {
+        "ok": True,
+        "changed": len(changes),
+        "audit_logged": audit_logged,
+        "record": saved,
+    }
+
+
+class ProbeSampleBulkUpdate(BaseModel):
+    records: List[ProbeSampleUpdate]
+
+
+@app.patch("/api/database/probe-samples/bulk")
+def update_probe_samples_bulk(req: ProbeSampleBulkUpdate) -> Dict[str, Any]:
+    """Apply spreadsheet edits atomically across multiple probe samples."""
+    _require_mode("edit")
+    active = _require_session()
+    if active.conn is None:
+        raise HTTPException(400, "No database connection is available.")
+    if not req.records:
+        raise HTTPException(400, "No changed probe samples were submitted.")
+    reaction_ids = [record.reaction_id for record in req.records]
+    if len(reaction_ids) != len(set(reaction_ids)):
+        raise HTTPException(400, "Each probe reaction may be submitted only once.")
+
+    saved_records: List[Dict[str, Any]] = []
+    audit_changes: List[Dict[str, Any]] = []
+    try:
+        with active.conn:
+            for record in req.records:
+                saved, changes = _apply_probe_sample_update(active.conn, record)
+                saved_records.append(saved)
+                audit_changes.append({
+                    "reaction_id": record.reaction_id,
+                    "sample_id": record.sample_id,
+                    "changes": changes,
+                })
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(
+            409, "Those edits conflict with an existing database record: %s" % exc
+        ) from exc
+
+    changed_fields = sum(len(item["changes"]) for item in audit_changes)
+    return {
+        "ok": True,
+        "changed_records": sum(bool(item["changes"]) for item in audit_changes),
+        "changed_fields": changed_fields,
+        "audit_logged": _log_probe_sample_changes(audit_changes),
+        "records": saved_records,
+    }
+
+
+def _apply_probe_sample_update(
+    conn: Any, req: ProbeSampleUpdate,
+) -> Tuple[Dict[str, Any], Dict[str, Dict[str, Any]]]:
+    """Validate and execute one update inside the caller's transaction."""
+
+    current = conn.execute(
         "SELECT pr.*, ss.sample_name, ss.seqrun_id, ss.fq_source, ss.fq_dir, "
         "ss.r1_file, ss.r2_file, ss.to_drop "
         "FROM probe_reactions pr JOIN sequencing_samples ss ON ss.id = pr.s_id "
@@ -643,43 +747,39 @@ def update_probe_sample(req: ProbeSampleUpdate) -> Dict[str, Any]:
         "construct": ("meta_constructs", "id", req.construct_id),
     }
     for label, (table, column, value) in foreign_keys.items():
-        if active.conn.execute(
+        if conn.execute(
             "SELECT 1 FROM %s WHERE %s = ?" % (table, column), (value,)
         ).fetchone() is None:
             raise HTTPException(400, "The selected %s no longer exists." % label)
 
     before = next(
-        row for row in _database_probe_samples(active.conn)
+        row for row in _database_probe_samples(conn, req.reaction_id)
         if int(row["reaction_id"]) == req.reaction_id
     )
-    try:
-        with active.conn:
-            active.conn.execute(
-                "UPDATE sequencing_samples SET seqrun_id = ?, sample_name = ?, "
-                "fq_source = ?, fq_dir = ?, r1_file = ?, r2_file = ?, to_drop = ? "
-                "WHERE id = ?",
-                (
-                    req.seqrun_id, req.sample_name.strip(), fq_source, req.fq_dir.strip(),
-                    req.r1_file.strip(), req.r2_file.strip(), req.to_drop, req.sample_id,
-                ),
-            )
-            active.conn.execute(
-                "UPDATE probe_reactions SET rg_id = ?, construct_id = ?, buffer_id = ?, "
-                "temperature = ?, replicate = ?, reaction_time = ?, "
-                "probe_concentration = ?, probe = ?, rt_protocol = ?, done_by = ?, "
-                "treated = ? WHERE id = ?",
-                (
-                    req.rg_id, req.construct_id, req.buffer_id, req.temperature,
-                    req.replicate, req.reaction_time, req.probe_concentration,
-                    req.probe.strip(), req.RT.strip(), req.done_by.strip(),
-                    req.treated, req.reaction_id,
-                ),
-            )
-    except sqlite3.IntegrityError as exc:
-        raise HTTPException(409, "That edit conflicts with an existing database record: %s" % exc) from exc
+    conn.execute(
+        "UPDATE sequencing_samples SET seqrun_id = ?, sample_name = ?, "
+        "fq_source = ?, fq_dir = ?, r1_file = ?, r2_file = ?, to_drop = ? "
+        "WHERE id = ?",
+        (
+            req.seqrun_id, req.sample_name.strip(), fq_source, req.fq_dir.strip(),
+            req.r1_file.strip(), req.r2_file.strip(), req.to_drop, req.sample_id,
+        ),
+    )
+    conn.execute(
+        "UPDATE probe_reactions SET rg_id = ?, construct_id = ?, buffer_id = ?, "
+        "temperature = ?, replicate = ?, reaction_time = ?, "
+        "probe_concentration = ?, probe = ?, rt_protocol = ?, done_by = ?, "
+        "treated = ? WHERE id = ?",
+        (
+            req.rg_id, req.construct_id, req.buffer_id, req.temperature,
+            req.replicate, req.reaction_time, req.probe_concentration,
+            req.probe.strip(), req.RT.strip(), req.done_by.strip(),
+            req.treated, req.reaction_id,
+        ),
+    )
 
     saved = next(
-        row for row in _database_probe_samples(active.conn)
+        row for row in _database_probe_samples(conn, req.reaction_id)
         if int(row["reaction_id"]) == req.reaction_id
     )
     changes = {
@@ -687,26 +787,27 @@ def update_probe_sample(req: ProbeSampleUpdate) -> Dict[str, Any]:
         for key in saved
         if key in before and before.get(key) != saved.get(key)
     }
-    audit_logged = True
-    if changes:
-        try:
-            _write_maintenance_log({
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "mode": "edit",
-                "entity_type": "probe_sample",
-                "entity_id": req.reaction_id,
-                "sample_id": req.sample_id,
-                "operation": "update_probe_sample",
-                "changes": changes,
-            })
-        except OSError:
-            audit_logged = False
-    return {
-        "ok": True,
-        "changed": len(changes),
-        "audit_logged": audit_logged,
-        "record": saved,
-    }
+    return saved, changes
+
+
+def _log_probe_sample_changes(entries: List[Dict[str, Any]]) -> bool:
+    changed = [entry for entry in entries if entry["changes"]]
+    if not changed:
+        return True
+    try:
+        _write_maintenance_log({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "mode": "edit",
+            "entity_type": "probe_sample",
+            "operation": (
+                "update_probe_sample" if len(changed) == 1
+                else "bulk_update_probe_samples"
+            ),
+            "records": changed,
+        })
+    except OSError:
+        return False
+    return True
 
 
 class EntityCreate(BaseModel):

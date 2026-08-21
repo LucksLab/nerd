@@ -7,6 +7,7 @@ import enum
 import json
 from pathlib import Path
 import re
+import socket
 import time
 from typing import Callable, Optional
 
@@ -46,6 +47,13 @@ image_app = typer.Typer(no_args_is_help=True, help="Inspect and prepare immutabl
 db_app = typer.Typer(no_args_is_help=True, help="Inspect the selected project database.")
 config_app = typer.Typer(no_args_is_help=True, help="Create, validate, and inspect analysis configs.")
 webui_app = typer.Typer(no_args_is_help=True, help="Create, edit, view, or analyze project data in the Web UI.")
+
+WEBUI_DEFAULT_PORTS = {
+    "analyze": 8420,
+    "create": 8421,
+    "edit": 8422,
+    "view": 8423,
+}
 
 
 class RunStep(str, enum.Enum):
@@ -1144,6 +1152,22 @@ app.add_typer(webui_app, name="webui")
 
 
 
+def _ensure_webui_port_available(host: str, port: int, mode: str) -> None:
+    """Fail before opening a browser when another Web UI owns the address."""
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    probe = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        probe.bind((host, port))
+    except OSError as exc:
+        raise ContextResolutionError(
+            "Port %s is already in use, so the %s Web UI was not started. "
+            "Close the existing server or choose another port with --port."
+            % (port, mode)
+        ) from exc
+    finally:
+        probe.close()
+
+
 def _launch_webui(
     ctx: typer.Context,
     mode: str,
@@ -1166,6 +1190,7 @@ def _launch_webui(
     invocation_context = _command_context(ctx, db, project)
     selected_project = invocation_context.project
     try:
+        _ensure_webui_port_available(host, port, mode)
         if selected_project is None:
             discovered = invocation_context.resolve_project()
             if discovered is None:
@@ -1219,7 +1244,7 @@ def webui_create(
         None, "--db", help="Database override; otherwise use project.toml or legacy discovery."
     ),
     host: str = typer.Option("127.0.0.1", "--host"),
-    port: int = typer.Option(8420, "--port"),
+    port: int = typer.Option(WEBUI_DEFAULT_PORTS["create"], "--port"),
     open_browser: bool = typer.Option(True, "--open-browser/--no-open-browser"),
 ) -> None:
     """Build sample sheets and create configurations in the Web UI."""
@@ -1237,7 +1262,7 @@ def webui_edit(
         None, "--db", help="Database override; otherwise use project.toml or legacy discovery."
     ),
     host: str = typer.Option("127.0.0.1", "--host"),
-    port: int = typer.Option(8420, "--port"),
+    port: int = typer.Option(WEBUI_DEFAULT_PORTS["edit"], "--port"),
     open_browser: bool = typer.Option(True, "--open-browser/--no-open-browser"),
 ) -> None:
     """Correct existing database entries in the maintenance Web UI."""
@@ -1255,7 +1280,7 @@ def webui_view(
         None, "--db", help="Database override; otherwise use project.toml or legacy discovery."
     ),
     host: str = typer.Option("127.0.0.1", "--host"),
-    port: int = typer.Option(8420, "--port"),
+    port: int = typer.Option(WEBUI_DEFAULT_PORTS["view"], "--port"),
     open_browser: bool = typer.Option(True, "--open-browser/--no-open-browser"),
 ) -> None:
     """Browse project database metadata in a read-only Web UI."""
@@ -1273,7 +1298,7 @@ def webui_analyze(
         None, "--db", help="Database override; otherwise use project.toml or legacy discovery."
     ),
     host: str = typer.Option("127.0.0.1", "--host"),
-    port: int = typer.Option(8420, "--port"),
+    port: int = typer.Option(WEBUI_DEFAULT_PORTS["analyze"], "--port"),
     open_browser: bool = typer.Option(True, "--open-browser/--no-open-browser"),
 ) -> None:
     """Interactively compare probing modification rates and time courses."""
