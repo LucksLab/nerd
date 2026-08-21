@@ -388,6 +388,7 @@ class ProbeTimecourseTask(Task):
                     result,
                     model=engine_name,
                     overwrite=overwrite,
+                    task_id=task_id,
                 )
         requested_rounds = len(inputs["rg_ids"]) * len(rounds)
         return {
@@ -852,6 +853,7 @@ class ProbeTimecourseTask(Task):
         *,
         model: str,
         overwrite: bool,
+        task_id: Optional[int] = None,
     ) -> None:
         rg_id = int(result.metadata.get("rg_id")) if result.metadata.get("rg_id") is not None else None
         metadata_valtype = result.metadata.get("valtype")
@@ -873,6 +875,7 @@ class ProbeTimecourseTask(Task):
                 fit_run_id = db_api.begin_probe_tc_fit_run(
                     conn,
                     fit_kind=round_id,
+                    task_id=task_id,
                     rg_id=rg_id,
                     nt_id=None,
                     model=model,
@@ -937,6 +940,7 @@ class ProbeTimecourseTask(Task):
                 fit_run_id = db_api.begin_probe_tc_fit_run(
                     conn,
                     fit_kind=round_id,
+                    task_id=task_id,
                     rg_id=rg_id,
                     nt_id=nt_id,
                     model=model,

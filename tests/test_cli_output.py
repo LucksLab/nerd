@@ -24,9 +24,10 @@ TOP_LEVEL_COMMANDS = {
     "prepare-image",
     "ls",
     "webui",
+    "export",
 }
 
-PUBLIC_COMMANDS = {"run", "init", "config", "task", "plugin", "image", "db", "webui"}
+PUBLIC_COMMANDS = {"run", "init", "config", "task", "plugin", "image", "db", "webui", "export"}
 
 
 def test_top_level_help_and_command_inventory(cli_runner):
@@ -51,6 +52,7 @@ def test_top_level_help_and_command_inventory(cli_runner):
         ("plugin", "plugin maintenance"),
         ("image", "immutable tool images"),
         ("db", "project database"),
+        ("export", "scientific results as CSV"),
     ],
 )
 def test_relevant_subcommand_help_remains_available(

@@ -20,6 +20,7 @@ nav:
       - nmr_kinetic_fit: cli/nmr_kinetic_fit.md
       - mut_count: cli/mut_count.md
       - probe_timecourse: cli/probe_timecourse.md
+      - export: cli/export.md
       - tempgrad_fit: cli/tempgrad_fit.md
 theme:
   name: material

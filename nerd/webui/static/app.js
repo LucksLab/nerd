@@ -28,6 +28,8 @@ let createCellEditInFlight = false;
 let analysisCatalog = { fmod_runs: [], reaction_groups: [] };
 let timecourseSites = [];
 let selectedRunIds = [];
+let selectedKobsGroupIds = [];
+let kineticRateData = null;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const PLOT_COLORS = ["#4338ca", "#0891b2", "#b45309"];
@@ -648,6 +650,7 @@ function groupLabel(group) {
 async function loadAnalysisCatalog() {
   analysisCatalog = await api("/api/analyze/catalog");
   renderFmodRunChoices();
+  renderKobsGroupChoices();
   const groups = analysisCatalog.reaction_groups || [];
   setSelectOptions(
     $("reactionGroupSelect"),
@@ -833,6 +836,167 @@ function renderModificationRatePlot(data) {
   svgText(svg, data.valtype, 16, margin.top + innerHeight / 2, "plot-label", { "text-anchor": "middle", transform: `rotate(-90 16 ${margin.top + innerHeight / 2})` });
   plot.appendChild(svg);
   renderLegend(plot, runs.map((run, index) => ({ label: run.sample_name, color: PLOT_COLORS[index] })));
+}
+
+function kobsGroups() {
+  return (analysisCatalog.reaction_groups || []).filter((group) =>
+    Number(group.kobs_site_count) > 0 && (group.fit_valtypes || []).length
+  );
+}
+
+function renderKobsGroupChoices() {
+  const list = $("kobsGroupChoices");
+  const groups = kobsGroups();
+  selectedKobsGroupIds = selectedKobsGroupIds.filter((id) => groups.some((group) => group.rg_id === id));
+  list.replaceChildren();
+  if (!groups.length) {
+    const empty = document.createElement("span");
+    empty.className = "hint";
+    empty.textContent = "No reaction groups with stored k_obs fits found.";
+    list.appendChild(empty);
+  }
+  groups.forEach((group) => {
+    const item = document.createElement("label");
+    item.className = `selection-item${selectedKobsGroupIds.includes(group.rg_id) ? " selected" : ""}`;
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = selectedKobsGroupIds.includes(group.rg_id);
+    input.addEventListener("change", () => {
+      if (input.checked && selectedKobsGroupIds.length >= 3) {
+        input.checked = false;
+        toast("Choose no more than three reaction groups.", "info");
+        return;
+      }
+      selectedKobsGroupIds = input.checked
+        ? [...selectedKobsGroupIds, group.rg_id]
+        : selectedKobsGroupIds.filter((id) => id !== group.rg_id);
+      renderKobsGroupChoices();
+      updateKobsValtypes();
+    });
+    const content = document.createElement("span");
+    content.className = "selection-item-main";
+    const name = document.createElement("b");
+    name.textContent = group.rg_label || `Reaction group ${group.rg_id}`;
+    const meta = document.createElement("span");
+    meta.className = "selection-item-meta";
+    meta.textContent = groupLabel(group);
+    const provenance = document.createElement("span");
+    provenance.className = "selection-item-provenance";
+    provenance.textContent = `${group.kobs_site_count} fitted sites · ${(group.fit_valtypes || []).join(", ")}`;
+    content.append(name, meta, provenance);
+    item.append(input, content);
+    list.appendChild(item);
+  });
+  $("kobsSelectionCount").textContent = selectedKobsGroupIds.length
+    ? `${selectedKobsGroupIds.length} of 3 selected` : "Choose up to 3";
+}
+
+function updateKobsValtypes() {
+  const select = $("kobsValtype");
+  const selectedGroups = selectedKobsGroupIds.map((id) =>
+    analysisCatalog.reaction_groups.find((group) => group.rg_id === id)
+  ).filter(Boolean);
+  let common = [];
+  if (selectedGroups.length) {
+    common = selectedGroups[0].fit_valtypes.filter((value) =>
+      selectedGroups.every((group) => group.fit_valtypes.includes(value))
+    );
+  }
+  common = orderedValtypes(common);
+  setSelectOptions(select, common);
+  select.disabled = !common.length;
+  if (common.length && !select.value) select.value = common[0];
+  loadKineticRates();
+}
+
+async function loadKineticRates() {
+  const valtype = $("kobsValtype").value;
+  if (!selectedKobsGroupIds.length || !valtype) {
+    kineticRateData = null;
+    $("kobsEmpty").textContent = selectedKobsGroupIds.length
+      ? "The selected reaction groups do not share a fitted data type."
+      : "Choose one to three reaction groups with stored time-course fits.";
+    $("kobsEmpty").classList.remove("hidden");
+    $("kobsPlotScroll").classList.add("hidden");
+    return;
+  }
+  const query = new URLSearchParams({ valtype });
+  selectedKobsGroupIds.forEach((id) => query.append("rg_id", id));
+  try {
+    kineticRateData = await api(`/api/analyze/kinetic-rates?${query}`);
+    renderKineticRatePlot(kineticRateData);
+  } catch (e) { toast(e.message, "err"); }
+}
+
+function renderKineticRatePlot(data) {
+  const values = data?.values || [];
+  const plot = $("kobsPlot");
+  plot.replaceChildren();
+  if (!values.length) {
+    $("kobsEmpty").textContent = "No stored k_obs values matched the selected reaction groups and data type.";
+    $("kobsEmpty").classList.remove("hidden");
+    $("kobsPlotScroll").classList.add("hidden");
+    return;
+  }
+  $("kobsEmpty").classList.add("hidden");
+  $("kobsPlotScroll").classList.remove("hidden");
+  const logged = $("logKobsToggle").checked;
+  const thresholdInput = Number($("kobsR2Threshold").value);
+  const r2Threshold = Number.isFinite(thresholdInput) ? Math.min(1, Math.max(0, thresholdInput)) : .3;
+  const plotValue = (row) => logged ? -Number(row.log_kobs) : Number(row.kobs);
+  const axisLabel = logged ? "−ln(k_obs)" : "k_obs";
+  const siteMap = new Map();
+  values.forEach((row) => siteMap.set(row.site_base, row));
+  const sites = [...siteMap.values()].sort((a, b) => Number(a.site) - Number(b.site) || a.nt_id - b.nt_id);
+  const groups = selectedKobsGroupIds.map((id) =>
+    analysisCatalog.reaction_groups.find((group) => group.rg_id === id)
+  ).filter(Boolean);
+  const width = Math.max(850, 100 + sites.length * Math.max(20, groups.length * 10));
+  const height = 420;
+  const margin = { top: 30, right: 25, bottom: 95, left: 65 };
+  const innerWidth = width - margin.left - margin.right;
+  const innerHeight = height - margin.top - margin.bottom;
+  const numbers = values.map(plotValue).filter(Number.isFinite);
+  const yMin = Math.min(0, ...numbers);
+  const yMax = Math.max(logged ? 0 : .01, ...numbers);
+  const pad = Math.max((yMax - yMin) * .08, logged ? .05 : .005);
+  const lo = yMin < 0 ? yMin - pad : 0;
+  const hi = yMax + pad;
+  const y = (value) => margin.top + innerHeight - ((value - lo) / (hi - lo)) * innerHeight;
+  const groupWidth = innerWidth / sites.length;
+  const barWidth = Math.min(18, groupWidth * .82 / groups.length);
+  const svg = svgElement("svg", { width, height, class: "plot-svg", role: "img", "aria-label": `${axisLabel} bar plot` });
+  for (let tick = 0; tick <= 5; tick += 1) {
+    const value = lo + (hi - lo) * tick / 5;
+    const py = y(value);
+    svg.appendChild(svgElement("line", { x1: margin.left, x2: width - margin.right, y1: py, y2: py, class: "plot-grid" }));
+    svgText(svg, fmtValue(value), margin.left - 8, py + 4, "plot-label", { "text-anchor": "end" });
+  }
+  const zeroY = y(0);
+  svg.appendChild(svgElement("line", { x1: margin.left, x2: width - margin.right, y1: zeroY, y2: zeroY, class: "plot-axis" }));
+  sites.forEach((site, siteIndex) => {
+    const center = margin.left + groupWidth * (siteIndex + .5);
+    groups.forEach((group, groupIndex) => {
+      const row = values.find((value) => value.site_base === site.site_base && value.rg_id === group.rg_id);
+      if (!row) return;
+      const value = plotValue(row);
+      const py = y(Math.max(value, 0));
+      const bottom = y(Math.min(value, 0));
+      const x = center - groups.length * barWidth / 2 + groupIndex * barWidth;
+      const lowR2 = row.r2 === null || row.r2 === undefined || Number(row.r2) < r2Threshold;
+      const rect = svgElement("rect", {
+        x, y: Math.min(py, bottom), width: Math.max(1, barWidth - 1), height: Math.max(1, Math.abs(bottom - py)),
+        fill: PLOT_COLORS[groupIndex], opacity: lowR2 ? .1 : .82,
+      });
+      addSvgTitle(rect, `${group.rg_label || `Reaction group ${group.rg_id}`}\n${row.site_base} · ${axisLabel}: ${fmtValue(value, 6)}\nk_obs: ${fmtValue(row.kobs, 6)} · R²: ${fmtValue(row.r2)}${lowR2 ? ` (below ${fmtValue(r2Threshold)})` : ""}\nfit ${row.fit_run_id} · ${row.fit_kind}${row.model ? ` · ${row.model}` : ""}`);
+      svg.appendChild(rect);
+    });
+    const label = svgText(svg, site.site_base, center, height - margin.bottom + 16, "plot-label", { "text-anchor": "end" });
+    label.setAttribute("transform", `rotate(-30 ${center} ${height - margin.bottom + 16})`);
+  });
+  svgText(svg, axisLabel, 16, margin.top + innerHeight / 2, "plot-label", { "text-anchor": "middle", transform: `rotate(-90 16 ${margin.top + innerHeight / 2})` });
+  plot.appendChild(svg);
+  renderLegend(plot, groups.map((group, index) => ({ label: group.rg_label || `Reaction group ${group.rg_id}`, color: PLOT_COLORS[index] })));
 }
 
 document.querySelectorAll("[data-analysis-view]").forEach((button) => {

@@ -50,6 +50,14 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     ):
         if task_columns and name not in task_columns:
             conn.execute("ALTER TABLE core_tasks ADD COLUMN %s %s" % (name, declaration))
+    probe_fit_columns = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(probe_tc_fit_runs)")
+    }
+    if probe_fit_columns and "task_id" not in probe_fit_columns:
+        conn.execute(
+            "ALTER TABLE probe_tc_fit_runs "
+            "ADD COLUMN task_id INTEGER REFERENCES core_tasks(id) ON DELETE SET NULL"
+        )
 
 
 def _is_lock_error(err: sqlite3.Error) -> bool:
@@ -874,6 +882,7 @@ def begin_probe_tc_fit_run(
     conn: sqlite3.Connection,
     *,
     fit_kind: str,
+    task_id: Optional[int] = None,
     rg_id: Optional[int],
     nt_id: Optional[int],
     model: Optional[str] = None,
@@ -885,13 +894,13 @@ def begin_probe_tc_fit_run(
     The valtype is stored as a column to uniquely identify fits per (nt_id, valtype).
     """
     sql = """
-        INSERT INTO probe_tc_fit_runs (fit_kind, fmod_run_id, rg_id, nt_id, valtype, model)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO probe_tc_fit_runs (fit_kind, task_id, fmod_run_id, rg_id, nt_id, valtype, model)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     """
 
     def _op() -> Optional[int]:
         with conn:
-            cursor = conn.execute(sql, (fit_kind, fmod_run_id, rg_id, nt_id, valtype, model))
+            cursor = conn.execute(sql, (fit_kind, task_id, fmod_run_id, rg_id, nt_id, valtype, model))
             return cursor.lastrowid
 
     try:

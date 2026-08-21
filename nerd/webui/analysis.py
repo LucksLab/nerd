@@ -68,7 +68,30 @@ def analysis_catalog(conn: Any) -> Dict[str, Any]:
             COUNT(DISTINCT CASE WHEN pr.treated != 0 THEN pr.reaction_time END) AS timepoint_count,
             MIN(CASE WHEN pr.treated != 0 THEN pr.reaction_time END) AS time_min,
             MAX(CASE WHEN pr.treated != 0 THEN pr.reaction_time END) AS time_max,
-            GROUP_CONCAT(DISTINCT fv.valtype) AS valtypes
+            GROUP_CONCAT(DISTINCT fv.valtype) AS valtypes,
+            (
+                SELECT GROUP_CONCAT(DISTINCT tfr.valtype)
+                FROM probe_tc_fit_runs tfr
+                WHERE tfr.rg_id = prg.rg_id
+                  AND tfr.nt_id IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1 FROM probe_tc_fit_params tfp
+                      WHERE tfp.fit_run_id = tfr.id
+                        AND tfp.param_name IN ('kobs', 'log_kobs')
+                        AND tfp.param_numeric IS NOT NULL
+                  )
+            ) AS fit_valtypes,
+            (
+                SELECT COUNT(DISTINCT tfr.nt_id)
+                FROM probe_tc_fit_runs tfr
+                WHERE tfr.rg_id = prg.rg_id
+                  AND EXISTS (
+                      SELECT 1 FROM probe_tc_fit_params tfp
+                      WHERE tfp.fit_run_id = tfr.id
+                        AND tfp.param_name IN ('kobs', 'log_kobs')
+                        AND tfp.param_numeric IS NOT NULL
+                  )
+            ) AS kobs_site_count
         FROM probe_reaction_groups prg
         JOIN probe_reactions pr ON pr.rg_id = prg.rg_id
         JOIN meta_constructs mc ON mc.id = pr.construct_id
@@ -80,8 +103,96 @@ def analysis_catalog(conn: Any) -> Dict[str, Any]:
     ).fetchall())
     for group in reaction_groups:
         group["valtypes"] = _csv_values(group.get("valtypes"))
+        group["fit_valtypes"] = _csv_values(group.get("fit_valtypes"))
 
     return {"fmod_runs": fmod_runs, "reaction_groups": reaction_groups}
+
+
+def kinetic_rates(conn: Any, rg_ids: Sequence[int], valtype: str) -> Dict[str, Any]:
+    """Return the preferred stored k_obs fit for each group and nucleotide."""
+    selected = list(dict.fromkeys(int(rg_id) for rg_id in rg_ids))
+    if not 1 <= len(selected) <= 3:
+        raise ValueError("Choose between one and three reaction groups.")
+    normalized_valtype = str(valtype or "").strip()
+    if not normalized_valtype:
+        raise ValueError("Choose a data type.")
+
+    placeholders = ",".join("?" for _ in selected)
+    rows = _dict_rows(conn.execute(
+        f"""
+        SELECT
+            r.id AS fit_run_id,
+            r.rg_id,
+            rg.rg_label,
+            r.nt_id,
+            mn.site,
+            UPPER(mn.base) AS base,
+            r.fit_kind,
+            r.model,
+            r.created_at,
+            p.param_name,
+            p.param_numeric
+        FROM probe_tc_fit_runs r
+        JOIN probe_tc_fit_params p ON p.fit_run_id = r.id
+        JOIN probe_reaction_groups rg ON rg.rg_id = r.rg_id
+        JOIN meta_nucleotides mn ON mn.id = r.nt_id
+        WHERE r.rg_id IN ({placeholders})
+          AND (r.valtype = ? OR r.valtype IS NULL)
+          AND p.param_name IN ('kobs', 'log_kobs', 'diag:r2')
+          AND p.param_numeric IS NOT NULL
+        ORDER BY mn.site, mn.id, r.rg_id, r.id DESC
+        """,
+        (*selected, normalized_valtype),
+    ).fetchall())
+
+    fits: Dict[int, Dict[str, Any]] = {}
+    for row in rows:
+        fit = fits.setdefault(row["fit_run_id"], {
+            "fit_run_id": row["fit_run_id"],
+            "rg_id": row["rg_id"],
+            "rg_label": row["rg_label"],
+            "nt_id": row["nt_id"],
+            "site": row["site"],
+            "base": row["base"],
+            "fit_kind": row["fit_kind"],
+            "model": row["model"],
+            "created_at": row["created_at"],
+            "params": {},
+        })
+        fit["params"][row["param_name"]] = row["param_numeric"]
+
+    priority = {"round3_constrained": 0, "round1_free": 1}
+    best: Dict[tuple[int, int], Dict[str, Any]] = {}
+    for fit in sorted(
+        fits.values(),
+        key=lambda item: (priority.get(item["fit_kind"], 2), -int(item["fit_run_id"])),
+    ):
+        params = fit.pop("params")
+        try:
+            log_kobs = float(params["log_kobs"]) if "log_kobs" in params else None
+            kobs = float(params["kobs"]) if "kobs" in params else None
+            if log_kobs is None and kobs is not None and kobs > 0:
+                log_kobs = math.log(kobs)
+            if kobs is None and log_kobs is not None:
+                kobs = math.exp(log_kobs)
+            if not (math.isfinite(float(log_kobs)) and math.isfinite(float(kobs)) and kobs > 0):
+                continue
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        fit["log_kobs"] = log_kobs
+        fit["kobs"] = kobs
+        try:
+            r2 = float(params["diag:r2"]) if "diag:r2" in params else None
+            fit["r2"] = r2 if r2 is not None and math.isfinite(r2) else None
+        except (TypeError, ValueError):
+            fit["r2"] = None
+        fit["site_base"] = f"{fit['site']}{fit['base']}"
+        best.setdefault((int(fit["rg_id"]), int(fit["nt_id"])), fit)
+
+    values = sorted(
+        best.values(), key=lambda row: (int(row["site"]), int(row["nt_id"]), selected.index(int(row["rg_id"])))
+    )
+    return {"rg_ids": selected, "valtype": normalized_valtype, "values": values}
 
 
 def modification_rates(conn: Any, run_ids: Sequence[int], valtype: str) -> Dict[str, Any]:

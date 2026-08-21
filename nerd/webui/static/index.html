@@ -63,8 +63,9 @@
 </main>
 
 <div id="analyzeBar" class="step-bar hidden">
-  <button class="step active" data-analysis-view="modrateView">Modification rates</button>
+  <button class="step active" data-analysis-view="modrateView">Raw reactivities</button>
   <button class="step" data-analysis-view="timecourseView">Time courses</button>
+  <button class="step" data-analysis-view="kobsView">Fitted rates</button>
 </div>
 
 <main id="analyzeWorkspace" class="analyze-workspace hidden">
@@ -80,6 +81,27 @@
     </div>
     <div id="modrateEmpty" class="analysis-empty">Choose one to three ShapeMapper runs to compare modification rates.</div>
     <div id="modratePlotScroll" class="plot-scroll hidden"><div id="modratePlot"></div></div>
+  </section>
+
+  <section id="kobsView" class="analysis-view">
+    <div class="analysis-controls kobs-controls">
+      <div class="analysis-control-wide">
+        <div class="control-heading"><b>Reaction groups</b><span id="kobsSelectionCount" class="hint">Choose up to 3</span></div>
+        <div id="kobsGroupChoices" class="selection-list"></div>
+      </div>
+      <div class="analysis-control-stack">
+        <label class="field">Data type
+          <select id="kobsValtype" class="input" disabled></select>
+        </label>
+        <label class="field">R² threshold
+          <input id="kobsR2Threshold" class="input" type="number" value="0.30" min="0" max="1" step="0.05">
+          <span class="condition-summary">Lower-R² bars are faded</span>
+        </label>
+        <label class="checkline"><input id="logKobsToggle" type="checkbox" checked> Plot −ln(k_obs)</label>
+      </div>
+    </div>
+    <div id="kobsEmpty" class="analysis-empty">Choose one to three reaction groups with stored time-course fits.</div>
+    <div id="kobsPlotScroll" class="plot-scroll hidden"><div id="kobsPlot"></div></div>
   </section>
 
   <section id="timecourseView" class="analysis-view">

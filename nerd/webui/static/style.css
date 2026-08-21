@@ -290,7 +290,9 @@ dialog.modal::backdrop{background:rgba(16,24,40,.4)}
   border:1px dashed var(--border-strong);border-radius:var(--r);color:var(--faint);text-align:center;padding:2rem}
 .plot-scroll{overflow-x:auto;background:var(--surface);border:1px solid var(--border);
   border-radius:var(--r);box-shadow:var(--shadow);padding:.5rem}
-#modratePlot{min-height:430px}
+#modratePlot,#kobsPlot{min-height:430px}
+.analysis-control-stack{display:flex;flex-direction:column;gap:.75rem}
+.kobs-controls{grid-template-columns:minmax(220px,1fr) minmax(150px,220px)}
 .plot-svg{display:block;background:var(--surface);font-family:var(--sans)}
 .plot-grid{stroke:var(--border);stroke-width:1}
 .plot-axis{stroke:var(--border-strong);stroke-width:1}

@@ -183,12 +183,14 @@ CREATE_PROBE_TC_FIT_RUNS = """
 CREATE TABLE IF NOT EXISTS probe_tc_fit_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fit_kind TEXT NOT NULL,
+    task_id INTEGER,
     fmod_run_id INTEGER,
     rg_id INTEGER,
     nt_id INTEGER,
     valtype TEXT,
     model TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(task_id) REFERENCES core_tasks(id) ON DELETE SET NULL,
     FOREIGN KEY(fmod_run_id) REFERENCES probe_fmod_runs(id),
     FOREIGN KEY(rg_id) REFERENCES probe_reaction_groups(rg_id),
     FOREIGN KEY(nt_id) REFERENCES meta_nucleotides(id)

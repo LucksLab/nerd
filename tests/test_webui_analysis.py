@@ -9,7 +9,8 @@ import pytest
 
 from nerd.db import api as db_api
 from nerd.webui.analysis import (
-    analysis_catalog, modification_rates, timecourse_data, timecourse_options,
+    analysis_catalog, kinetic_rates, modification_rates, timecourse_data,
+    timecourse_options,
 )
 
 
@@ -106,6 +107,8 @@ def test_catalog_prioritizes_reaction_metadata_and_lists_available_types(analysi
     assert group["timepoint_count"] == 2
     assert group["time_min"] == 30
     assert group["time_max"] == 60
+    assert group["fit_valtypes"] == ["modrate"]
+    assert group["kobs_site_count"] == 1
 
 
 def test_modification_rates_support_three_runs_and_numeric_site_order(analysis_conn):
@@ -135,3 +138,20 @@ def test_timecourse_options_and_data_include_flags_and_stored_fit(analysis_conn)
     assert len(first["fit"]["curve"]) == 200
     assert first["fit"]["curve"][0]["fmod_val"] == pytest.approx(.01)
     assert result["series"][1]["fit"] is None
+
+
+def test_kinetic_rates_return_logged_and_linear_values_for_up_to_three_groups(analysis_conn):
+    result = kinetic_rates(analysis_conn, [7], "modrate")
+
+    assert result["rg_ids"] == [7]
+    assert result["valtype"] == "modrate"
+    assert len(result["values"]) == 1
+    value = result["values"][0]
+    assert value["site_base"] == "1A"
+    assert value["rg_label"] == "WT_25C_rep1"
+    assert value["log_kobs"] == pytest.approx(math.log(1.2))
+    assert value["kobs"] == pytest.approx(1.2)
+    assert value["r2"] == pytest.approx(.94)
+
+    with pytest.raises(ValueError, match="one and three"):
+        kinetic_rates(analysis_conn, [1, 2, 3, 4], "modrate")

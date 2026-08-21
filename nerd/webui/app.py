@@ -41,7 +41,8 @@ from nerd.fastq_sources import (
     profile_for_source, remote_profiles,
 )
 from nerd.webui.analysis import (
-    analysis_catalog, modification_rates, timecourse_data, timecourse_options,
+    analysis_catalog, kinetic_rates, modification_rates, timecourse_data,
+    timecourse_options,
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -225,6 +226,17 @@ def get_modification_rates(
 ) -> Dict[str, Any]:
     try:
         return modification_rates(_analysis_connection(), run_id, valtype)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/analyze/kinetic-rates")
+def get_kinetic_rates(
+    rg_id: List[int] = Query(...),
+    valtype: str = Query(...),
+) -> Dict[str, Any]:
+    try:
+        return kinetic_rates(_analysis_connection(), rg_id, valtype)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
