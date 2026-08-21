@@ -17,6 +17,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sqlite3
 from typing import Any, Dict, List, Optional
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
@@ -143,7 +144,10 @@ async def enforce_workspace_mode(request: Request, call_next):
     """Keep view/analyze read-only and creation writes out of maintenance mode."""
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         always_allowed = {"/api/session/connect", "/api/shutdown"}
-        edit_allowed = {"/api/database/constructs/base-regions"}
+        edit_allowed = {
+            "/api/database/constructs/base-regions",
+            "/api/database/probe-samples",
+        }
         path = request.url.path
         if path not in always_allowed:
             if _mode in {"view", "analyze"}:
@@ -512,7 +516,197 @@ def database_entities() -> Dict[str, Any]:
                 int(active.conn.execute(query, (record["id"],)).fetchone()[0])
                 for query in reference_queries.get(entity_type, ())
             )
-    return {"mode": _mode, "entities": result}
+    result["probe_sample"] = _database_probe_samples(active.conn)
+    reaction_groups = [
+        dict(row) for row in active.conn.execute(
+            "SELECT rg_id, rg_label FROM probe_reaction_groups "
+            "ORDER BY LOWER(COALESCE(rg_label, '')), rg_id"
+        ).fetchall()
+    ]
+    return {
+        "mode": _mode,
+        "entities": result,
+        "reaction_groups": reaction_groups,
+    }
+
+
+def _database_probe_samples(conn: Any) -> List[Dict[str, Any]]:
+    """Return the creation-sheet fields joined onto each probe reaction."""
+    rows = conn.execute(
+        """
+        SELECT
+            pr.id AS reaction_id,
+            ss.id AS sample_id,
+            ss.sample_name,
+            ss.seqrun_id,
+            sr.run_name AS sequencing_run_name,
+            ss.fq_source,
+            ss.fq_dir,
+            ss.r1_file,
+            ss.r2_file,
+            ss.to_drop,
+            pr.rg_id,
+            rg.rg_label AS reaction_group,
+            pr.temperature,
+            pr.replicate,
+            pr.reaction_time,
+            pr.probe,
+            pr.probe_concentration,
+            pr.rt_protocol AS RT,
+            pr.treated,
+            pr.buffer_id,
+            b.disp_name AS buffer,
+            pr.construct_id,
+            c.disp_name AS construct,
+            pr.done_by,
+            (SELECT COUNT(*) FROM probe_fmod_runs fr WHERE fr.s_id = ss.id)
+                AS reference_count
+        FROM probe_reactions pr
+        JOIN sequencing_samples ss ON ss.id = pr.s_id
+        JOIN sequencing_runs sr ON sr.id = ss.seqrun_id
+        JOIN probe_reaction_groups rg ON rg.rg_id = pr.rg_id
+        JOIN meta_buffers b ON b.id = pr.buffer_id
+        JOIN meta_constructs c ON c.id = pr.construct_id
+        ORDER BY LOWER(ss.sample_name), pr.id
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+class ProbeSampleUpdate(BaseModel):
+    reaction_id: int
+    sample_id: int
+    sample_name: str
+    seqrun_id: int
+    fq_source: str
+    fq_dir: str
+    r1_file: str
+    r2_file: str
+    to_drop: int = 0
+    rg_id: int
+    temperature: float
+    replicate: int
+    reaction_time: float
+    probe: str
+    probe_concentration: float
+    RT: str
+    treated: int
+    buffer_id: int
+    construct_id: int
+    done_by: str
+
+
+@app.patch("/api/database/probe-samples")
+def update_probe_sample(req: ProbeSampleUpdate) -> Dict[str, Any]:
+    """Correct one joined sequencing-sample/probe-reaction record in place."""
+    _require_mode("edit")
+    active = _require_session()
+    if active.conn is None:
+        raise HTTPException(400, "No database connection is available.")
+
+    current = active.conn.execute(
+        "SELECT pr.*, ss.sample_name, ss.seqrun_id, ss.fq_source, ss.fq_dir, "
+        "ss.r1_file, ss.r2_file, ss.to_drop "
+        "FROM probe_reactions pr JOIN sequencing_samples ss ON ss.id = pr.s_id "
+        "WHERE pr.id = ? AND ss.id = ?",
+        (req.reaction_id, req.sample_id),
+    ).fetchone()
+    if current is None:
+        raise HTTPException(404, "No matching probe sample was found.")
+
+    text_fields = {
+        "sample_name": req.sample_name,
+        "fq_source": req.fq_source,
+        "fq_dir": req.fq_dir,
+        "r1_file": req.r1_file,
+        "r2_file": req.r2_file,
+        "probe": req.probe,
+        "RT": req.RT,
+        "done_by": req.done_by,
+    }
+    missing = [name for name, value in text_fields.items() if not str(value).strip()]
+    if missing:
+        raise HTTPException(400, "Missing required field(s): %s" % ", ".join(missing))
+    try:
+        fq_source = normalize_source(req.fq_source)
+    except FastqSourceError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if req.treated not in {0, 1, 2}:
+        raise HTTPException(400, "treated must be 0 (untreated), 1 (treated), or 2 (mixed).")
+    if req.to_drop not in {0, 1}:
+        raise HTTPException(400, "to_drop must be 0 or 1.")
+
+    foreign_keys = {
+        "sequencing run": ("sequencing_runs", "id", req.seqrun_id),
+        "reaction group": ("probe_reaction_groups", "rg_id", req.rg_id),
+        "buffer": ("meta_buffers", "id", req.buffer_id),
+        "construct": ("meta_constructs", "id", req.construct_id),
+    }
+    for label, (table, column, value) in foreign_keys.items():
+        if active.conn.execute(
+            "SELECT 1 FROM %s WHERE %s = ?" % (table, column), (value,)
+        ).fetchone() is None:
+            raise HTTPException(400, "The selected %s no longer exists." % label)
+
+    before = next(
+        row for row in _database_probe_samples(active.conn)
+        if int(row["reaction_id"]) == req.reaction_id
+    )
+    try:
+        with active.conn:
+            active.conn.execute(
+                "UPDATE sequencing_samples SET seqrun_id = ?, sample_name = ?, "
+                "fq_source = ?, fq_dir = ?, r1_file = ?, r2_file = ?, to_drop = ? "
+                "WHERE id = ?",
+                (
+                    req.seqrun_id, req.sample_name.strip(), fq_source, req.fq_dir.strip(),
+                    req.r1_file.strip(), req.r2_file.strip(), req.to_drop, req.sample_id,
+                ),
+            )
+            active.conn.execute(
+                "UPDATE probe_reactions SET rg_id = ?, construct_id = ?, buffer_id = ?, "
+                "temperature = ?, replicate = ?, reaction_time = ?, "
+                "probe_concentration = ?, probe = ?, rt_protocol = ?, done_by = ?, "
+                "treated = ? WHERE id = ?",
+                (
+                    req.rg_id, req.construct_id, req.buffer_id, req.temperature,
+                    req.replicate, req.reaction_time, req.probe_concentration,
+                    req.probe.strip(), req.RT.strip(), req.done_by.strip(),
+                    req.treated, req.reaction_id,
+                ),
+            )
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(409, "That edit conflicts with an existing database record: %s" % exc) from exc
+
+    saved = next(
+        row for row in _database_probe_samples(active.conn)
+        if int(row["reaction_id"]) == req.reaction_id
+    )
+    changes = {
+        key: {"old": before.get(key), "new": saved.get(key)}
+        for key in saved
+        if key in before and before.get(key) != saved.get(key)
+    }
+    audit_logged = True
+    if changes:
+        try:
+            _write_maintenance_log({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "mode": "edit",
+                "entity_type": "probe_sample",
+                "entity_id": req.reaction_id,
+                "sample_id": req.sample_id,
+                "operation": "update_probe_sample",
+                "changes": changes,
+            })
+        except OSError:
+            audit_logged = False
+    return {
+        "ok": True,
+        "changed": len(changes),
+        "audit_logged": audit_logged,
+        "record": saved,
+    }
 
 
 class EntityCreate(BaseModel):

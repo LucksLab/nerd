@@ -413,6 +413,116 @@ def test_webui_construct_region_edit_rejects_invalid_annotation_atomically(
     assert [row["base_region"] for row in saved] == ["1", "2"]
 
 
+def test_webui_edit_can_correct_probe_sample_creation_fields(cli_runner, tmp_path):
+    import nerd.webui.app as webui_module
+
+    root = tmp_path / "project"
+    _init_project(cli_runner, root)
+    webui_module.set_mode("edit")
+    webui_module.session.connect(str(root), None, "sample_import")
+    conn = webui_module.session.conn
+    with conn:
+        construct_id = conn.execute(
+            "INSERT INTO meta_constructs (family, name, version, sequence, disp_name) "
+            "VALUES ('switch', 'WT', 'v1', 'AC', 'switch_WT')"
+        ).lastrowid
+        buffer_id = conn.execute(
+            "INSERT INTO meta_buffers (name, pH, composition, disp_name) "
+            "VALUES ('fold', 7.0, 'salt', 'folding')"
+        ).lastrowid
+        seqrun_id = conn.execute(
+            "INSERT INTO sequencing_runs (run_name, date, sequencer, run_manager) "
+            "VALUES ('run-1', '2026-08-21', 'NovaSeq', 'EKC')"
+        ).lastrowid
+        sample_id = conn.execute(
+            "INSERT INTO sequencing_samples "
+            "(seqrun_id, sample_name, fq_source, fq_dir, r1_file, r2_file) "
+            "VALUES (?, 'sample_q', 'local', '/reads', 'r1.fastq.gz', 'r2.fastq.gz')",
+            (seqrun_id,),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO probe_reaction_groups (rg_id, rg_label) VALUES (1, 'group-1')"
+        )
+        reaction_id = conn.execute(
+            "INSERT INTO probe_reactions "
+            "(rg_id, s_id, construct_id, buffer_id, temperature, replicate, "
+            "reaction_time, probe_concentration, probe, rt_protocol, done_by, treated) "
+            "VALUES (1, ?, ?, ?, 25, 1, 30, 0.01, 'DMS', 'MRT', 'EKC', 'q')",
+            (sample_id, construct_id, buffer_id),
+        ).lastrowid
+
+    catalog = webui_module.database_entities()
+    record = catalog["entities"]["probe_sample"][0]
+    assert record["sample_name"] == "sample_q"
+    assert record["treated"] == "q"
+    assert catalog["reaction_groups"] == [{"rg_id": 1, "rg_label": "group-1"}]
+
+    request = webui_module.ProbeSampleUpdate(**{
+        **record,
+        "sample_name": "sample_corrected",
+        "treated": 1,
+        "reaction_time": 45,
+    })
+    result = webui_module.update_probe_sample(request)
+
+    assert result["record"]["sample_name"] == "sample_corrected"
+    assert result["record"]["treated"] == 1
+    assert result["record"]["reaction_time"] == 45
+    assert result["record"]["sample_id"] == sample_id
+    assert result["record"]["reaction_id"] == reaction_id
+    assert conn.execute(
+        "SELECT sample_name FROM sequencing_samples WHERE id = ?", (sample_id,)
+    ).fetchone()[0] == "sample_corrected"
+    assert conn.execute(
+        "SELECT treated FROM probe_reactions WHERE id = ?", (reaction_id,)
+    ).fetchone()[0] == 1
+
+
+def test_webui_probe_sample_edit_rejects_invalid_treated_atomically(cli_runner, tmp_path):
+    import nerd.webui.app as webui_module
+
+    root = tmp_path / "project"
+    _init_project(cli_runner, root)
+    webui_module.set_mode("edit")
+    webui_module.session.connect(str(root), None, "sample_import")
+    conn = webui_module.session.conn
+    with conn:
+        construct_id = conn.execute(
+            "INSERT INTO meta_constructs (family, name, version, sequence, disp_name) "
+            "VALUES ('switch', 'WT', 'v1', 'AC', 'switch_WT')"
+        ).lastrowid
+        buffer_id = conn.execute(
+            "INSERT INTO meta_buffers (name, pH, composition, disp_name) "
+            "VALUES ('fold', 7.0, 'salt', 'folding')"
+        ).lastrowid
+        seqrun_id = conn.execute(
+            "INSERT INTO sequencing_runs (run_name, date, sequencer, run_manager) "
+            "VALUES ('run-1', '2026-08-21', 'NovaSeq', 'EKC')"
+        ).lastrowid
+        sample_id = conn.execute(
+            "INSERT INTO sequencing_samples "
+            "(seqrun_id, sample_name, fq_source, fq_dir, r1_file, r2_file) "
+            "VALUES (?, 'sample', 'local', '/reads', 'r1.fastq.gz', 'r2.fastq.gz')",
+            (seqrun_id,),
+        ).lastrowid
+        conn.execute("INSERT INTO probe_reaction_groups (rg_id, rg_label) VALUES (1, 'group-1')")
+        conn.execute(
+            "INSERT INTO probe_reactions "
+            "(rg_id, s_id, construct_id, buffer_id, temperature, replicate, "
+            "reaction_time, probe_concentration, probe, rt_protocol, done_by, treated) "
+            "VALUES (1, ?, ?, ?, 25, 1, 30, 0.01, 'DMS', 'MRT', 'EKC', 1)",
+            (sample_id, construct_id, buffer_id),
+        )
+
+    record = webui_module.database_entities()["entities"]["probe_sample"][0]
+    request = webui_module.ProbeSampleUpdate(**{**record, "sample_name": "changed", "treated": 9})
+    with pytest.raises(HTTPException, match="treated must be"):
+        webui_module.update_probe_sample(request)
+    assert conn.execute(
+        "SELECT sample_name FROM sequencing_samples WHERE id = ?", (sample_id,)
+    ).fetchone()[0] == "sample"
+
+
 def test_webui_shutdown_stops_registered_server_after_response():
     import nerd.webui.app as webui_module
 

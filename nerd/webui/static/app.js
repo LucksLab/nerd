@@ -16,6 +16,7 @@ let queue = [];           // pending unresolved entities
 let queueIndex = 0;
 let selectedRowUids = new Set();
 let databaseEntities = {};
+let databaseReactionGroups = [];
 let databaseType = "construct";
 let selectedDatabaseId = null;
 let analysisCatalog = { fmod_runs: [], reaction_groups: [] };
@@ -80,12 +81,18 @@ function configureMode(mode = "create") {
 async function loadDatabaseEntities() {
   const data = await api("/api/database/entities");
   databaseEntities = data.entities || {};
+  databaseReactionGroups = data.reaction_groups || [];
   renderDatabaseList();
 }
 
 function databaseDisplayName(type, record) {
+  if (type === "probe_sample") return record.sample_name || `probe reaction ${record.reaction_id}`;
   if (type === "sequencing_run") return record.run_name || `run ${record.id}`;
   return record.disp_name || record.name || `${type} ${record.id}`;
+}
+
+function databaseRecordId(type, record) {
+  return type === "probe_sample" ? record.reaction_id : record.id;
 }
 
 function renderDatabaseList() {
@@ -98,11 +105,13 @@ function renderDatabaseList() {
   $("databaseCount").textContent = `${records.length} ${databaseType.replace("_", " ")}${records.length === 1 ? "" : "s"}`;
   records.forEach((record) => {
     const button = document.createElement("button");
-    button.className = `database-item${record.id === selectedDatabaseId ? " active" : ""}`;
+    button.className = `database-item${databaseRecordId(databaseType, record) === selectedDatabaseId ? " active" : ""}`;
     const name = document.createElement("b");
     name.textContent = databaseDisplayName(databaseType, record);
     const meta = document.createElement("span");
-    meta.textContent = `${record.reference_count || 0} reference${record.reference_count === 1 ? "" : "s"}`;
+    meta.textContent = databaseType === "probe_sample"
+      ? `${record.reaction_group || "no group"} · ${record.treated == 0 ? "untreated" : record.treated == 1 ? "treated" : record.treated == 2 ? "mixed" : `invalid treated: ${record.treated}`}`
+      : `${record.reference_count || 0} reference${record.reference_count === 1 ? "" : "s"}`;
     button.append(name, meta);
     button.onclick = () => showDatabaseRecord(databaseType, record);
     list.appendChild(button);
@@ -117,7 +126,7 @@ function renderDatabaseList() {
 
 async function showDatabaseRecord(type, record) {
   databaseType = type;
-  selectedDatabaseId = record.id;
+  selectedDatabaseId = databaseRecordId(type, record);
   renderDatabaseList();
   const detail = $("databaseDetail");
   detail.replaceChildren();
@@ -131,6 +140,11 @@ async function showDatabaseRecord(type, record) {
   refs.textContent = `${record.reference_count || 0} references`;
   title.append(heading, refs);
   detail.appendChild(title);
+
+  if (type === "probe_sample" && S.mode === "edit") {
+    renderProbeSampleEditor(record);
+    return;
+  }
 
   const fields = document.createElement("div");
   fields.className = "database-fields";
@@ -158,6 +172,115 @@ async function showDatabaseRecord(type, record) {
     error.textContent = e.message;
     detail.appendChild(error);
   }
+}
+
+function renderProbeSampleEditor(record) {
+  const detail = $("databaseDetail");
+  const form = document.createElement("form");
+  form.className = "database-edit-form form-grid";
+
+  function field(labelText, name, options = {}) {
+    const label = document.createElement("label");
+    if (options.full) label.className = "full";
+    label.textContent = labelText;
+    let input;
+    if (options.choices) {
+      input = document.createElement("select");
+      options.choices.forEach((choice) => input.add(new Option(choice.label, choice.value)));
+      if (![...input.options].some((option) => String(option.value) === String(record[name]))) {
+        input.add(new Option(`Invalid current value: ${record[name]}`, record[name]), 0);
+      }
+    } else {
+      input = document.createElement("input");
+      input.type = options.type || "text";
+      if (options.step) input.step = options.step;
+    }
+    input.name = name;
+    input.value = record[name] ?? "";
+    input.required = options.required !== false;
+    label.appendChild(input);
+    form.appendChild(label);
+  }
+
+  const sequencingRuns = (databaseEntities.sequencing_run || []).map((item) => ({
+    value: item.id, label: item.run_name || `run ${item.id}`,
+  }));
+  const reactionGroups = databaseReactionGroups.map((item) => ({
+    value: item.rg_id, label: item.rg_label || `group ${item.rg_id}`,
+  }));
+  const buffers = (databaseEntities.buffer || []).map((item) => ({
+    value: item.id, label: item.disp_name || item.name || `buffer ${item.id}`,
+  }));
+  const constructs = (databaseEntities.construct || []).map((item) => ({
+    value: item.id, label: item.disp_name || item.name || `construct ${item.id}`,
+  }));
+
+  field("Sample name", "sample_name", { full: true });
+  field("Sequencing run", "seqrun_id", { choices: sequencingRuns });
+  field("Reaction group", "rg_id", { choices: reactionGroups });
+  field("Construct", "construct_id", { choices: constructs });
+  field("Buffer", "buffer_id", { choices: buffers });
+  field("Temperature", "temperature", { type: "number", step: "any" });
+  field("Replicate", "replicate", { type: "number", step: "1" });
+  field("Reaction time", "reaction_time", { type: "number", step: "any" });
+  field("Probe", "probe");
+  field("Probe concentration", "probe_concentration", { type: "number", step: "any" });
+  field("RT protocol", "RT");
+  field("Treated", "treated", { choices: [
+    { value: 0, label: "0 — untreated" },
+    { value: 1, label: "1 — treated" },
+    { value: 2, label: "2 — mixed / legacy" },
+  ] });
+  field("Done by", "done_by");
+  field("FASTQ source", "fq_source");
+  field("FASTQ folder", "fq_dir", { full: true });
+  field("R1 file", "r1_file", { full: true });
+  field("R2 file", "r2_file", { full: true });
+  field("Drop sample", "to_drop", { choices: [
+    { value: 0, label: "0 — keep" }, { value: 1, label: "1 — drop" },
+  ] });
+
+  const actions = document.createElement("div");
+  actions.className = "panel-actions full";
+  const save = document.createElement("button");
+  save.type = "submit";
+  save.className = "btn btn-primary";
+  save.textContent = "Save sample corrections";
+  const note = document.createElement("span");
+  note.className = "hint";
+  note.textContent = "Updates the existing sample and probe reaction; their IDs and analysis results are preserved.";
+  actions.append(save, note);
+  form.appendChild(actions);
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    save.disabled = true;
+    const payload = { reaction_id: record.reaction_id, sample_id: record.sample_id };
+    new FormData(form).forEach((value, key) => { payload[key] = value; });
+    ["seqrun_id", "rg_id", "construct_id", "buffer_id", "replicate", "treated", "to_drop"].forEach((key) => {
+      payload[key] = Number(payload[key]);
+    });
+    ["temperature", "reaction_time", "probe_concentration"].forEach((key) => {
+      payload[key] = Number(payload[key]);
+    });
+    try {
+      const data = await api("/api/database/probe-samples", {
+        method: "PATCH", body: JSON.stringify(payload),
+      });
+      toast(`${data.changed} field${data.changed === 1 ? "" : "s"} updated.`, "ok");
+      if (!data.audit_logged) toast("Saved, but the maintenance log could not be written.", "info");
+      await loadDatabaseEntities();
+      const saved = (databaseEntities.probe_sample || []).find(
+        (item) => item.reaction_id === record.reaction_id
+      );
+      if (saved) showDatabaseRecord("probe_sample", saved);
+    } catch (e) {
+      toast(e.message, "err");
+    } finally {
+      save.disabled = false;
+    }
+  });
+  detail.appendChild(form);
 }
 
 function renderDatabaseNtRows(record, rows) {

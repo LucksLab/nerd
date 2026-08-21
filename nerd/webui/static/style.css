@@ -126,6 +126,9 @@ select.input{cursor:pointer}
 .database-field{border-bottom:1px solid var(--border);padding:.3rem 0}
 .database-field .key{display:block;text-transform:uppercase;letter-spacing:.03em;color:var(--faint);font-size:.65rem}
 .database-field .value{font:.8rem var(--mono);overflow-wrap:anywhere}
+.database-edit-form{max-width:900px}
+.database-edit-form input,.database-edit-form select{width:100%;border:1px solid var(--border-strong);
+  border-radius:6px;padding:.4rem .5rem;background:var(--surface);color:var(--text)}
 .database-nt-head{display:flex;align-items:center;gap:.6rem;margin:.6rem 0 .4rem}
 .database-nt-head h3{font-size:.85rem;margin:0}
 .region-select{width:100%;border:0;background:transparent;padding:.18rem .35rem;font:.76rem var(--mono)}
