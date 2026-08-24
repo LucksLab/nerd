@@ -111,7 +111,7 @@ def test_catalog_prioritizes_reaction_metadata_and_lists_available_types(analysi
     assert group["kobs_site_count"] == 1
 
 
-def test_modification_rates_support_three_runs_and_numeric_site_order(analysis_conn):
+def test_modification_rates_support_unlimited_runs_and_numeric_site_order(analysis_conn):
     result = modification_rates(analysis_conn, [11, 12, 13], "GAmodrate")
 
     assert result["valtype"] == "GAmodrate"
@@ -119,8 +119,8 @@ def test_modification_rates_support_three_runs_and_numeric_site_order(analysis_c
     flagged = next(row for row in result["values"] if row["fmod_run_id"] == 12 and row["nt_id"] == 1)
     assert flagged["outlier"] == 1
 
-    with pytest.raises(ValueError, match="one and three"):
-        modification_rates(analysis_conn, [11, 12, 13, 14], "modrate")
+    unlimited = modification_rates(analysis_conn, [11, 12, 13, 14], "modrate")
+    assert unlimited["run_ids"] == [11, 12, 13, 14]
 
 
 def test_timecourse_options_and_data_include_flags_and_stored_fit(analysis_conn):
@@ -140,7 +140,7 @@ def test_timecourse_options_and_data_include_flags_and_stored_fit(analysis_conn)
     assert result["series"][1]["fit"] is None
 
 
-def test_kinetic_rates_return_logged_and_linear_values_for_up_to_three_groups(analysis_conn):
+def test_kinetic_rates_return_logged_and_linear_values_for_unlimited_groups(analysis_conn):
     result = kinetic_rates(analysis_conn, [7], "modrate")
 
     assert result["rg_ids"] == [7]
@@ -151,7 +151,9 @@ def test_kinetic_rates_return_logged_and_linear_values_for_up_to_three_groups(an
     assert value["rg_label"] == "WT_25C_rep1"
     assert value["log_kobs"] == pytest.approx(math.log(1.2))
     assert value["kobs"] == pytest.approx(1.2)
+    assert value["log_kdeg"] == pytest.approx(math.log(.01))
+    assert value["kdeg"] == pytest.approx(.01)
     assert value["r2"] == pytest.approx(.94)
 
-    with pytest.raises(ValueError, match="one and three"):
-        kinetic_rates(analysis_conn, [1, 2, 3, 4], "modrate")
+    unlimited = kinetic_rates(analysis_conn, [1, 2, 3, 4], "modrate")
+    assert unlimited["rg_ids"] == [1, 2, 3, 4]

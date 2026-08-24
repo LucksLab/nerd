@@ -15,7 +15,9 @@ from nerd.configuration import resolve_config, validate_config
 from nerd.project import ProjectContext, load_project
 from nerd.sheetbuilder import fillers
 from nerd.sheetbuilder.catalog import EntityCatalog
-from nerd.sheetbuilder.export import default_nt_rows, export, validate_primer_annotations
+from nerd.sheetbuilder.export import (
+    copy_nt_row_annotations, default_nt_rows, export, validate_primer_annotations,
+)
 from nerd.sheetbuilder.model import Sheet
 from nerd.sheetbuilder.session import Session
 
@@ -83,6 +85,25 @@ def test_default_nt_rows_detects_lower_upper_lower_construct_regions():
     assert [row["base_region"] for row in rows[first_rt_primer:]] == ["2"] * (
         len(sequence) - first_rt_primer
     )
+
+
+def test_copy_nt_row_annotations_keeps_template_labels_but_uses_form_sequence():
+    template = [
+        {"site": -1, "base": "A", "base_region": "0"},
+        {"site": 1, "base": "C", "base_region": "1"},
+        {"site": 3, "base": "G", "base_region": "2"},
+    ]
+
+    assert copy_nt_row_annotations("tga", template) == [
+        {"site": -1, "base": "U", "base_region": "0"},
+        {"site": 1, "base": "G", "base_region": "1"},
+        {"site": 3, "base": "A", "base_region": "2"},
+    ]
+
+
+def test_copy_nt_row_annotations_requires_matching_lengths():
+    with pytest.raises(ValueError, match="sequence has 2 positions.*template has 1"):
+        copy_nt_row_annotations("AC", [{"site": 1, "base": "G", "base_region": "1"}])
 
 
 def test_default_nt_rows_detects_target_and_rt_primer_without_five_prime_primer():

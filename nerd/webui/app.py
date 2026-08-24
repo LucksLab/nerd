@@ -879,7 +879,7 @@ def nt_rows(
     sequence: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Seed the numbering grid: default 1-based, or copy an existing construct's."""
-    if sequence:
+    if sequence and not disp_name and construct_id is None:
         try:
             rows = export_mod.default_nt_rows(sequence)
         except ValueError as exc:
@@ -893,7 +893,13 @@ def nt_rows(
             (construct_id,),
         ).fetchall() if active.conn is not None else []
         if rows:
-            return {"nt_rows": [dict(row) for row in rows], "source": "database"}
+            template_rows = [dict(row) for row in rows]
+            if sequence:
+                try:
+                    template_rows = export_mod.copy_nt_row_annotations(sequence, template_rows)
+                except ValueError as exc:
+                    raise HTTPException(400, str(exc)) from exc
+            return {"nt_rows": template_rows, "source": "database"}
         raise HTTPException(404, "No numbering found for construct id %s." % construct_id)
     if not disp_name:
         raise HTTPException(400, "Pass construct_id=, sequence=, or disp_name=.")
@@ -903,7 +909,13 @@ def nt_rows(
          if str(c.get("disp_name", "")).lower() == disp_name.lower()), None
     )
     if staged and staged.get("nt_rows"):
-        return {"nt_rows": staged["nt_rows"], "source": "staged"}
+        template_rows = staged["nt_rows"]
+        if sequence:
+            try:
+                template_rows = export_mod.copy_nt_row_annotations(sequence, template_rows)
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+        return {"nt_rows": template_rows, "source": "staged"}
 
     resolved = session.catalog.resolve("construct", disp_name)
     if resolved.status == "db" and session.conn is not None:
@@ -913,7 +925,13 @@ def nt_rows(
             (resolved.entity_id,),
         ).fetchall()
         if rows:
-            return {"nt_rows": [dict(r) for r in rows], "source": "database"}
+            template_rows = [dict(r) for r in rows]
+            if sequence:
+                try:
+                    template_rows = export_mod.copy_nt_row_annotations(sequence, template_rows)
+                except ValueError as exc:
+                    raise HTTPException(400, str(exc)) from exc
+            return {"nt_rows": template_rows, "source": "database"}
     raise HTTPException(404, "No numbering found for %r." % disp_name)
 
 

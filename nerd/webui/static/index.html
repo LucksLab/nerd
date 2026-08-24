@@ -66,27 +66,31 @@
   <button class="step active" data-analysis-view="modrateView">Raw reactivities</button>
   <button class="step" data-analysis-view="timecourseView">Time courses</button>
   <button class="step" data-analysis-view="kobsView">Fitted rates</button>
+  <label class="checkline analysis-filter-toggle"><input id="acOnlyToggle" type="checkbox"> A/C only</label>
 </div>
 
 <main id="analyzeWorkspace" class="analyze-workspace hidden">
   <section id="modrateView" class="analysis-view active">
     <div class="analysis-controls">
       <div class="analysis-control-wide">
-        <div class="control-heading"><b>ShapeMapper runs</b><span id="runSelectionCount" class="hint">Choose up to 3</span></div>
+        <div class="control-heading"><b>ShapeMapper runs</b><span id="runSelectionCount" class="hint">Choose runs</span></div>
         <div id="fmodRunChoices" class="selection-list"></div>
       </div>
-      <label class="field">Data type
-        <select id="modrateValtype" class="input" disabled></select>
-      </label>
+      <div class="analysis-control-stack">
+        <label class="field">Data type
+          <select id="modrateValtype" class="input" disabled></select>
+        </label>
+        <button id="exportModrateBtn" class="btn btn-secondary btn-sm" type="button" disabled>Export displayed CSV</button>
+      </div>
     </div>
-    <div id="modrateEmpty" class="analysis-empty">Choose one to three ShapeMapper runs to compare modification rates.</div>
+    <div id="modrateEmpty" class="analysis-empty">Choose one or more ShapeMapper runs to compare modification rates.</div>
     <div id="modratePlotScroll" class="plot-scroll hidden"><div id="modratePlot"></div></div>
   </section>
 
   <section id="kobsView" class="analysis-view">
     <div class="analysis-controls kobs-controls">
       <div class="analysis-control-wide">
-        <div class="control-heading"><b>Reaction groups</b><span id="kobsSelectionCount" class="hint">Choose up to 3</span></div>
+        <div class="control-heading"><b>Reaction groups</b><span id="kobsSelectionCount" class="hint">Choose groups</span></div>
         <div id="kobsGroupChoices" class="selection-list"></div>
       </div>
       <div class="analysis-control-stack">
@@ -98,9 +102,10 @@
           <span class="condition-summary">Lower-R² bars are faded</span>
         </label>
         <label class="checkline"><input id="logKobsToggle" type="checkbox" checked> Plot −ln(k_obs)</label>
+        <button id="exportKobsBtn" class="btn btn-secondary btn-sm" type="button" disabled>Export displayed CSV</button>
       </div>
     </div>
-    <div id="kobsEmpty" class="analysis-empty">Choose one to three reaction groups with stored time-course fits.</div>
+    <div id="kobsEmpty" class="analysis-empty">Choose one or more reaction groups with stored time-course fits.</div>
     <div id="kobsPlotScroll" class="plot-scroll hidden"><div id="kobsPlot"></div></div>
   </section>
 
@@ -120,7 +125,10 @@
           <option value="3" selected>3 sites</option>
         </select>
       </label>
-      <label class="checkline fit-toggle"><input id="showTimecourseFits" type="checkbox" checked> Show stored fits</label>
+      <div class="analysis-inline-actions fit-toggle">
+        <label class="checkline"><input id="showTimecourseFits" type="checkbox" checked> Show stored fits</label>
+        <button id="exportTimecourseBtn" class="btn btn-secondary btn-sm" type="button" disabled>Export displayed CSV</button>
+      </div>
       <div id="timecourseSiteSelectors" class="site-selectors analysis-control-wide"></div>
     </div>
     <div id="timecourseEmpty" class="analysis-empty">Choose a reaction group and nucleotide sites to inspect their time courses.</div>
@@ -150,7 +158,7 @@
     <button id="ingestFastqBtn" class="btn btn-primary">Pair reads &amp; build rows</button>
     <span class="hint">R1/R2 are paired automatically; sample_name, fq_dir, r1_file, r2_file get filled.</span>
   </div>
-  <p id="fqSourceHelp" class="hint">Remote HPC locations appear only after an <code>ssh_slurm</code> alias is configured in <code>.nerd/project.toml</code>. Configure and test its OpenSSH Host alias before creating samples.</p>
+  <p id="fqSourceHelp" class="hint">Remote HPC locations appear only after an <code>ssh_slurm</code> executor is configured in <code>.nerd/project.toml</code>. Its OpenSSH alias can be overridden on this computer with <code>NERD_SSH_HOST_EXECUTOR</code> (for example, <code>NERD_SSH_HOST_QUEST=quest-login</code>).</p>
   <details class="fallback">
     <summary>No fastq files — just paste sample names</summary>
     <textarea id="plainNames" class="input input-mono" rows="4" placeholder="one sample name per line"></textarea>
@@ -275,13 +283,13 @@
       <div id="ntBlock" class="nt-block">
         <div class="nt-head">
           <h4>Sequence numbering and primer sites</h4>
-          <span class="hint">Numbering defaults to 1, 2, 3… Edit it to match canonical numbering (negative and skipped positions are fine).</span>
+          <span class="hint">Numbering defaults to 1, 2, 3… Select or Shift-click a range, copy/paste blocks, or drag the handle. Double-click the handle to fill to the bottom. One cell repeats; two or more site numbers continue the trend.</span>
         </div>
         <p class="hint">Sequence case is detected automatically: <strong>lowercase</strong> = 5'-primer (<strong>0</strong>), <strong>UPPERCASE</strong> = target (<strong>1</strong>), and trailing <strong>lowercase</strong> = RT primer (<strong>2</strong>). Starting with uppercase is valid when there is no 5'-primer. You can edit the detected labels below.</p>
         <div class="nt-actions">
           <button type="button" id="ntDefaultBtn" class="btn btn-secondary btn-sm">Detect from case</button>
           <input id="ntCopyFrom" class="input input-sm" placeholder="copy from construct…" size="18">
-          <button type="button" id="ntCopyBtn" class="btn btn-secondary btn-sm">Copy</button>
+          <button type="button" id="ntCopyBtn" class="btn btn-secondary btn-sm">Copy labels</button>
           <span id="ntSummary" class="hint"></span>
         </div>
         <div id="ntGridWrap" class="nt-grid-wrap"><table id="ntGrid">

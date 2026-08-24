@@ -54,6 +54,31 @@ def default_nt_rows(sequence: str) -> List[Dict[str, Any]]:
     return generate_nt_rows_default(sequence)
 
 
+def copy_nt_row_annotations(
+    sequence: str, template_rows: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Apply template numbering/regions to bases from a new sequence."""
+    allowed = set("ACGTUacgtu")
+    if not sequence or any(base not in allowed for base in sequence):
+        raise ValueError("Sequence must contain only A, C, G, T, or U.")
+    if len(sequence) != len(template_rows):
+        raise ValueError(
+            "The sequence has %d positions, but the template has %d. "
+            "Choose a template with the same length."
+            % (len(sequence), len(template_rows))
+        )
+
+    bases = [("U" if base.upper() == "T" else base.upper()) for base in sequence]
+    return [
+        {
+            "site": row.get("site"),
+            "base": bases[index],
+            "base_region": row.get("base_region"),
+        }
+        for index, row in enumerate(template_rows)
+    ]
+
+
 def validate_primer_annotations(nt_rows: List[Dict[str, Any]]) -> None:
     """Validate the manually assigned primer-site labels for a construct."""
     regions = [str(row.get("base_region", "")).strip() for row in nt_rows]

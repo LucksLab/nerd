@@ -29,10 +29,43 @@ let analysisCatalog = { fmod_runs: [], reaction_groups: [] };
 let timecourseSites = [];
 let selectedRunIds = [];
 let selectedKobsGroupIds = [];
+let modificationRateData = null;
 let kineticRateData = null;
+let timecourseData = null;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const PLOT_COLORS = ["#4338ca", "#0891b2", "#b45309"];
+
+function plotColor(index) {
+  if (index < PLOT_COLORS.length) return PLOT_COLORS[index];
+  return `hsl(${Math.round((index * 137.508) % 360)} 62% 42%)`;
+}
+
+function csvCell(value) {
+  if (value === null || value === undefined) return "";
+  const text = String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function exportCsv(filename, columns, rows) {
+  if (!rows.length) return;
+  const csv = [columns.join(","), ...rows.map((row) => columns.map((column) => csvCell(row[column])).join(","))].join("\r\n");
+  const url = URL.createObjectURL(new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function exportName(kind, valtype) {
+  const safeValtype = String(valtype || "data").replace(/[^a-z0-9_.-]+/gi, "-");
+  return `nerd-${kind}-${safeValtype}.csv`;
+}
+
+function setExportEnabled(id, enabled) {
+  $(id).disabled = !enabled;
+}
 
 /* ---------------------------------------------------------------- util */
 
@@ -630,6 +663,10 @@ function fmtValue(value, digits = 3) {
   return Number.isFinite(number) ? number.toLocaleString(undefined, { maximumFractionDigits: digits }) : "—";
 }
 
+function analysisBaseIsVisible(row) {
+  return !$("acOnlyToggle").checked || ["A", "C"].includes(String(row.base || "").toUpperCase());
+}
+
 function runConditions(run) {
   const parts = [run.construct_name, run.buffer_name];
   if (run.temperature !== null) parts.push(`${fmtValue(run.temperature)}°C`);
@@ -680,11 +717,6 @@ function renderFmodRunChoices() {
     input.type = "checkbox";
     input.checked = selectedRunIds.includes(run.fmod_run_id);
     input.addEventListener("change", () => {
-      if (input.checked && selectedRunIds.length >= 3) {
-        input.checked = false;
-        toast("Choose no more than three ShapeMapper runs.", "info");
-        return;
-      }
       selectedRunIds = input.checked
         ? [...selectedRunIds, run.fmod_run_id]
         : selectedRunIds.filter((id) => id !== run.fmod_run_id);
@@ -705,7 +737,7 @@ function renderFmodRunChoices() {
     item.append(input, content);
     list.appendChild(item);
   });
-  $("runSelectionCount").textContent = selectedRunIds.length ? `${selectedRunIds.length} of 3 selected` : "Choose up to 3";
+  $("runSelectionCount").textContent = selectedRunIds.length ? `${selectedRunIds.length} selected` : "Choose runs";
 }
 
 function updateModrateValtypes() {
@@ -729,15 +761,18 @@ function updateModrateValtypes() {
 async function loadModificationRates() {
   const valtype = $("modrateValtype").value;
   if (!selectedRunIds.length || !valtype) {
+    modificationRateData = null;
+    setExportEnabled("exportModrateBtn", false);
     $("modrateEmpty").classList.remove("hidden");
     $("modratePlotScroll").classList.add("hidden");
     return;
   }
   const query = new URLSearchParams({ valtype });
   selectedRunIds.forEach((id) => query.append("run_id", id));
+  setExportEnabled("exportModrateBtn", false);
   try {
-    const data = await api(`/api/analyze/modification-rates?${query}`);
-    renderModificationRatePlot(data);
+    modificationRateData = await api(`/api/analyze/modification-rates?${query}`);
+    renderModificationRatePlot(modificationRateData);
   } catch (e) { toast(e.message, "err"); }
 }
 
@@ -776,17 +811,21 @@ function renderLegend(container, items) {
 }
 
 function renderModificationRatePlot(data) {
-  const values = data.values || [];
+  const values = (data?.values || []).filter(analysisBaseIsVisible);
   const plot = $("modratePlot");
   plot.replaceChildren();
   if (!values.length) {
-    $("modrateEmpty").textContent = "No values matched the selected runs and data type.";
+    setExportEnabled("exportModrateBtn", false);
+    $("modrateEmpty").textContent = $("acOnlyToggle").checked
+      ? "No A/C values matched the selected runs and data type."
+      : "No values matched the selected runs and data type.";
     $("modrateEmpty").classList.remove("hidden");
     $("modratePlotScroll").classList.add("hidden");
     return;
   }
   $("modrateEmpty").classList.add("hidden");
   $("modratePlotScroll").classList.remove("hidden");
+  setExportEnabled("exportModrateBtn", true);
   const siteMap = new Map();
   values.forEach((row) => siteMap.set(row.site_base, row));
   const sites = [...siteMap.values()].sort((a, b) => Number(a.site) - Number(b.site) || a.nt_id - b.nt_id);
@@ -825,7 +864,7 @@ function renderModificationRatePlot(data) {
       const x = center - runs.length * barWidth / 2 + runIndex * barWidth;
       const rect = svgElement("rect", {
         x, y: Math.min(py, bottom), width: Math.max(1, barWidth - 1), height: Math.max(1, Math.abs(bottom - py)),
-        fill: PLOT_COLORS[runIndex], opacity: row.outlier ? .55 : .82,
+        fill: plotColor(runIndex), opacity: row.outlier ? .55 : .82,
       });
       addSvgTitle(rect, `${run.sample_name}\n${row.site_base} · ${data.valtype}: ${fmtValue(value, 6)}\nread depth: ${row.read_depth}${row.outlier ? "\noutlier" : ""}`);
       svg.appendChild(rect);
@@ -835,7 +874,7 @@ function renderModificationRatePlot(data) {
   });
   svgText(svg, data.valtype, 16, margin.top + innerHeight / 2, "plot-label", { "text-anchor": "middle", transform: `rotate(-90 16 ${margin.top + innerHeight / 2})` });
   plot.appendChild(svg);
-  renderLegend(plot, runs.map((run, index) => ({ label: run.sample_name, color: PLOT_COLORS[index] })));
+  renderLegend(plot, runs.map((run, index) => ({ label: run.sample_name, color: plotColor(index) })));
 }
 
 function kobsGroups() {
@@ -862,11 +901,6 @@ function renderKobsGroupChoices() {
     input.type = "checkbox";
     input.checked = selectedKobsGroupIds.includes(group.rg_id);
     input.addEventListener("change", () => {
-      if (input.checked && selectedKobsGroupIds.length >= 3) {
-        input.checked = false;
-        toast("Choose no more than three reaction groups.", "info");
-        return;
-      }
       selectedKobsGroupIds = input.checked
         ? [...selectedKobsGroupIds, group.rg_id]
         : selectedKobsGroupIds.filter((id) => id !== group.rg_id);
@@ -888,7 +922,7 @@ function renderKobsGroupChoices() {
     list.appendChild(item);
   });
   $("kobsSelectionCount").textContent = selectedKobsGroupIds.length
-    ? `${selectedKobsGroupIds.length} of 3 selected` : "Choose up to 3";
+    ? `${selectedKobsGroupIds.length} selected` : "Choose groups";
 }
 
 function updateKobsValtypes() {
@@ -913,15 +947,17 @@ async function loadKineticRates() {
   const valtype = $("kobsValtype").value;
   if (!selectedKobsGroupIds.length || !valtype) {
     kineticRateData = null;
+    setExportEnabled("exportKobsBtn", false);
     $("kobsEmpty").textContent = selectedKobsGroupIds.length
       ? "The selected reaction groups do not share a fitted data type."
-      : "Choose one to three reaction groups with stored time-course fits.";
+      : "Choose one or more reaction groups with stored time-course fits.";
     $("kobsEmpty").classList.remove("hidden");
     $("kobsPlotScroll").classList.add("hidden");
     return;
   }
   const query = new URLSearchParams({ valtype });
   selectedKobsGroupIds.forEach((id) => query.append("rg_id", id));
+  setExportEnabled("exportKobsBtn", false);
   try {
     kineticRateData = await api(`/api/analyze/kinetic-rates?${query}`);
     renderKineticRatePlot(kineticRateData);
@@ -929,17 +965,21 @@ async function loadKineticRates() {
 }
 
 function renderKineticRatePlot(data) {
-  const values = data?.values || [];
+  const values = (data?.values || []).filter(analysisBaseIsVisible);
   const plot = $("kobsPlot");
   plot.replaceChildren();
   if (!values.length) {
-    $("kobsEmpty").textContent = "No stored k_obs values matched the selected reaction groups and data type.";
+    setExportEnabled("exportKobsBtn", false);
+    $("kobsEmpty").textContent = $("acOnlyToggle").checked
+      ? "No stored A/C k_obs values matched the selected reaction groups and data type."
+      : "No stored k_obs values matched the selected reaction groups and data type.";
     $("kobsEmpty").classList.remove("hidden");
     $("kobsPlotScroll").classList.add("hidden");
     return;
   }
   $("kobsEmpty").classList.add("hidden");
   $("kobsPlotScroll").classList.remove("hidden");
+  setExportEnabled("exportKobsBtn", true);
   const logged = $("logKobsToggle").checked;
   const thresholdInput = Number($("kobsR2Threshold").value);
   const r2Threshold = Number.isFinite(thresholdInput) ? Math.min(1, Math.max(0, thresholdInput)) : .3;
@@ -986,7 +1026,7 @@ function renderKineticRatePlot(data) {
       const lowR2 = row.r2 === null || row.r2 === undefined || Number(row.r2) < r2Threshold;
       const rect = svgElement("rect", {
         x, y: Math.min(py, bottom), width: Math.max(1, barWidth - 1), height: Math.max(1, Math.abs(bottom - py)),
-        fill: PLOT_COLORS[groupIndex], opacity: lowR2 ? .1 : .82,
+        fill: plotColor(groupIndex), opacity: lowR2 ? .1 : .82,
       });
       addSvgTitle(rect, `${group.rg_label || `Reaction group ${group.rg_id}`}\n${row.site_base} · ${axisLabel}: ${fmtValue(value, 6)}\nk_obs: ${fmtValue(row.kobs, 6)} · R²: ${fmtValue(row.r2)}${lowR2 ? ` (below ${fmtValue(r2Threshold)})` : ""}\nfit ${row.fit_run_id} · ${row.fit_kind}${row.model ? ` · ${row.model}` : ""}`);
       svg.appendChild(rect);
@@ -996,7 +1036,7 @@ function renderKineticRatePlot(data) {
   });
   svgText(svg, axisLabel, 16, margin.top + innerHeight / 2, "plot-label", { "text-anchor": "middle", transform: `rotate(-90 16 ${margin.top + innerHeight / 2})` });
   plot.appendChild(svg);
-  renderLegend(plot, groups.map((group, index) => ({ label: group.rg_label || `Reaction group ${group.rg_id}`, color: PLOT_COLORS[index] })));
+  renderLegend(plot, groups.map((group, index) => ({ label: group.rg_label || `Reaction group ${group.rg_id}`, color: plotColor(index) })));
 }
 
 document.querySelectorAll("[data-analysis-view]").forEach((button) => {
@@ -1006,10 +1046,19 @@ document.querySelectorAll("[data-analysis-view]").forEach((button) => {
     button.classList.add("active");
     $(button.dataset.analysisView).classList.add("active");
     if (button.dataset.analysisView === "timecourseView") loadTimecourseData();
+    if (button.dataset.analysisView === "kobsView") loadKineticRates();
   });
 });
 
 $("modrateValtype").addEventListener("change", loadModificationRates);
+$("kobsValtype").addEventListener("change", loadKineticRates);
+$("logKobsToggle").addEventListener("change", () => renderKineticRatePlot(kineticRateData));
+$("kobsR2Threshold").addEventListener("input", () => renderKineticRatePlot(kineticRateData));
+$("acOnlyToggle").addEventListener("change", () => {
+  if (modificationRateData) renderModificationRatePlot(modificationRateData);
+  if (kineticRateData) renderKineticRatePlot(kineticRateData);
+  if (timecourseSites.length) renderTimecourseSiteSelectors();
+});
 
 async function selectReactionGroup() {
   const rgId = Number($("reactionGroupSelect").value);
@@ -1034,7 +1083,9 @@ async function selectReactionGroup() {
 function renderTimecourseSiteSelectors() {
   const count = Number($("timecoursePlotCount").value);
   const valtype = $("timecourseValtype").value;
-  const available = timecourseSites.filter((site) => site.valtypes.includes(valtype));
+  const available = timecourseSites.filter((site) =>
+    site.valtypes.includes(valtype) && analysisBaseIsVisible(site)
+  );
   const container = $("timecourseSiteSelectors");
   const previous = [...container.querySelectorAll("select")].map((select) => select.value);
   container.replaceChildren();
@@ -1060,15 +1111,18 @@ async function loadTimecourseData() {
     .map((select) => select.value).filter(Boolean);
   const uniqueNtIds = [...new Set(ntIds)];
   if (!rgId || !valtype || !uniqueNtIds.length) {
+    timecourseData = null;
+    setExportEnabled("exportTimecourseBtn", false);
     $("timecourseEmpty").classList.remove("hidden");
     $("timecoursePlots").classList.add("hidden");
     return;
   }
   const query = new URLSearchParams({ rg_id: rgId, valtype, include_fits: $("showTimecourseFits").checked });
   uniqueNtIds.forEach((id) => query.append("nt_id", id));
+  setExportEnabled("exportTimecourseBtn", false);
   try {
-    const data = await api(`/api/analyze/timecourse?${query}`);
-    renderTimecoursePlots(data);
+    timecourseData = await api(`/api/analyze/timecourse?${query}`);
+    renderTimecoursePlots(timecourseData);
   } catch (e) { toast(e.message, "err"); }
 }
 
@@ -1076,6 +1130,7 @@ function renderTimecoursePlots(data) {
   const container = $("timecoursePlots");
   container.replaceChildren();
   if (!(data.series || []).length) {
+    setExportEnabled("exportTimecourseBtn", false);
     $("timecourseEmpty").textContent = "No observations matched the selected group, sites, and data type.";
     $("timecourseEmpty").classList.remove("hidden");
     container.classList.add("hidden");
@@ -1083,6 +1138,7 @@ function renderTimecoursePlots(data) {
   }
   $("timecourseEmpty").classList.add("hidden");
   container.classList.remove("hidden");
+  setExportEnabled("exportTimecourseBtn", true);
   data.series.forEach((series) => renderTimecoursePlot(container, series, data.valtype));
 }
 
@@ -1158,6 +1214,72 @@ $("reactionGroupSelect").addEventListener("change", selectReactionGroup);
 $("timecourseValtype").addEventListener("change", renderTimecourseSiteSelectors);
 $("timecoursePlotCount").addEventListener("change", renderTimecourseSiteSelectors);
 $("showTimecourseFits").addEventListener("change", loadTimecourseData);
+
+$("exportModrateBtn").addEventListener("click", () => {
+  const rows = (modificationRateData?.values || []).filter(analysisBaseIsVisible)
+    .map((row) => ({ ...row, valtype: modificationRateData.valtype }));
+  exportCsv(
+    exportName("raw-reactivities", modificationRateData?.valtype),
+    ["fmod_run_id", "sample_name", "nt_id", "site", "base", "site_base", "valtype", "fmod_val", "read_depth", "outlier", "source_rows"],
+    rows,
+  );
+});
+
+$("exportKobsBtn").addEventListener("click", () => {
+  const logged = $("logKobsToggle").checked;
+  const thresholdInput = Number($("kobsR2Threshold").value);
+  const threshold = Number.isFinite(thresholdInput) ? Math.min(1, Math.max(0, thresholdInput)) : .3;
+  const rows = (kineticRateData?.values || []).filter(analysisBaseIsVisible).map((row) => ({
+    ...row,
+    valtype: kineticRateData.valtype,
+    display_scale: logged ? "-ln(k_obs)" : "k_obs",
+    display_value: logged ? -Number(row.log_kobs) : Number(row.kobs),
+    r2_threshold: threshold,
+    below_r2_threshold: row.r2 === null || row.r2 === undefined || Number(row.r2) < threshold,
+  }));
+  exportCsv(
+    exportName("fitted-rates", kineticRateData?.valtype),
+    ["rg_id", "rg_label", "fit_run_id", "fit_kind", "model", "created_at", "nt_id", "site", "base", "site_base", "valtype", "log_kobs", "kobs", "log_kdeg", "kdeg", "r2", "display_scale", "display_value", "r2_threshold", "below_r2_threshold"],
+    rows,
+  );
+});
+
+$("exportTimecourseBtn").addEventListener("click", () => {
+  const rows = [];
+  (timecourseData?.series || []).forEach((series) => {
+    const fitFields = series.fit ? {
+      fit_run_id: series.fit.fit_run_id,
+      fit_kind: series.fit.fit_kind,
+      model: series.fit.model,
+      fit_created_at: series.fit.created_at,
+      r2: series.fit.r2,
+    } : {};
+    (series.observations || []).forEach((observation) => rows.push({
+      record_type: "observation",
+      rg_id: timecourseData.rg_id,
+      valtype: timecourseData.valtype,
+      ...fitFields,
+      ...observation,
+    }));
+    (series.fit?.curve || []).forEach((point) => rows.push({
+      record_type: "fit_curve",
+      rg_id: timecourseData.rg_id,
+      valtype: timecourseData.valtype,
+      nt_id: series.nt_id,
+      site: series.site,
+      base: series.base,
+      site_base: series.site_base,
+      ...fitFields,
+      curve_time: point.time,
+      curve_fmod_val: point.fmod_val,
+    }));
+  });
+  exportCsv(
+    exportName("time-courses", timecourseData?.valtype),
+    ["record_type", "rg_id", "valtype", "nt_id", "site", "base", "site_base", "reaction_id", "sample_name", "treated", "reaction_time", "plot_time", "temperature", "replicate", "fmod_run_id", "fmod_val", "read_depth", "outlier", "to_drop", "fit_run_id", "fit_kind", "model", "fit_created_at", "r2", "curve_time", "curve_fmod_val"],
+    rows,
+  );
+});
 
 /* ---------------------------------------------------------------- panels */
 
@@ -1722,6 +1844,11 @@ function renderStaged() {
 /* ---------------------------------------------------------------- wizard */
 
 let currentEntity = { type: null, ntRows: null };
+const NT_FIELDS = ["site", "base", "base_region"];
+let ntSelection = null;
+let ntSelecting = false;
+let ntFillDrag = null;
+let ntDetectionRevision = 0;
 
 function startQueue() {
   if (!queue.length) return;
@@ -1750,6 +1877,7 @@ function entityWizardDefaults(type, prefill, existing) {
 }
 
 function openEntityWizard(type, prefill, existing) {
+  ntDetectionRevision += 1;
   currentEntity = { type, ntRows: existing?.nt_rows || null };
   const fields = entitySchema.fields[type] || [];
   const defaults = entityWizardDefaults(type, prefill, existing);
@@ -1786,7 +1914,7 @@ function openEntityWizard(type, prefill, existing) {
   renderNtGrid(currentEntity.ntRows || []);
   if (isConstruct) {
     const sequenceInput = container.querySelector('[name="sequence"]');
-    const detectRegions = debounce(async () => {
+    const detectRegions = debounce(async (revision) => {
       const sequence = sequenceInput?.value.trim() || "";
       if (!sequence) {
         renderNtGrid([]);
@@ -1794,7 +1922,8 @@ function openEntityWizard(type, prefill, existing) {
       }
       try {
         const data = await api(`/api/constructs/nt_rows?sequence=${encodeURIComponent(sequence)}`);
-        if (currentEntity.type === "construct" && sequenceInput.value.trim() === sequence) {
+        if (currentEntity.type === "construct" && sequenceInput.value.trim() === sequence
+            && revision === ntDetectionRevision) {
           renderNtGrid(data.nt_rows);
           $("entityError").textContent = "";
         }
@@ -1803,48 +1932,214 @@ function openEntityWizard(type, prefill, existing) {
         // the validation message if the sequence is left in that state.
       }
     }, 250);
-    sequenceInput?.addEventListener("input", detectRegions);
+    sequenceInput?.addEventListener("input", () => {
+      ntDetectionRevision += 1;
+      detectRegions(ntDetectionRevision);
+    });
   }
   $("entityModal").showModal();
 }
 
-function renderNtGrid(rows) {
+function normalizedNtSelection() {
+  if (!ntSelection) return null;
+  return {
+    top: Math.min(ntSelection.anchor.row, ntSelection.focus.row),
+    bottom: Math.max(ntSelection.anchor.row, ntSelection.focus.row),
+    left: Math.min(ntSelection.anchor.col, ntSelection.focus.col),
+    right: Math.max(ntSelection.anchor.col, ntSelection.focus.col),
+  };
+}
+
+function paintNtSelection() {
+  const range = normalizedNtSelection();
+  document.querySelectorAll("#ntGrid td").forEach((cell) => {
+    const row = Number(cell.dataset.row);
+    const col = Number(cell.dataset.col);
+    const selected = range && row >= range.top && row <= range.bottom
+      && col >= range.left && col <= range.right;
+    cell.classList.toggle("nt-selected", Boolean(selected));
+    cell.classList.remove("nt-selection-edge");
+    cell.querySelector(".nt-fill-handle")?.remove();
+  });
+  if (!range) return;
+  const edge = document.querySelector(`#ntGrid td[data-row="${range.bottom}"][data-col="${range.right}"]`);
+  if (edge) {
+    edge.classList.add("nt-selection-edge");
+    const handle = document.createElement("span");
+    handle.className = "nt-fill-handle";
+    handle.title = "Drag to fill, or double-click to fill to the bottom";
+    handle.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      ntFillDrag = { source: { ...range }, targetRow: range.bottom };
+    });
+    handle.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      ntFillDrag = {
+        source: { ...range },
+        targetRow: currentEntity.ntRows.length - 1,
+      };
+      applyNtFill();
+    });
+    edge.appendChild(handle);
+  }
+}
+
+function selectNtCell(row, col, extend = false) {
+  if (!extend || !ntSelection) ntSelection = { anchor: { row, col }, focus: { row, col } };
+  else ntSelection.focus = { row, col };
+  paintNtSelection();
+}
+
+function ntFillValue(field, values, offset) {
+  if (field === "site" && values.length >= 2 && values.every((value) => Number.isFinite(Number(value)))) {
+    const step = (Number(values[values.length - 1]) - Number(values[0])) / (values.length - 1);
+    return String(Number(values[values.length - 1]) + (step * offset));
+  }
+  return String(values[(offset - 1) % values.length] ?? "");
+}
+
+function applyNtFill() {
+  if (!ntFillDrag || !currentEntity.ntRows?.length) return;
+  const { source, targetRow } = ntFillDrag;
+  ntFillDrag = null;
+  if (targetRow === source.bottom) return;
+
+  if (targetRow > source.bottom) {
+    for (let row = source.bottom + 1; row <= targetRow; row += 1) {
+      for (let col = source.left; col <= source.right; col += 1) {
+        const values = currentEntity.ntRows.slice(source.top, source.bottom + 1)
+          .map((item) => item[NT_FIELDS[col]]);
+        currentEntity.ntRows[row][NT_FIELDS[col]] = ntFillValue(
+          NT_FIELDS[col], values, row - source.bottom,
+        );
+      }
+    }
+    ntSelection = {
+      anchor: { row: source.top, col: source.left },
+      focus: { row: targetRow, col: source.right },
+    };
+  } else if (targetRow < source.top) {
+    for (let row = source.top - 1; row >= targetRow; row -= 1) {
+      for (let col = source.left; col <= source.right; col += 1) {
+        const field = NT_FIELDS[col];
+        const values = currentEntity.ntRows.slice(source.top, source.bottom + 1)
+          .map((item) => item[field]);
+        if (field === "site" && values.length >= 2 && values.every((value) => Number.isFinite(Number(value)))) {
+          const step = (Number(values[values.length - 1]) - Number(values[0])) / (values.length - 1);
+          currentEntity.ntRows[row][field] = String(Number(values[0]) - (step * (source.top - row)));
+        } else {
+          const index = values.length - 1 - ((source.top - row - 1) % values.length);
+          currentEntity.ntRows[row][field] = String(values[index] ?? "");
+        }
+      }
+    }
+    ntSelection = {
+      anchor: { row: targetRow, col: source.left },
+      focus: { row: source.bottom, col: source.right },
+    };
+  }
+  renderNtGrid(currentEntity.ntRows, true);
+}
+
+function renderNtGrid(rows, keepSelection = false) {
   currentEntity.ntRows = rows;
+  if (!keepSelection) ntSelection = null;
   const body = document.querySelector("#ntGrid tbody");
   body.innerHTML = "";
   rows.forEach((row, index) => {
     const tr = document.createElement("tr");
-    ["site", "base", "base_region"].forEach((field) => {
+    NT_FIELDS.forEach((field, colIndex) => {
       const td = document.createElement("td");
+      td.dataset.row = index;
+      td.dataset.col = colIndex;
       const input = document.createElement("input");
       input.value = row[field] ?? "";
-      input.addEventListener("change", () => { rows[index][field] = input.value; });
+      input.addEventListener("input", () => { rows[index][field] = input.value; });
+      td.addEventListener("mousedown", (event) => {
+        if (event.target.classList.contains("nt-fill-handle")) return;
+        ntSelecting = true;
+        selectNtCell(index, colIndex, event.shiftKey);
+      });
+      td.addEventListener("mouseenter", () => {
+        if (ntFillDrag) {
+          ntFillDrag.targetRow = index;
+        } else if (ntSelecting && ntSelection) {
+          ntSelection.focus = { row: index, col: colIndex };
+          paintNtSelection();
+        }
+      });
       td.appendChild(input);
       tr.appendChild(td);
     });
     body.appendChild(tr);
   });
+  paintNtSelection();
   $("ntSummary").textContent = rows.length
     ? `${rows.length} positions (${rows[0].site} … ${rows[rows.length - 1].site})`
     : "no numbering yet — it will default to 1-based";
 }
 
+document.addEventListener("mouseup", () => {
+  ntSelecting = false;
+  applyNtFill();
+});
+
+$("ntGridWrap").addEventListener("copy", (event) => {
+  const range = normalizedNtSelection();
+  if (!range) return;
+  const text = [];
+  for (let row = range.top; row <= range.bottom; row += 1) {
+    text.push(NT_FIELDS.slice(range.left, range.right + 1)
+      .map((field) => currentEntity.ntRows[row][field] ?? "").join("\t"));
+  }
+  event.clipboardData.setData("text/plain", text.join("\n"));
+  event.preventDefault();
+});
+
+$("ntGridWrap").addEventListener("paste", (event) => {
+  const range = normalizedNtSelection();
+  if (!range) return;
+  const pasted = event.clipboardData.getData("text/plain").replace(/\r/g, "")
+    .replace(/\n$/, "").split("\n").map((line) => line.split("\t"));
+  pasted.forEach((values, rowOffset) => {
+    const row = range.top + rowOffset;
+    if (row >= currentEntity.ntRows.length) return;
+    values.forEach((value, colOffset) => {
+      const col = range.left + colOffset;
+      if (col < NT_FIELDS.length) currentEntity.ntRows[row][NT_FIELDS[col]] = value;
+    });
+  });
+  const bottom = Math.min(currentEntity.ntRows.length - 1, range.top + pasted.length - 1);
+  const right = Math.min(NT_FIELDS.length - 1, range.left + Math.max(...pasted.map((row) => row.length)) - 1);
+  ntSelection = { anchor: { row: range.top, col: range.left }, focus: { row: bottom, col: right } };
+  renderNtGrid(currentEntity.ntRows, true);
+  event.preventDefault();
+});
+
 $("ntDefaultBtn").addEventListener("click", async () => {
+  const revision = ++ntDetectionRevision;
   const sequence = $("entityForm").querySelector('[name="sequence"]')?.value.trim();
   if (!sequence) return toast("Enter the sequence first.", "err");
   try {
     const data = await api(`/api/constructs/nt_rows?sequence=${encodeURIComponent(sequence)}`);
+    if (revision !== ntDetectionRevision) return;
     renderNtGrid(data.nt_rows);
   } catch (e) { toast(e.message, "err"); }
 });
 
 $("ntCopyBtn").addEventListener("click", async () => {
+  const revision = ++ntDetectionRevision;
   const from = $("ntCopyFrom").value.trim();
   if (!from) return;
+  const sequence = $("entityForm").querySelector('[name="sequence"]')?.value.trim();
+  if (!sequence) return toast("Enter the sequence first.", "err");
   try {
-    const data = await api(`/api/constructs/nt_rows?disp_name=${encodeURIComponent(from)}`);
+    const data = await api(`/api/constructs/nt_rows?disp_name=${encodeURIComponent(from)}&sequence=${encodeURIComponent(sequence)}`);
+    if (revision !== ntDetectionRevision) return;
     renderNtGrid(data.nt_rows);
-    toast(`Copied ${data.nt_rows.length} positions from ${from} (${data.source}).`, "ok");
+    toast(`Copied numbering and primer-site labels from ${from}; kept bases from the sequence above.`, "ok");
   } catch (e) { toast(e.message, "err"); }
 });
 

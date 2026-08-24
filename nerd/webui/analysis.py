@@ -111,8 +111,8 @@ def analysis_catalog(conn: Any) -> Dict[str, Any]:
 def kinetic_rates(conn: Any, rg_ids: Sequence[int], valtype: str) -> Dict[str, Any]:
     """Return the preferred stored k_obs fit for each group and nucleotide."""
     selected = list(dict.fromkeys(int(rg_id) for rg_id in rg_ids))
-    if not 1 <= len(selected) <= 3:
-        raise ValueError("Choose between one and three reaction groups.")
+    if not selected:
+        raise ValueError("Choose at least one reaction group.")
     normalized_valtype = str(valtype or "").strip()
     if not normalized_valtype:
         raise ValueError("Choose a data type.")
@@ -138,7 +138,7 @@ def kinetic_rates(conn: Any, rg_ids: Sequence[int], valtype: str) -> Dict[str, A
         JOIN meta_nucleotides mn ON mn.id = r.nt_id
         WHERE r.rg_id IN ({placeholders})
           AND (r.valtype = ? OR r.valtype IS NULL)
-          AND p.param_name IN ('kobs', 'log_kobs', 'diag:r2')
+          AND p.param_name IN ('kobs', 'log_kobs', 'kdeg', 'log_kdeg', 'diag:r2')
           AND p.param_numeric IS NOT NULL
         ORDER BY mn.site, mn.id, r.rg_id, r.id DESC
         """,
@@ -182,6 +182,21 @@ def kinetic_rates(conn: Any, rg_ids: Sequence[int], valtype: str) -> Dict[str, A
         fit["log_kobs"] = log_kobs
         fit["kobs"] = kobs
         try:
+            log_kdeg = float(params["log_kdeg"]) if "log_kdeg" in params else None
+            kdeg = float(params["kdeg"]) if "kdeg" in params else None
+            if log_kdeg is None and kdeg is not None and kdeg > 0:
+                log_kdeg = math.log(kdeg)
+            if kdeg is None and log_kdeg is not None:
+                kdeg = math.exp(log_kdeg)
+            if not (math.isfinite(float(log_kdeg)) and math.isfinite(float(kdeg)) and kdeg > 0):
+                log_kdeg = None
+                kdeg = None
+        except (TypeError, ValueError, OverflowError):
+            log_kdeg = None
+            kdeg = None
+        fit["log_kdeg"] = log_kdeg
+        fit["kdeg"] = kdeg
+        try:
             r2 = float(params["diag:r2"]) if "diag:r2" in params else None
             fit["r2"] = r2 if r2 is not None and math.isfinite(r2) else None
         except (TypeError, ValueError):
@@ -197,8 +212,8 @@ def kinetic_rates(conn: Any, rg_ids: Sequence[int], valtype: str) -> Dict[str, A
 
 def modification_rates(conn: Any, run_ids: Sequence[int], valtype: str) -> Dict[str, Any]:
     selected = list(dict.fromkeys(int(run_id) for run_id in run_ids))
-    if not 1 <= len(selected) <= 3:
-        raise ValueError("Choose between one and three ShapeMapper runs.")
+    if not selected:
+        raise ValueError("Choose at least one ShapeMapper run.")
     normalized_valtype = str(valtype or "").strip()
     if not normalized_valtype:
         raise ValueError("Choose a data type.")
