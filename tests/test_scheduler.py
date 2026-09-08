@@ -346,8 +346,8 @@ def test_mut_count_plans_one_unit_per_reaction_group_without_duplicate_samples(
 
     task = MutCountTask()
     groups = {
-        "first": (11, "first", ["sample-a", "sample-b"]),
-        "second": (12, "second", ["sample-c"]),
+        "first": (11, "first", [(1, "sample-a"), (2, "sample-b")]),
+        "second": (12, "second", [(3, "sample-c")]),
     }
     monkeypatch.setattr(task, "_fetch_reaction_group_info", lambda ctx, value: groups[value])
     cfg = {

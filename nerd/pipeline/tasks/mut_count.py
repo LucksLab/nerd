@@ -68,7 +68,7 @@ class MutCountTask(Task):
             if info is None:
                 continue
             rg_id, rg_label, samples = info
-            grouped_samples.update(str(sample) for sample in samples)
+            grouped_samples.update(str(sample_name) for _, sample_name in samples)
             unit_cfg = _clone_config()
             block = dict(unit_cfg.get(self.name) or {})
             # Explicit samples are scheduled once in a separate residual unit below.
@@ -138,8 +138,14 @@ class MutCountTask(Task):
         for name in resolved_samples:
             if not name:
                 continue
+            resolved_ids = inputs.get("_resolved_sample_ids_by_name") or {}
+            resolved_id = (
+                resolved_ids.get(name) if isinstance(resolved_ids, dict) else None
+            )
+            sample_filter = "ss.id = ?" if resolved_id is not None else "ss.sample_name = ?"
+            sample_value = int(resolved_id) if resolved_id is not None else name
             row = ctx.db.execute(
-                """
+                f"""
                 SELECT ss.id AS sample_id,
                        ss.sample_name AS sample_name,
                        pr.rg_id AS rg_id,
@@ -147,10 +153,10 @@ class MutCountTask(Task):
                 FROM sequencing_samples ss
                 LEFT JOIN probe_reactions pr ON pr.s_id = ss.id
                 LEFT JOIN probe_reaction_groups rg ON rg.rg_id = pr.rg_id
-                WHERE ss.sample_name = ?
+                WHERE {sample_filter}
                 LIMIT 1
                 """,
-                (name,),
+                (sample_value,),
             ).fetchone()
             if row:
                 sample_id = int(row["sample_id"])
@@ -257,7 +263,9 @@ class MutCountTask(Task):
         if isinstance(cache, dict) and "samples" in cache:
             samples = list(cache.get("samples") or [])
             rg_map = dict(cache.get("reaction_groups") or {})
+            sample_ids_by_name = dict(cache.get("sample_ids_by_name") or {})
             inputs["samples"] = samples
+            inputs["_resolved_sample_ids_by_name"] = sample_ids_by_name
             return samples, rg_map
 
         configured_samples: List[str] = []
@@ -269,7 +277,7 @@ class MutCountTask(Task):
                 continue
             configured_samples.append(text_val)
 
-        reaction_samples: List[str] = []
+        reaction_samples: List[Tuple[int, str]] = []
         rg_map: Dict[int, Optional[str]] = {}
         reaction_groups_cfg = inputs.get("reaction_group")
         if reaction_groups_cfg:
@@ -287,7 +295,18 @@ class MutCountTask(Task):
                 reaction_samples.extend(samples)
                 log.info("Resolved reaction_group %s to %d sample(s).", rg_value, len(samples))
 
-        combined = configured_samples + reaction_samples
+        sample_ids_by_name: Dict[str, int] = {}
+        for sample_id, sample_name in reaction_samples:
+            previous_id = sample_ids_by_name.get(sample_name)
+            if previous_id is not None and previous_id != sample_id:
+                raise ValueError(
+                    "Sample name %r refers to multiple sample ids in the selected "
+                    "reaction group(s): %s and %s."
+                    % (sample_name, previous_id, sample_id)
+                )
+            sample_ids_by_name[sample_name] = sample_id
+
+        combined = configured_samples + [name for _, name in reaction_samples]
         seen: Set[str] = set()
         sample_names: List[str] = []
         for name in combined:
@@ -299,16 +318,18 @@ class MutCountTask(Task):
         inputs["_scope_resolution_cache"] = {
             "samples": list(sample_names),
             "reaction_groups": dict(rg_map),
+            "sample_ids_by_name": dict(sample_ids_by_name),
         }
         inputs["samples"] = sample_names
         inputs["_resolved_reaction_groups"] = dict(rg_map)
+        inputs["_resolved_sample_ids_by_name"] = dict(sample_ids_by_name)
         return sample_names, rg_map
 
     def _fetch_reaction_group_info(
         self,
         ctx: TaskContext,
         rg_value: Any,
-    ) -> Optional[Tuple[int, Optional[str], List[str]]]:
+    ) -> Optional[Tuple[int, Optional[str], List[Tuple[int, str]]]]:
         if rg_value in (None, ""):
             return None
         rg_id: Optional[int] = None
@@ -342,7 +363,7 @@ class MutCountTask(Task):
 
         rows = ctx.db.execute(
             """
-            SELECT ss.sample_name
+            SELECT ss.id, ss.sample_name
             FROM probe_reactions pr
             JOIN sequencing_samples ss ON ss.id = pr.s_id
             WHERE pr.rg_id = ?
@@ -351,12 +372,48 @@ class MutCountTask(Task):
             (rg_id,),
         ).fetchall()
         samples = [
-            row["sample_name"] if hasattr(row, "keys") else row[0]
+            (
+                int(row["id"] if hasattr(row, "keys") else row[0]),
+                str(row["sample_name"] if hasattr(row, "keys") else row[1]),
+            )
             for row in rows
         ]
         if not samples:
             raise ValueError(f"Reaction group '{rg_value}' has no associated samples.")
         return rg_id, rg_label, samples
+
+    @staticmethod
+    def _sample_row_for_name(ctx: TaskContext, inputs: Dict[str, Any], name: str):
+        """Resolve a sample by the reaction group's stable id when available."""
+        resolved_ids = inputs.get("_resolved_sample_ids_by_name") or {}
+        sample_id = resolved_ids.get(name) if isinstance(resolved_ids, dict) else None
+        if sample_id is not None:
+            row = ctx.db.execute(
+                "SELECT * FROM sequencing_samples WHERE id = ?",
+                (int(sample_id),),
+            ).fetchone()
+            if row is None:
+                raise ValueError(
+                    "Resolved sample id %s for %r is missing from sequencing_samples."
+                    % (sample_id, name)
+                )
+            row_name = row["sample_name"] if hasattr(row, "keys") else row[2]
+            if str(row_name) != name:
+                raise ValueError(
+                    "Resolved sample id %s belongs to %r, not %r."
+                    % (sample_id, row_name, name)
+                )
+            return row
+
+        rows = ctx.db.execute(
+            "SELECT * FROM sequencing_samples WHERE sample_name = ?",
+            (name,),
+        ).fetchall()
+        if not rows:
+            return None
+        if len(rows) > 1:
+            raise ValueError(f"Sample name '{name}' is ambiguous across sequencing runs.")
+        return rows[0]
 
     def prepare(self, cfg: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if self.name not in cfg:
@@ -441,17 +498,6 @@ class MutCountTask(Task):
             ).fetchall()
             return [dict(r) for r in rows]
 
-        def _sample_row_by_name(name: str):
-            rows = ctx.db.execute(
-                "SELECT * FROM sequencing_samples WHERE sample_name = ?",
-                (name,),
-            ).fetchall()
-            if not rows:
-                return None
-            if len(rows) > 1:
-                raise ValueError(f"Sample name '{name}' is ambiguous across sequencing runs.")
-            return rows[0]
-
         def _derived_by_child(child_name: str):
             row = ctx.db.execute(
                 "SELECT * FROM sequencing_derived_samples WHERE child_name = ?",
@@ -488,7 +534,7 @@ class MutCountTask(Task):
                         "Sample names used in external commands may contain only letters, numbers, '.', '_', and '-'."
                     )
                 _q = lambda value: _shlex.quote(str(value))
-                parent_srow = _sample_row_by_name(name)
+                parent_srow = self._sample_row_for_name(ctx, inputs, name)
                 is_derived = False
                 derived_row = None
                 if parent_srow is None:
@@ -895,10 +941,7 @@ class MutCountTask(Task):
                 except Exception:
                     pass
 
-            sample_row = ctx.db.execute(
-                "SELECT id FROM sequencing_samples WHERE sample_name = ?",
-                (name,),
-            ).fetchone()
+            sample_row = self._sample_row_for_name(ctx, inputs, name)
             if sample_row is None:
                 log.error("Sample %s not found in sequencing_samples; skipping ingestion.", name)
                 continue

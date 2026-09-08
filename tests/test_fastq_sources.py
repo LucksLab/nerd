@@ -129,6 +129,36 @@ def test_remote_fastqs_are_used_in_place_without_stage_in(tmp_path):
     assert task.stage_in_pairs() == []
 
 
+def test_reaction_group_uses_sample_id_when_name_exists_in_multiple_runs(tmp_path):
+    ctx = _remote_mut_count_context(tmp_path)
+    ctx.db.execute(
+        "INSERT INTO sequencing_runs "
+        "(run_name, date, sequencer, run_manager) "
+        "VALUES ('other-run', '20260102', 'miseq', 'user')"
+    )
+    ctx.db.execute(
+        "INSERT INTO sequencing_samples "
+        "(seqrun_id, sample_name, fq_source, fq_dir, r1_file, r2_file) "
+        "VALUES (2, 'sample', 'remote_hpc:quest', '/projects/wrong', "
+        "'wrong_R1.fastq.gz', 'wrong_R2.fastq.gz')"
+    )
+    ctx.db.commit()
+
+    task = MutCountTask()
+    inputs = {
+        "samples": [], "reaction_group": 1, "plugin": "shapemapper",
+        "dry_run": True, "tool": {},
+    }
+    scope = task.resolve_scope(ctx, inputs)
+    command = task.command(ctx, inputs, {})
+
+    assert [(member.kind, member.ref_id) for member in scope.members] == [
+        ("rg", 1), ("sample", 1),
+    ]
+    assert "/projects/run/sample_R1.fastq.gz" in command
+    assert "/projects/wrong/wrong_R1.fastq.gz" not in command
+
+
 def test_remote_fastqs_require_matching_executor_alias(tmp_path):
     ctx = _remote_mut_count_context(tmp_path)
     ctx.executor_profile = "other"
