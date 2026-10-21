@@ -57,6 +57,8 @@ class TokenSpec:
 
     def apply(self, raw: str) -> Any:
         text = (raw or "").strip()
+        if self.maps_to == "replicate":
+            text = re.sub(r"^rep(?=[0-9])", "", text, flags=re.IGNORECASE)
         mapped = self.value_map.get(text.lower())
         if mapped is not None:
             text = mapped

@@ -4,6 +4,7 @@ Task for running probe timecourse fitting engines.
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import sqlite3
@@ -20,7 +21,7 @@ from nerd.pipeline.plugins.timecourse import (
     ROUND_FREE,
     ROUND_GLOBAL,
 )
-from nerd.pipeline.tasks.base import Task, TaskContext, TaskScope, TaskScopeMember
+from nerd.pipeline.tasks.base import Task, TaskContext, TaskScope, TaskScopeMember, WorkUnit
 from nerd.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -60,25 +61,15 @@ class ProbeTimecourseTask(Task):
         global_metadata = block.get("global_metadata")
         block["global_metadata"] = dict(global_metadata or {})
 
-        rg_inputs = block.get("rg_ids") or block.get("reaction_groups") or block.get("rg")
-        if not rg_inputs:
-            raise ValueError("probe_timecourse requires 'rg_ids' (list of reaction group IDs).")
-
-        rg_ids: List[int] = []
-        if isinstance(rg_inputs, (list, tuple, set)):
-            sources = rg_inputs
-        else:
-            sources = [rg_inputs]
-        for raw in sources:
-            if raw in (None, ""):
-                continue
-            try:
-                rg_ids.append(int(raw))
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"Invalid rg_id '{raw}' in probe_timecourse config.") from exc
-        if not rg_ids:
-            raise ValueError("probe_timecourse config resolved to zero reaction group IDs.")
-        block["rg_ids"] = rg_ids
+        rg_inputs = (block.get("rg_ids") or block.get("reaction_group_ids")
+                     or block.get("reaction_groups") or block.get("rg"))
+        if not rg_inputs and not block.get("missing_only"):
+            raise ValueError("probe_timecourse requires reaction_groups/rg_ids or missing_only: true.")
+        sources = rg_inputs if isinstance(rg_inputs, (list, tuple, set)) else [rg_inputs]
+        block["rg_ids"] = list(dict.fromkeys(
+            raw for raw in sources if raw not in (None, "")
+        ))
+        block["_groups_resolved"] = False
 
         block["overwrite"] = bool(block.get("overwrite", False))
 
@@ -196,6 +187,68 @@ class ProbeTimecourseTask(Task):
         block["_scope_cache"] = None  # placeholder populated in resolve_scope
         return block, {}
 
+    def _resolve_groups(self, ctx: TaskContext, inputs: Dict[str, Any]) -> List[int]:
+        if inputs.get("_groups_resolved"):
+            return list(inputs["rg_ids"])
+        requested = inputs.get("rg_ids") or []
+        ids: List[int] = []
+        for value in requested:
+            row = ctx.db.execute(
+                "SELECT rg_id FROM probe_reaction_groups WHERE rg_label = ?", (str(value),)
+            ).fetchone() if not isinstance(value, int) else None
+            if row is None:
+                try:
+                    row = ctx.db.execute(
+                        "SELECT rg_id FROM probe_reaction_groups WHERE rg_id = ?", (int(value),)
+                    ).fetchone()
+                except (ValueError, TypeError):
+                    pass
+            if row is None:
+                raise ValueError("Reaction group %r not found in database." % value)
+            ids.append(int(row["rg_id"]))
+        if inputs.get("missing_only"):
+            pending = {int(row["rg_id"]) for row in ctx.db.execute("""
+                SELECT rg.rg_id FROM probe_reaction_groups rg
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM probe_tc_fit_runs fit WHERE fit.rg_id = rg.rg_id
+                ) AND EXISTS (
+                    SELECT 1 FROM probe_reactions pr
+                    JOIN sequencing_samples ss ON ss.id = pr.s_id
+                    JOIN probe_fmod_values fv ON fv.rxn_id = pr.id
+                    WHERE pr.rg_id = rg.rg_id AND (? OR ss.to_drop = 0)
+                )
+                ORDER BY rg.rg_id
+            """, (bool(inputs.get("include_dropped_samples")),)).fetchall()}
+            ids = [rg for rg in ids if rg in pending] if requested else sorted(pending)
+        ids = list(dict.fromkeys(ids))
+        if not ids:
+            raise ValueError("No eligible reaction groups without existing probe_timecourse fits."
+                             if inputs.get("missing_only") else "No reaction groups selected.")
+        inputs["rg_ids"] = ids
+        inputs["_groups_resolved"] = True
+        return ids
+
+    def plan_work_units(self, ctx, cfg, inputs, params) -> List[WorkUnit]:
+        from nerd.utils.config import LoadedConfig
+
+        units = []
+        for rg_id in self._resolve_groups(ctx, inputs):
+            data = copy.deepcopy(dict(cfg))
+            source = getattr(cfg, "source_path", None)
+            unit_cfg = LoadedConfig(data, Path(source)) if source is not None else data
+            block = dict(unit_cfg[self.name])
+            for alias in ("reaction_groups", "reaction_group_ids", "rg"):
+                block.pop(alias, None)
+            block["rg_ids"] = [rg_id]
+            unit_cfg[self.name] = block
+            if hasattr(unit_cfg, "hash_data"):
+                unit_cfg.hash_data = copy.deepcopy(dict(unit_cfg))
+            row = ctx.db.execute("SELECT rg_label FROM probe_reaction_groups WHERE rg_id = ?",
+                                 (rg_id,)).fetchone()
+            units.append(WorkUnit(key="rg-%s" % rg_id, label=str(row["rg_label"] or rg_id),
+                                  config=unit_cfg, scope_kind="rg", scope_id=rg_id))
+        return units
+
     def command(self, ctx: TaskContext, inputs: Dict[str, Any], params: Dict[str, Any]) -> Optional[str]:
         return None
 
@@ -207,6 +260,7 @@ class ProbeTimecourseTask(Task):
         run_dir: Path,
         task_id: Optional[int] = None,
     ):
+        self._resolve_groups(ctx, inputs)
         engine_name = inputs["engine"]
         rounds = inputs["rounds"]
         overwrite = bool(inputs.get("overwrite", True))
@@ -498,7 +552,7 @@ class ProbeTimecourseTask(Task):
         if ctx is None or inputs is None:
             return TaskScope(kind=self.scope_kind or "rg_batch")
 
-        rg_ids: Sequence[int] = list(inputs.get("rg_ids") or []) if isinstance(inputs, dict) else []
+        rg_ids: Sequence[int] = self._resolve_groups(ctx, inputs) if isinstance(inputs, dict) else []
         members: List[TaskScopeMember] = []
         labels: Dict[int, Optional[str]] = {}
         for rg_id in rg_ids or []:

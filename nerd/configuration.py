@@ -33,7 +33,7 @@ WORKFLOW_KEYS = {
         "plugin", "tool", "reaction_group", "reaction_group_id", "rg_id", "params",
         "force_run", "overwrite", "samples", "sample_names", "derived_samples",
         "threads", "dry_run", "amplicon", "dms_mode", "output_N7",
-        "output_parsed_mutations", "per_read_histograms",
+        "output_parsed_mutations", "per_read_histograms", "missing_only", "reaction_groups",
     },
     "nmr_create": {"search_roots", "reactions", "force_run", "overwrite"},
     "nmr_kinetic_fit": {
@@ -50,7 +50,7 @@ WORKFLOW_KEYS = {
         "nt_ids", "valtype", "fmod_run_id", "include_dropped_samples", "outliers",
         "rt_protocol", "RT_protocol", "done_by",
         "min_points", "overwrite", "force_run", "engine_options", "global_metadata",
-        "filters",
+        "filters", "missing_only",
     },
     "tempgrad_fit": {
         "mode", "engine", "data_source", "filters", "engine_options", "metadata",
@@ -208,11 +208,11 @@ def _validate_required(workflow: str, block: Mapping[str, Any]) -> None:
         )
     if workflow == "mut_count" and not any(
         block.get(key) for key in (
-            "samples", "sample_names", "derived_samples", "reaction_group", "reaction_groups"
+            "samples", "sample_names", "derived_samples", "reaction_group", "reaction_groups", "missing_only"
         )
     ):
         raise ConfigValidationError(
-            "mut_count requires samples, derived_samples, or reaction_group."
+            "mut_count requires samples, derived_samples, reaction_group, or missing_only: true."
         )
     if workflow == "nmr_create":
         reactions = block.get("reactions")
@@ -232,7 +232,7 @@ def _validate_required(workflow: str, block: Mapping[str, Any]) -> None:
     ):
         raise ConfigValidationError("drop requires sample names or a referenced samples config.")
     if workflow == "probe_timecourse" and not any(
-        block.get(key) for key in ("rg_ids", "reaction_group_ids", "reaction_groups", "rg")
+        block.get(key) for key in ("rg_ids", "reaction_group_ids", "reaction_groups", "rg", "missing_only")
     ):
         raise ConfigValidationError("probe_timecourse requires reaction-group IDs (rg_ids).")
     if workflow == "tempgrad_fit" and block.get("mode") not in {

@@ -1,4 +1,4 @@
-# `nerd mut_count`
+# `nerd run mut_count`
 
 `nerd mut_count` orchestrates mutation counting on sequencing samples (e.g., FASTQ files). It stages FASTQs, runs the configured plugin (default SHAPEMapper), and records per-nucleotide mutation rates into `probe_fmod_values`.
 
@@ -9,6 +9,36 @@ nerd mut_count --config PATH/TO/config.yaml --db PATH/TO/nerd.sqlite
 Without `--db`, `<run.output_dir>/nerd.sqlite` is used.
 
 ---
+
+
+## Discover groups and run samples without results
+
+List all available reaction-group IDs and labels, with total sample counts and
+counts of eligible samples without recorded mutation-count runs:
+
+```bash
+nerd db reaction-groups --db /path/to/nerd.sqlite
+```
+
+Use a listed ID or label in `mut_count.reaction_group` (or a list of IDs/labels).
+To select all samples with no existing row in `probe_fmod_runs`, use:
+
+```yaml
+mut_count:
+  plugin: shapemapper
+  missing_only: true
+  params:
+    n_proc: 8
+```
+
+Run this configuration with `nerd run mut_count config.yaml`. Database and
+execution settings follow the normal project/configuration rules. With no explicit
+sample or group selection, pending samples are automatically scheduled as one
+independent job per reaction group. Samples without a reaction group run in a
+separate ungrouped job; groups with no pending samples are omitted. Samples marked
+for dropping are excluded. Existing runs from any mutation-count plugin count as
+already processed. If `samples` or `reaction_group` is also supplied,
+`missing_only` filters that selection instead of selecting the entire database.
 
 ## Configuration Layout
 

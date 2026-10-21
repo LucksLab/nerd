@@ -948,6 +948,37 @@ def database_path(
     typer.echo(_resolved_existing_database(ctx, db, project))
 
 
+@db_app.command("reaction-groups")
+def database_reaction_groups(
+    ctx: typer.Context,
+    db: Optional[Path] = typer.Option(None, "--db", help="Existing database."),
+    project: Optional[Path] = typer.Option(None, "--project", help="Project directory."),
+):
+    """List IDs and labels accepted by mut_count.reaction_group."""
+    path = _resolved_existing_database(ctx, db, project)
+    conn = db_api.connect(path, read_only=True)
+    try:
+        rows = conn.execute("""
+            SELECT rg.rg_id, rg.rg_label, COUNT(DISTINCT pr.s_id) AS samples,
+                   COUNT(DISTINCT CASE WHEN ss.to_drop = 0 AND NOT EXISTS (
+                       SELECT 1 FROM probe_fmod_runs fr WHERE fr.s_id = ss.id
+                   ) THEN ss.id END) AS missing
+            FROM probe_reaction_groups rg
+            LEFT JOIN probe_reactions pr ON pr.rg_id = rg.rg_id
+            LEFT JOIN sequencing_samples ss ON ss.id = pr.s_id
+            GROUP BY rg.rg_id, rg.rg_label ORDER BY rg.rg_id
+        """).fetchall()
+        if not rows:
+            typer.echo("No reaction groups found.")
+            return
+        table = Table("rg_id", "reaction_group", "samples", "without mut_count")
+        for row in rows:
+            table.add_row(str(row["rg_id"]), row["rg_label"] or "", str(row["samples"]), str(row["missing"]))
+        Console().print(table)
+    finally:
+        conn.close()
+
+
 @db_app.command("info")
 def database_info(
     ctx: typer.Context,

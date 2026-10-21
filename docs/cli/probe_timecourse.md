@@ -85,3 +85,22 @@ nerd run probe_timecourse configs/probe_timecourse_constrained.yaml --db nerd.sq
 ```
 
 Once fits are completed, downstream tasks (e.g., `tempgrad_fit` with `data_source: probe_tc`) can reuse the stored kinetics for Arrhenius analysis.
+
+## Select pending reaction groups
+
+```yaml
+probe_timecourse:
+  missing_only: true
+  # Optional: restrict to these reaction-group IDs or labels.
+  reaction_groups: [26, "my-group"]
+```
+
+Without a group selection, `missing_only: true` selects groups with mutation-rate
+values and no rows in `probe_tc_fit_runs`. Any existing fit excludes the group,
+regardless of engine or round. Dropped samples do not qualify a group unless
+`include_dropped_samples: true` is set. Omit `missing_only` to explicitly refit
+selected groups, subject to the normal overwrite settings.
+
+Detached submissions plan one task per selected reaction group. Time-course
+fitting currently executes in the submitting process; these tasks do not launch
+parallel Slurm compute jobs.

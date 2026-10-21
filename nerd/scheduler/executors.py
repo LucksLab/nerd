@@ -83,6 +83,13 @@ def _result_status(path: Path) -> Optional[JobStatus]:
 def _render_script(spec: JobSpec, workdir: str) -> str:
     result_path = str(Path(workdir) / RESULT_FILE)
     started_path = str(Path(workdir) / STARTED_FILE)
+    command_path = str(Path(workdir) / "nerd-command.sh")
+    # Keep large sample batches out of execve arguments. Quote the heredoc so
+    # variables and substitutions are evaluated only by the command shell.
+    delimiter = "NERD_COMMAND_EOF"
+    command_lines = set(spec.command.splitlines())
+    while delimiter in command_lines:
+        delimiter += "_"
     lines = [
         "#!/usr/bin/env bash",
         "set +e",
@@ -100,7 +107,10 @@ def _render_script(spec: JobSpec, workdir: str) -> str:
     lines.extend([
         "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)",
         "printf '%s\\n' \"$started_at\" > %s" % ("%s", shlex.quote(started_path)),
-        "bash -lc %s" % shlex.quote(spec.command),
+        "cat > %s <<'%s'" % (shlex.quote(command_path), delimiter),
+        spec.command,
+        delimiter,
+        "bash -l %s" % shlex.quote(command_path),
         "rc=$?",
         "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)",
         "tmp=%s.tmp.$$" % shlex.quote(result_path),

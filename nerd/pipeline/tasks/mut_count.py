@@ -51,7 +51,28 @@ class MutCountTask(Task):
     ) -> List[WorkUnit]:
         """Fan a multi-reaction-group request into one scheduler job per group."""
         configured = inputs.get("reaction_group")
-        if not isinstance(configured, (list, tuple, set)) or len(configured) < 2:
+        automatic = bool(inputs.get("missing_only") and not configured
+                         and not inputs.get("samples") and not inputs.get("derived_samples"))
+        ungrouped: List[str] = []
+        if automatic:
+            rows = ctx.db.execute("""
+                SELECT ss.id, ss.sample_name, pr.rg_id
+                FROM sequencing_samples ss
+                LEFT JOIN probe_reactions pr ON pr.s_id = ss.id
+                WHERE ss.to_drop = 0 AND NOT EXISTS (
+                    SELECT 1 FROM probe_fmod_runs fr WHERE fr.s_id = ss.id
+                )
+                ORDER BY pr.rg_id, ss.id
+            """).fetchall()
+            configured = list(dict.fromkeys(
+                int(row["rg_id"]) for row in rows if row["rg_id"] is not None
+            ))
+            ungrouped = list(dict.fromkeys(
+                str(row["sample_name"]) for row in rows if row["rg_id"] is None
+            ))
+            if not rows:
+                raise ValueError("No eligible samples without an existing mut_count run.")
+        if not automatic and (not isinstance(configured, (list, tuple, set)) or len(configured) < 2):
             return super().plan_work_units(ctx, cfg, inputs, params)
 
         from nerd.utils.config import LoadedConfig
@@ -90,7 +111,7 @@ class MutCountTask(Task):
 
         original = cfg.get(self.name) or {}
         explicit_samples = [
-            sample for sample in list(original.get("samples") or [])
+            sample for sample in list(original.get("samples") or []) + ungrouped
             if str(sample) not in grouped_samples
         ]
         explicit_derived = list(original.get("derived_samples") or [])
@@ -295,6 +316,24 @@ class MutCountTask(Task):
                 reaction_samples.extend(samples)
                 log.info("Resolved reaction_group %s to %d sample(s).", rg_value, len(samples))
 
+        if inputs.get("missing_only"):
+            missing = ctx.db.execute(
+                """
+                SELECT ss.id, ss.sample_name FROM sequencing_samples ss
+                WHERE ss.to_drop = 0 AND NOT EXISTS (
+                    SELECT 1 FROM probe_fmod_runs fr WHERE fr.s_id = ss.id
+                )
+                ORDER BY ss.id
+                """
+            ).fetchall()
+            eligible_ids = {int(row["id"]) for row in missing}
+            eligible_names = {str(row["sample_name"]) for row in missing}
+            if configured_samples or reaction_groups_cfg:
+                configured_samples = [name for name in configured_samples if name in eligible_names]
+                reaction_samples = [(sid, name) for sid, name in reaction_samples if sid in eligible_ids]
+            else:
+                reaction_samples = [(int(row["id"]), str(row["sample_name"])) for row in missing]
+
         sample_ids_by_name: Dict[str, int] = {}
         for sample_id, sample_name in reaction_samples:
             previous_id = sample_ids_by_name.get(sample_name)
@@ -435,8 +474,8 @@ class MutCountTask(Task):
             reaction_groups = [str(rg_cfg).strip()]
         else:
             reaction_groups = []
-        if not samples and not derived and not reaction_groups:
-            raise ValueError("mut_count requires 'samples', 'derived_samples', and/or 'reaction_group' to list inputs.")
+        if not samples and not derived and not reaction_groups and not mc.get("missing_only"):
+            raise ValueError("mut_count requires samples, derived_samples, reaction_group, or missing_only: true.")
         merged = samples + derived
         mc = {**mc, "samples": merged}
         if reaction_groups:

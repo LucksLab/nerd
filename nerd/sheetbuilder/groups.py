@@ -196,7 +196,8 @@ class GroupSet:
         `{n}` is a per-template-collision counter, which is how labels like
         37_1 / 37_2 / 37_3 arise for several timecourses at one temperature.
         A construct suffix is added when groups at the same temperature use
-        different constructs, mirroring the existing 37_2_A8C convention.
+        different constructs and the template omits {construct}, mirroring
+        the existing 37_2_A8C convention.
         """
         # Suffix only the *variant* constructs: the most common construct in
         # the run is treated as the default and left off the label, which is
@@ -226,7 +227,8 @@ class GroupSet:
             label = label.replace("{n}", str(counters[base]))
             label = re.sub(r"__+", "_", label).strip("_-")
             construct = fields.get("construct", "")
-            if multi_construct and construct and construct != default_construct:
+            if (multi_construct and construct and construct != default_construct
+                    and "{construct}" not in self.label_template):
                 label = "%s_%s" % (label, construct)
             while label in used:
                 counters[base] += 1
