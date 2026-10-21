@@ -59,9 +59,16 @@ class ShapeMapperPlugin(MutCountPlugin):
             "--target", target,
             "--out", out,
             "--modified",
-            "--R1", str(r1_path),
-            "--R2", str(r2_path),
         ]
+
+        mode = opts.get("unpaired_mode")
+        if mode not in (None, "R1", "R2"):
+            raise ValueError("mut_count.unpaired_mode must be R1 or R2 (or null for paired reads).")
+        read_paths = (r1_path, r2_path) if mode is None else (r1_path if mode == "R1" else r2_path,)
+        if mode is None:
+            parts += ["--R1", str(r1_path), "--R2", str(r2_path)]
+        else:
+            parts += ["--U", str(read_paths[0])]
 
         if opts.get("amplicon", False):
             parts.append("--amplicon")
@@ -79,7 +86,7 @@ class ShapeMapperPlugin(MutCountPlugin):
             info = self.container_execution
             runtime = RuntimeInfo(**info["runtime"])
             bind_paths = [str(info["workdir"])]
-            for path in (r1_path, r2_path, fasta_path, out_dir):
+            for path in (*read_paths, fasta_path, out_dir):
                 if path.is_absolute():
                     bind_paths.append(str(path if path.is_dir() else path.parent))
             parts[0] = str(info.get("executable") or "shapemapper")

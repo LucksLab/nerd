@@ -522,6 +522,12 @@ class MutCountTask(Task):
             "output_parsed_mutations": _opt_bool("output_parsed_mutations", False),
             "per_read_histograms": _opt_bool("per_read_histograms", False),
         }
+        mode = param_opts.get("unpaired_mode", inputs.get("unpaired_mode"))
+        if mode not in (None, "R1", "R2"):
+            raise ValueError("mut_count.unpaired_mode must be R1 or R2 (or null for paired reads).")
+        if mode is not None and plugin_name != "shapemapper":
+            raise ValueError("mut_count.unpaired_mode requires the shapemapper plugin.")
+        options["unpaired_mode"] = mode
         dry_run = bool(param_opts.get("dry_run", inputs.get("dry_run", False)))
 
         sample_names, _ = self._resolve_sample_names(ctx, inputs)
@@ -650,8 +656,10 @@ class MutCountTask(Task):
                     and not bool(inputs.get("_shared_filesystem"))
                 )
                 if needs_stage:
-                    self._stage_in.append({"src": str(r1), "dst": str(remote_r1)})
-                    self._stage_in.append({"src": str(r2), "dst": str(remote_r2)})
+                    if is_derived or mode != "R2":
+                        self._stage_in.append({"src": str(r1), "dst": str(remote_r1)})
+                    if is_derived or mode != "R1":
+                        self._stage_in.append({"src": str(r2), "dst": str(remote_r2)})
 
                 # If derived, materialize child FASTQs on remote first
                 parent_r1_for_use = remote_r1 if needs_stage else r1
@@ -704,6 +712,8 @@ class MutCountTask(Task):
                     out_dir=Path(str(out_dir)),
                     options=options,
                 )
+                selected_reads = (use_r1, use_r2) if mode is None else (use_r1 if mode == "R1" else use_r2,)
+                verify_reads = "ls -lh %s || true" % " ".join(_q(path) for path in selected_reads)
                 wrapped_shapecmd = shapecmd
                 sep = "################################################################################"
                 if not is_derived:
@@ -712,7 +722,7 @@ class MutCountTask(Task):
                     cmds.append(f"echo '{sep}'")
                     cmds.append(f"echo '# 3 - {verify_label}'")
                     cmds.append(f"echo '{sep}'")
-                    cmds.append("ls -lh %s %s || true" % (_q(use_r1), _q(use_r2)))
+                    cmds.append(verify_reads)
                     cmds.append(f"echo '{sep}'")
                     cmds.append("echo '# 4 - Verify created FASTA'")
                     cmds.append(f"echo '{sep}'")
@@ -731,7 +741,7 @@ class MutCountTask(Task):
                 if dry_run:
                     dry_label = "staged FASTQs" if needs_stage else "FASTQ inputs"
                     cmds.append("echo %s" % _q("[Step 1] Verifying %s for %s" % (dry_label, name)))
-                    cmds.append("ls -lh %s %s || true" % (_q(use_r1), _q(use_r2)))
+                    cmds.append(verify_reads)
                     cmds.append("echo %s" % _q("[Step 2] FASTA created for %s at %s" % (name, target_fa)))
                     cmds.append("head -n 2 %s || true" % _q(target_fa))
                     run_script = sample_dir / "run_shapemapper.sh"

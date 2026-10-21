@@ -33,7 +33,7 @@ WORKFLOW_KEYS = {
         "plugin", "tool", "reaction_group", "reaction_group_id", "rg_id", "params",
         "force_run", "overwrite", "samples", "sample_names", "derived_samples",
         "threads", "dry_run", "amplicon", "dms_mode", "output_N7",
-        "output_parsed_mutations", "per_read_histograms", "missing_only", "reaction_groups",
+        "output_parsed_mutations", "per_read_histograms", "missing_only", "reaction_groups", "unpaired_mode",
     },
     "nmr_create": {"search_roots", "reactions", "force_run", "overwrite"},
     "nmr_kinetic_fit": {
@@ -179,6 +179,12 @@ def _validate_plugin(workflow: str, block: Mapping[str, Any]) -> None:
             plugin = block.get("plugin")
             if not plugin:
                 raise ConfigValidationError("mut_count.plugin is required (for example, shapemapper).")
+            params = block.get("params") or {}
+            mode = params.get("unpaired_mode", block.get("unpaired_mode"))
+            if mode not in (None, "R1", "R2"):
+                raise ConfigValidationError("mut_count.unpaired_mode must be R1 or R2 (or null for paired reads).")
+            if mode is not None and str(plugin).lower() != "shapemapper":
+                raise ConfigValidationError("mut_count.unpaired_mode requires the shapemapper plugin.")
             from nerd.pipeline.plugins.mutcount import load_mutcount_plugin
             load_mutcount_plugin(str(plugin))
         elif workflow == "nmr_kinetic_fit" and block.get("plugin"):

@@ -116,3 +116,24 @@ nerd mut_count --config configs/mutcount.yaml --db nerd.sqlite --dry-run
 ```
 
 After `mut_count`, you can proceed to `probe_timecourse` or Arrhenius tasks using the inserted mutation rates.
+
+## Count mutations using one read
+
+Select either read from a sample's FASTQ pair with `unpaired_mode`:
+
+```yaml
+mut_count:
+  plugin: shapemapper
+  reaction_group: 1
+  unpaired_mode: R1  # R1 or R2
+  params:
+    n_proc: 8
+```
+
+ShapeMapper receives `--modified --U <selected FASTQ>` instead of
+`--R1 <R1 FASTQ> --R2 <R2 FASTQ>`. Omit `unpaired_mode` (or set it to
+`null`) to keep paired-read counting. The option may also be placed under
+`params`; that value takes precedence. Values other than `R1`, `R2`, or
+`null` are rejected. Sample metadata remains unchanged. Derived-sample
+preparation still uses both parent reads; mutation counting uses the selected
+derived read.

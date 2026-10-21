@@ -167,3 +167,19 @@ def test_remote_fastqs_require_matching_executor_alias(tmp_path):
             "samples": ["sample"], "plugin": "shapemapper", "dry_run": True,
             "tool": {},
         }, {})
+
+
+@pytest.mark.parametrize('mode', ['R1', 'R2'])
+@pytest.mark.parametrize('nested', [False, True])
+def test_task_uses_selected_read_only(tmp_path, mode, nested):
+    ctx = _remote_mut_count_context(tmp_path)
+    task = MutCountTask()
+    inputs = {'samples': ['sample'], 'plugin': 'shapemapper', 'dry_run': True, 'tool': {}}
+    if nested:
+        inputs.update(unpaired_mode='R2' if mode == 'R1' else 'R1', params={'unpaired_mode': mode})
+    else:
+        inputs['unpaired_mode'] = mode
+    command = task.command(ctx, inputs, {})
+    assert '--U /projects/run/sample_%s.fastq.gz' % mode in command
+    other = 'R2' if mode == 'R1' else 'R1'
+    assert 'sample_%s.fastq.gz' % other not in command
