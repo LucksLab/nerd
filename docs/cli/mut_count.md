@@ -137,3 +137,13 @@ ShapeMapper receives `--modified --U <selected FASTQ>` instead of
 `null` are rejected. Sample metadata remains unchanged. Derived-sample
 preparation still uses both parent reads; mutation counting uses the selected
 derived read.
+
+## Replace previous results
+
+Set `mut_count.overwrite: true` to force a rerun and replace previous mutation-rate
+values for each selected sample, across plugins and read modes. Old values are
+removed only after all available replacement profiles for that sample have been
+validated and imported. Other samples are unaffected. Old run metadata is retained
+when referenced by existing time-course fits; those fits are not recalculated.
+Rerun `probe_timecourse` with overwrite enabled to update downstream fits.
+`force_run: true` alone bypasses caching without replacing previous results.

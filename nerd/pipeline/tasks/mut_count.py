@@ -1092,10 +1092,11 @@ class MutCountTask(Task):
                 profiles_to_ingest.append((ga_profile_path, "GAmodrate"))
 
             inserted_for_sample = False
+            imported_valtypes: Set[str] = set()
             db_sequence = "".join(db_sequence_parts).upper().replace("T", "U")
 
             for path, valtype in profiles_to_ingest:
-                if valtype in existing_valtypes:
+                if valtype in existing_valtypes and not inputs.get("overwrite"):
                     log.debug("probe_fmod_values for %s (%s) already present; skipping.", name, valtype)
                     continue
 
@@ -1158,11 +1159,34 @@ class MutCountTask(Task):
                     log.warning("No probe_fmod_values generated for %s (%s); skipping.", name, valtype)
                     continue
 
+                if inputs.get("overwrite"):
+                    ctx.db.execute(
+                        "DELETE FROM probe_fmod_values WHERE fmod_run_id = ? AND valtype = ?",
+                        (run_id, valtype),
+                    )
                 db_api.bulk_insert_fmod_vals(ctx.db, records)
+                imported_valtypes.add(valtype)
                 nucleotide_values_ingested += len(records)
                 log.debug("Inserted %d probe_fmod_values records for %s (%s).", len(records), name, valtype)
                 existing_valtypes.add(valtype)
                 inserted_for_sample = True
+
+            # Retire old values only after all replacement profiles were imported.
+            # Preserve run metadata referenced by existing time-course fits.
+            if (inputs.get("overwrite") and inserted_for_sample
+                    and all(valtype in imported_valtypes for _, valtype in profiles_to_ingest)):
+                with ctx.db:
+                    ctx.db.execute(
+                        "DELETE FROM probe_fmod_values WHERE fmod_run_id IN "
+                        "(SELECT id FROM probe_fmod_runs WHERE s_id = ? AND id <> ?)",
+                        (s_id, run_id),
+                    )
+                    ctx.db.execute(
+                        "DELETE FROM probe_fmod_runs WHERE s_id = ? AND id <> ? "
+                        "AND NOT EXISTS (SELECT 1 FROM probe_tc_fit_runs "
+                        "WHERE fmod_run_id = probe_fmod_runs.id)",
+                        (s_id, run_id),
+                    )
 
             if per_read_hist_enabled and histograms:
                 mod_hist = histograms.get("modrate")
